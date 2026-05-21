@@ -1,0 +1,19 @@
+
+---
+import Layout from '../../layouts/main.astro';
+import CardDemo from '../../components/CardDemo';
+import { baseUrl } from '../../lib/base-url';
+---
+
+<Layout>
+  <CardDemo client:only="react" baseUrl={baseUrl} />
+</Layout>
+
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--color-background);
+  }
+</style>
+

@@ -1,0 +1,36 @@
+---
+import TicketDetailPage from '../../../components/TicketDetailPage';
+import '../../../styles/miraka-portal.css';
+import '../../../styles/miraka-unified.css';
+import { baseUrl } from '../../../lib/base-url';
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect('/miraka-co-portal/tickets');
+}
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ticket Details - Miraka & Co</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      background: #F2F2F2;
+    }
+  </style>
+</head>
+<body>
+  <TicketDetailPage 
+    client:only="react" 
+    ticketId={id}
+  />
+</body>
+</html>

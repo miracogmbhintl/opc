@@ -1,0 +1,859 @@
+/**
+ * MIRAKA & CO - UNIFIED DESIGN SYSTEM
+ * Apple/iOS Minimal Aesthetic
+ * NOW WITH FULL-WIDTH RESPONSIVE CONTENT SUPPORT
+ */
+
+/* ==========================================
+   BASE VARIABLES
+   ========================================== */
+:root {
+  /* Colors */
+  --miraka-bg: #F2F2F2;
+  --miraka-white: #FFFFFF;
+  --miraka-surface: #F7F7F7;
+  --miraka-black: #1A1A1A;
+  --miraka-text: #1A1A1A;
+  --miraka-text-muted: #7A7A7A;
+  --miraka-border: #E5E5E5;
+  
+  /* Status Colors */
+  --miraka-active: #0E7A4D;
+  --miraka-active-bg: #E5F5EE;
+  --miraka-hold: #B37A00;
+  --miraka-hold-bg: #FFF5D7;
+  --miraka-completed: #1A1A1A;
+  --miraka-completed-bg: #EAEAEA;
+  --miraka-error: #DC2626;
+  --miraka-error-bg: #FEE2E2;
+  
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-md: 0 18px 45px rgba(0,0,0,0.06);
+  --shadow-lg: 0 24px 60px rgba(0,0,0,0.12);
+  
+  /* Typography */
+  --font-system: "Helvetica Neue", Inter, system-ui, -apple-system, sans-serif;
+  
+  /* Sidebar Width */
+  --sidebar-width-expanded: 260px;
+  --sidebar-width-collapsed: 80px;
+}
+
+/* ==========================================
+   BASE STYLES
+   ========================================== */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-system);
+  background: var(--miraka-bg);
+  color: var(--miraka-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ==========================================
+   LAYOUT - DASHBOARD SHELL
+   ========================================== */
+.miraka-portal {
+  min-height: 100vh;
+  background: var(--miraka-bg);
+  width: 100%;
+}
+
+.miraka-dashboard-layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  position: relative;
+}
+
+/* Main Content Area - Takes full remaining width */
+.miraka-main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  min-width: 0; /* Allow flex item to shrink below content size */
+}
+
+.miraka-content-area {
+  flex: 1;
+  padding: 40px 48px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Top Bar - Full width of content area */
+.miraka-top-bar {
+  background: var(--miraka-white);
+  border-bottom: 1px solid var(--miraka-border);
+  padding: 20px 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.miraka-top-bar-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--miraka-text);
+  margin: 0;
+}
+
+.miraka-top-bar-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ==========================================
+   SIDEBAR (FIXED)
+   ========================================== */
+.miraka-sidebar {
+  width: var(--sidebar-width-expanded);
+  background: var(--miraka-white);
+  border-right: 1px solid var(--miraka-border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  height: 100vh;
+  left: 0;
+  top: 0;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+}
+
+.miraka-sidebar.collapsed {
+  width: var(--sidebar-width-collapsed);
+}
+
+.miraka-sidebar-logo {
+  padding: 32px 24px;
+  border-bottom: 1px solid var(--miraka-border);
+  text-align: center;
+  transition: padding 0.3s ease;
+}
+
+.miraka-sidebar.collapsed .miraka-sidebar-logo {
+  padding: 32px 16px;
+}
+
+.miraka-sidebar-logo h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--miraka-text);
+  margin: 0 0 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.miraka-sidebar-logo p {
+  font-size: 11px;
+  color: var(--miraka-text-muted);
+  margin: 0;
+}
+
+.miraka-sidebar-nav {
+  flex: 1;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.miraka-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: var(--radius-md);
+  color: var(--miraka-text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.miraka-sidebar.collapsed .miraka-nav-item {
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.miraka-nav-item svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.5;
+  flex-shrink: 0;
+}
+
+.miraka-nav-item:hover {
+  background: var(--miraka-surface);
+  color: var(--miraka-text);
+}
+
+.miraka-nav-item.active {
+  background: var(--miraka-surface);
+  color: var(--miraka-text);
+}
+
+.miraka-sidebar-footer {
+  padding: 20px 24px;
+  border-top: 1px solid var(--miraka-border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: padding 0.3s ease;
+}
+
+.miraka-sidebar.collapsed .miraka-sidebar-footer {
+  justify-content: center;
+  padding: 20px 16px;
+}
+
+.miraka-sidebar-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--miraka-black);
+  color: var(--miraka-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.miraka-sidebar-user {
+  flex: 1;
+  min-width: 0;
+}
+
+.miraka-sidebar-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--miraka-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.miraka-sidebar-user-role {
+  font-size: 12px;
+  color: var(--miraka-text-muted);
+}
+
+/* ==========================================
+   TYPOGRAPHY
+   ========================================== */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  color: var(--miraka-text);
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 28px;
+  margin: 0 0 4px 0;
+}
+
+h2 {
+  font-size: 22px;
+  margin: 0 0 8px 0;
+}
+
+h3 {
+  font-size: 18px;
+  margin: 0 0 12px 0;
+}
+
+.miraka-subtitle {
+  font-size: 14px;
+  color: var(--miraka-text-muted);
+  margin: 0;
+}
+
+/* ==========================================
+   BUTTONS
+   ========================================== */
+.miraka-btn {
+  padding: 10px 24px;
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  font-family: var(--font-system);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.miraka-btn-primary {
+  background: var(--miraka-black);
+  color: var(--miraka-white);
+}
+
+.miraka-btn-primary:hover {
+  background: #000000;
+  transform: translateY(-1px);
+}
+
+.miraka-btn-primary:disabled {
+  background: var(--miraka-border);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.miraka-btn-secondary {
+  padding: 6px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--miraka-border);
+  background: transparent;
+  color: var(--miraka-text);
+  font-size: 13px;
+}
+
+.miraka-btn-secondary:hover {
+  background: var(--miraka-surface);
+}
+
+.miraka-btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--miraka-border);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--miraka-text);
+}
+
+.miraka-btn-icon:hover {
+  background: var(--miraka-surface);
+}
+
+/* ==========================================
+   CARDS
+   ========================================== */
+.miraka-card {
+  background: var(--miraka-white);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-md);
+  transition: all 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.miraka-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.miraka-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  width: 100%;
+}
+
+.miraka-card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--miraka-text);
+  margin: 0;
+  flex: 1;
+}
+
+.miraka-card-meta {
+  font-size: 12px;
+  color: var(--miraka-text-muted);
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.miraka-card-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+/* ==========================================
+   FORMS & INPUTS
+   ========================================== */
+.miraka-form-group {
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.miraka-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--miraka-text);
+  margin-bottom: 8px;
+}
+
+.miraka-input,
+.miraka-select,
+.miraka-textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--miraka-border);
+  background: var(--miraka-white);
+  font-size: 14px;
+  color: var(--miraka-text);
+  font-family: var(--font-system);
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.miraka-input:focus,
+.miraka-select:focus,
+.miraka-textarea:focus {
+  outline: none;
+  border-color: var(--miraka-text);
+}
+
+.miraka-textarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.miraka-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 280px;
+}
+
+.miraka-search-icon {
+  position: absolute;
+  left: 16px;
+  color: var(--miraka-text-muted);
+}
+
+.miraka-search-input {
+  padding: 10px 16px 10px 44px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--miraka-border);
+  background: var(--miraka-white);
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.miraka-search-input:focus {
+  border-color: var(--miraka-text);
+}
+
+/* ==========================================
+   STATUS PILLS
+   ========================================== */
+.miraka-status-pill {
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.miraka-status-active {
+  color: var(--miraka-active);
+  background: var(--miraka-active-bg);
+}
+
+.miraka-status-on-hold {
+  color: var(--miraka-hold);
+  background: var(--miraka-hold-bg);
+}
+
+.miraka-status-completed {
+  color: var(--miraka-completed);
+  background: var(--miraka-completed-bg);
+}
+
+/* ==========================================
+   PROGRESS BAR
+   ========================================== */
+.miraka-progress-section {
+  margin-bottom: 16px;
+  width: 100%;
+}
+
+.miraka-progress-label {
+  font-size: 12px;
+  color: var(--miraka-text-muted);
+  margin-bottom: 8px;
+}
+
+.miraka-progress-track {
+  height: 6px;
+  background: var(--miraka-bg);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  width: 100%;
+}
+
+.miraka-progress-fill {
+  height: 100%;
+  background: var(--miraka-black);
+  border-radius: var(--radius-pill);
+  transition: width 0.3s ease;
+}
+
+/* ==========================================
+   GRID LAYOUTS - Full Width Responsive
+   ========================================== */
+.miraka-grid {
+  display: grid;
+  gap: 24px;
+  width: 100%;
+}
+
+.miraka-grid-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.miraka-grid-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.miraka-grid-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* ==========================================
+   MODAL
+   ========================================== */
+.miraka-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.miraka-modal {
+  max-width: 640px;
+  width: 100%;
+  background: var(--miraka-white);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  box-shadow: var(--shadow-lg);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.miraka-modal-header {
+  margin-bottom: 24px;
+}
+
+.miraka-modal-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--miraka-text);
+  margin: 0 0 8px 0;
+}
+
+.miraka-modal-subtitle {
+  font-size: 14px;
+  color: var(--miraka-text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.miraka-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+/* ==========================================
+   STATES
+   ========================================== */
+.miraka-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--miraka-text-muted);
+  width: 100%;
+}
+
+.miraka-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--miraka-border);
+  border-top: 3px solid var(--miraka-black);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.miraka-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+  width: 100%;
+}
+
+.miraka-empty-icon {
+  width: 48px;
+  height: 48px;
+  stroke: var(--miraka-border);
+  margin-bottom: 16px;
+}
+
+.miraka-empty-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--miraka-text);
+  margin: 0 0 4px 0;
+}
+
+.miraka-empty-subtext {
+  font-size: 14px;
+  color: var(--miraka-text-muted);
+  margin: 0;
+}
+
+.miraka-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: var(--miraka-error);
+  width: 100%;
+}
+
+/* ==========================================
+   TOAST
+   ========================================== */
+.miraka-toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  background: var(--miraka-white);
+  padding: 16px 24px;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 1000;
+  animation: slideInRight 0.3s ease;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.miraka-toast-success {
+  color: var(--miraka-active);
+}
+
+.miraka-toast-error {
+  color: var(--miraka-error);
+}
+
+/* ==========================================
+   FILTERS
+   ========================================== */
+.miraka-filters {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
+  gap: 16px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.miraka-filter-left {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.miraka-select {
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--miraka-border);
+  background: var(--miraka-white);
+  font-size: 14px;
+  color: var(--miraka-text);
+  cursor: pointer;
+  outline: none;
+}
+
+.miraka-view-toggle {
+  display: flex;
+  gap: 4px;
+  background: var(--miraka-white);
+  padding: 4px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--miraka-border);
+}
+
+.miraka-view-button {
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: var(--miraka-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.miraka-view-button.active {
+  background: var(--miraka-surface);
+  color: var(--miraka-text);
+}
+
+/* ==========================================
+   RESPONSIVE - Mobile First
+   ========================================== */
+@media (max-width: 1024px) {
+  .miraka-grid-3,
+  .miraka-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .miraka-content-area {
+    padding: 32px 32px;
+  }
+  
+  .miraka-top-bar {
+    padding: 16px 32px;
+  }
+}
+
+@media (max-width: 768px) {
+  .miraka-sidebar {
+    transform: translateX(-100%);
+  }
+
+  .miraka-sidebar.show {
+    transform: translateX(0);
+  }
+
+  .miraka-main-content {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  .miraka-content-area {
+    padding: 24px 20px;
+  }
+
+  .miraka-top-bar {
+    padding: 16px 20px;
+  }
+
+  .miraka-grid-2,
+  .miraka-grid-3,
+  .miraka-grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .miraka-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .miraka-filter-left {
+    flex-direction: column;
+  }
+
+  .miraka-search {
+    max-width: 100%;
+  }
+  
+  .miraka-search-input {
+    width: 100%;
+  }
+  
+  /* Hide sidebar spacer on mobile */
+  #miraka-sidebar-spacer {
+    display: none;
+  }
+}
+
+/* ==========================================
+   UTILITY - Full Width
+   ========================================== */
+.w-full {
+  width: 100%;
+}
+
+.max-w-full {
+  max-width: 100%;
+}
+
+.flex-1 {
+  flex: 1;
+}

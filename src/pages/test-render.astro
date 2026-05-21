@@ -1,0 +1,85 @@
+---
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React Render Test</title>
+</head>
+<body style="margin: 0; padding: 20px; font-family: sans-serif; background: #f0f0f0;">
+  <h1 style="color: #333;">React Render Test</h1>
+  
+  <div id="test-root" style="min-height: 200px; background: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+    <p style="color: #999;">Waiting for React to render...</p>
+  </div>
+
+  <div id="console-log" style="background: #1a1a1a; color: #00ff00; padding: 20px; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 400px; overflow-y: auto;">
+    <div style="color: #00ff00; margin-bottom: 10px; font-weight: bold;">Console Output:</div>
+  </div>
+
+  <script type="module">
+    import { createRoot } from 'react-dom/client';
+    import { createElement } from 'react';
+
+    // Capture console logs
+    const consoleLog = document.getElementById('console-log');
+    const originalLog = console.log;
+    const originalError = console.error;
+
+    function addLog(type, ...args) {
+      const logEntry = document.createElement('div');
+      logEntry.style.marginBottom = '4px';
+      logEntry.style.color = type === 'error' ? '#ff4444' : '#00ff00';
+      logEntry.textContent = `[${type}] ${args.join(' ')}`;
+      consoleLog.appendChild(logEntry);
+      consoleLog.scrollTop = consoleLog.scrollHeight;
+    }
+
+    console.log = (...args) => {
+      originalLog(...args);
+      addLog('LOG', ...args);
+    };
+
+    console.error = (...args) => {
+      originalError(...args);
+      addLog('ERROR', ...args);
+    };
+
+    console.log('🟢 Test page loaded');
+    console.log('🟢 React import started');
+
+    // Simple test component
+    function TestComponent() {
+      console.log('🎨 TestComponent: Rendering');
+      
+      return createElement('div', {
+        style: {
+          padding: '20px',
+          background: '#e8f5e9',
+          borderRadius: '8px',
+          border: '2px solid #4caf50'
+        }
+      }, 
+        createElement('h2', { style: { color: '#2e7d32', marginTop: 0 } }, '✅ React is Working!'),
+        createElement('p', { style: { color: '#333' } }, 'If you can see this, React is rendering correctly.'),
+        createElement('p', { style: { color: '#666', fontSize: '14px' } }, `Rendered at: ${new Date().toLocaleTimeString()}`)
+      );
+    }
+
+    try {
+      console.log('🟢 Creating React root');
+      const root = createRoot(document.getElementById('test-root'));
+      
+      console.log('🟢 Rendering component');
+      root.render(createElement(TestComponent));
+      
+      console.log('✅ React render complete');
+    } catch (error) {
+      console.error('❌ React render failed:', error.message);
+      console.error('❌ Stack:', error.stack);
+    }
+  </script>
+</body>
+</html>

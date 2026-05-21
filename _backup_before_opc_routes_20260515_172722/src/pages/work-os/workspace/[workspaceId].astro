@@ -1,0 +1,24 @@
+---
+import Layout from '../../../layouts/main.astro';
+import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
+import WorkspaceDetail from '../../../components/work-os/WorkspaceDetail';
+import EnsureAuthCookies from '../../../components/work-os/EnsureAuthCookies';
+import { baseUrl } from '../../../lib/base-url';
+---
+
+<Layout>
+  <MirakaDashboardShell 
+    client:only="react" 
+    baseUrl={baseUrl} 
+    currentPath="work-os"
+    hideTopBar={true}
+    fullWidth={true}
+  >
+    <EnsureAuthCookies client:only="react">
+      <WorkspaceDetail client:only="react" baseUrl={baseUrl} />
+    </EnsureAuthCookies>
+  </MirakaDashboardShell>
+</Layout>
+
+
+

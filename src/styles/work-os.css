@@ -1,0 +1,171 @@
+
+.work-os-btn-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.work-os-btn-icon.dark {
+  background: var(--miraka-accent);
+  border-color: var(--miraka-accent);
+  color: var(--miraka-white);
+}
+
+.work-os-btn-icon.dark:hover {
+  background: var(--miraka-accent-hover);
+}
+
+/* Mini icon buttons */
+.work-os-btn-icon-mini {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  padding: 0;
+  color: var(--miraka-placeholder);
+}
+
+.work-os-btn-icon-mini:hover {
+  background: var(--miraka-white);
+  color: var(--miraka-accent);
+}
+
+/* Menu items */
+.work-os-menu-item {
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--miraka-border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  transition: background 0.15s;
+  min-height: 44px;
+  /* Inherits font from global */
+}
+
+.work-os-menu-item:hover {
+  background: var(--miraka-hover-bg);
+}
+
+.work-os-menu-item:last-child {
+  border-bottom: none;
+}
+
+.work-os-menu-item.danger {
+  color: #DC2626;
+}
+
+.work-os-menu-item.danger:hover {
+  background: #FEF2F2;
+}
+
+/* ==========================================
+   WORK OS GRIDS (Responsive layouts only)
+   ========================================== */
+
+.work-os-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .work-os-grid-4 {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .work-os-grid-4 {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.work-os-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+}
+
+@media (max-width: 1024px) {
+  .work-os-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+}
+
+@media (max-width: 640px) {
+  .work-os-metrics-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+/* Button groups */
+.work-os-btn-group {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ==========================================
+   WORK OS UTILITY CLASSES (Aliases to global)
+   ========================================== */
+
+/* Typography - maps to global h1, h2, etc */
+.work-os-h1 { /* Use <h1> tag instead or apply global h1 styles */ }
+.work-os-h2 { /* Use <h2> tag instead or apply global h2 styles */ }
+.work-os-h3 { /* Use <h3> tag instead or apply global h3 styles */ }
+.work-os-h4 { /* Use <h4> tag instead or apply global h4 styles */ }
+
+/* Text colors - use global classes */
+.work-os-text-muted { color: var(--muted-foreground); }
+.work-os-text-body { /* Inherits from body */ }
+
+/* Labels - use global label styles */
+.work-os-label { /* Inherits from label */ }
+
+/* Inputs - use global input styles */
+.work-os-input { /* Inherits from input */ }
+.work-os-select { /* Inherits from select */ }
+.work-os-textarea { /* Inherits from textarea */ }
+
+/* Buttons - use global button classes */
+.work-os-btn-primary { /* Inherits from button or .btn */ }
+.work-os-btn-secondary { /* Inherits from .btn-secondary */ }
+
+/* ==========================================
+   WORK OS CONTAINER
+   ========================================== */
+
+.work-os-container {
+  /* Inherits padding from parent, can override if needed */
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .work-os-container {
+    padding: 24px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .work-os-container {
+    padding: 16px !important;
+  }
+}

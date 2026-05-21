@@ -1,0 +1,919 @@
+===== PWD =====
+/Applications/MCO/opc_portal
+
+===== NODE / NPM =====
+v22.21.0
+10.9.4
+
+===== PACKAGE.JSON =====
+{
+  "name": "orange-pro-clean-portal",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "predev": "npx kill-port 3000 || true",
+    "dev": "astro dev --port 3000",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/cloudflare": "latest",
+    "@astrojs/react": "latest",
+    "@radix-ui/react-accordion": "1.2.12",
+    "@radix-ui/react-alert-dialog": "1.1.15",
+    "@radix-ui/react-aspect-ratio": "1.1.8",
+    "@radix-ui/react-avatar": "1.1.11",
+    "@radix-ui/react-checkbox": "1.3.3",
+    "@radix-ui/react-collapsible": "1.1.12",
+    "@radix-ui/react-context-menu": "2.2.16",
+    "@radix-ui/react-dialog": "1.1.15",
+    "@radix-ui/react-dropdown-menu": "2.1.16",
+    "@radix-ui/react-hover-card": "1.1.15",
+    "@radix-ui/react-label": "2.1.8",
+    "@radix-ui/react-menubar": "1.1.16",
+    "@radix-ui/react-navigation-menu": "1.2.14",
+    "@radix-ui/react-popover": "1.1.15",
+    "@radix-ui/react-progress": "1.1.8",
+    "@radix-ui/react-radio-group": "1.3.8",
+    "@radix-ui/react-scroll-area": "1.2.10",
+    "@radix-ui/react-select": "2.2.6",
+    "@radix-ui/react-separator": "1.1.8",
+    "@radix-ui/react-slider": "1.3.6",
+    "@radix-ui/react-slot": "1.2.4",
+    "@radix-ui/react-switch": "1.2.6",
+    "@radix-ui/react-tabs": "1.1.13",
+    "@radix-ui/react-toggle": "1.1.10",
+    "@radix-ui/react-toggle-group": "1.1.11",
+    "@radix-ui/react-tooltip": "1.2.8",
+    "@react-pdf/renderer": "4.5.1",
+    "@supabase/supabase-js": "latest",
+    "astro": "latest",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "cmdk": "1.1.1",
+    "date-fns": "4.1.0",
+    "embla-carousel-react": "8.6.0",
+    "html2canvas": "1.4.1",
+    "input-otp": "1.4.2",
+    "lucide-react": "latest",
+    "next-themes": "0.4.6",
+    "react": "latest",
+    "react-day-picker": "10.0.1",
+    "react-dom": "latest",
+    "react-hook-form": "7.76.0",
+    "react-resizable-panels": "4.11.1",
+    "recharts": "latest",
+    "sonner": "2.0.7",
+    "tailwind-merge": "3.6.0",
+    "vaul": "1.1.2"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}
+
+===== PACKAGE LOCK EXISTS =====
+-rw-r--r--  1 ermirandmiraka  admin  344555 May 17 19:13 package-lock.json
+
+===== ASTRO VERSION =====
+orange-pro-clean-portal@0.0.1 /Applications/MCO/opc_portal
+├── @astrojs/cloudflare@13.5.1
+├── @astrojs/react@5.0.5
+└── astro@6.3.3
+
+
+===== ROOT FILES =====
+total 2408
+drwxrwxr-x@  29 ermirandmiraka  admin     928 May 17 19:42 .
+drwxr-xr-x   16 ermirandmiraka  admin     512 May 15 15:39 ..
+-rw-r--r--@   1 ermirandmiraka  admin  249860 May 15 15:40 .DS_Store
+drwxr-xr-x    6 ermirandmiraka  admin     192 May 17 19:33 .astro
+-rw-r--r--@   1 ermirandmiraka  admin     977 May 17 01:28 .env
+-rw-r--r--@   1 ermirandmiraka  admin     977 May 17 01:28 .env.local
+drwxrwxr-x@   3 ermirandmiraka  admin      96 Mar 31 00:42 .github
+-rw-rw-r--@   1 ermirandmiraka  admin     361 Mar 31 00:42 .gitignore
+-rw-rw-r--@   1 ermirandmiraka  admin      16 Mar 31 00:42 .npmrc
+drwxr-xr-x@   3 ermirandmiraka  admin      96 Apr 15 21:27 .wrangler
+-rw-r--r--    1 ermirandmiraka  admin    2559 May 17 19:42 OPC_AUDIT_20260517_194228.txt
+drwxrwxr-x@  25 ermirandmiraka  admin     800 Apr 15 21:18 Wonday-main
+-rw-rw-r--@   1 ermirandmiraka  admin    6052 Apr 15 20:05 YOUR_INFORMATION_WIDGET_UPDATE.md
+drwxr-xr-x@   3 ermirandmiraka  admin      96 May 15 17:27 _backup_before_opc_routes_20260515_172722
+drwxr-xr-x    4 ermirandmiraka  admin     128 May 17 18:05 _legacy_miraka_archive
+-rw-r--r--    1 ermirandmiraka  admin     481 May 17 19:01 astro.config.mjs
+drwxrwxr-x@   5 ermirandmiraka  admin     160 Apr 15 20:05 generated
+drwxr-xr-x  376 ermirandmiraka  admin   12032 May 17 19:33 node_modules
+-rw-r--r--    1 ermirandmiraka  admin  344555 May 17 19:13 package-lock.json
+-rw-r--r--@   1 ermirandmiraka  admin  281440 May 17 18:31 package-lock.wonday-backup.json
+-rw-r--r--    1 ermirandmiraka  admin    2139 May 17 19:11 package.json
+-rw-r--r--@   1 ermirandmiraka  admin    1273 May 17 18:31 package.wonday-backup.json
+drwxrwxr-x@   7 ermirandmiraka  admin     224 Apr 15 20:05 public
+drwxrwxr-x@  15 ermirandmiraka  admin     480 Apr 15 21:18 src
+drwxrwxr-x@   3 ermirandmiraka  admin      96 Apr 15 20:05 supabase
+-rw-r--r--    1 ermirandmiraka  admin     158 May 17 19:01 tsconfig.json
+-rw-rw-r--@   1 ermirandmiraka  admin  292805 Apr 15 20:05 worker-configuration.d.ts
+-rw-rw-r--@   1 ermirandmiraka  admin    2567 May 17 19:06 wrangler.jsonc
+-rw-r--r--@   1 ermirandmiraka  admin    2596 May 17 19:06 wrangler.jsonc.backup-before-dev-fix
+
+===== BACKUP FILES =====
+./Wonday-main/package-lock.json
+./Wonday-main/package.json
+./_backup_before_opc_routes_20260515_172722
+./_legacy_miraka_archive/components/ProjectDetail.tsx.backup
+./astro.config.mjs
+./node_modules/.bin/wrangler
+./node_modules/.bin/wrangler2
+./node_modules/abs-svg-path/package.json
+./node_modules/anymatch/package.json
+./node_modules/argparse/package.json
+./node_modules/aria-hidden/package.json
+./node_modules/aria-query/package.json
+./node_modules/array-iterate/package.json
+./node_modules/astro/package.json
+./node_modules/axobject-query/package.json
+./node_modules/bail/package.json
+./node_modules/base64-arraybuffer/package.json
+./node_modules/base64-js/package.json
+./node_modules/baseline-browser-mapping/package.json
+./node_modules/bidi-js/package.json
+./node_modules/blake3-wasm/package.json
+./node_modules/boolbase/package.json
+./node_modules/brotli/package.json
+./node_modules/browserify-zlib/package.json
+./node_modules/browserslist/package.json
+./node_modules/caniuse-lite/package.json
+./node_modules/ccount/package.json
+./node_modules/character-entities-html4/package.json
+./node_modules/character-entities-legacy/package.json
+./node_modules/character-entities/package.json
+./node_modules/chokidar/package.json
+./node_modules/ci-info/package.json
+./node_modules/class-variance-authority/package.json
+./node_modules/clone/package.json
+./node_modules/clsx/package.json
+./node_modules/cmdk/package.json
+./node_modules/color-name/package.json
+./node_modules/color-string/package.json
+./node_modules/comma-separated-tokens/package.json
+./node_modules/commander/package-support.json
+./node_modules/commander/package.json
+./node_modules/common-ancestor-path/package.json
+./node_modules/convert-source-map/package.json
+./node_modules/cookie-es/package.json
+./node_modules/cookie/package.json
+./node_modules/crossws/package.json
+./node_modules/css-line-break/package.json
+./node_modules/css-select/package.json
+./node_modules/css-tree/package.json
+./node_modules/css-what/package.json
+./node_modules/csso/package.json
+./node_modules/csstype/package.json
+./node_modules/d3-array/package.json
+./node_modules/d3-color/package.json
+./node_modules/d3-ease/package.json
+./node_modules/d3-format/package.json
+./node_modules/d3-interpolate/package.json
+./node_modules/d3-path/package.json
+./node_modules/d3-scale/package.json
+./node_modules/d3-shape/package.json
+./node_modules/d3-time-format/package.json
+./node_modules/d3-time/package.json
+./node_modules/d3-timer/package.json
+./node_modules/date-fns/package.json
+./node_modules/debug/package.json
+./node_modules/decimal.js-light/package.json
+./node_modules/decode-named-character-reference/package.json
+./node_modules/defu/package.json
+./node_modules/dequal/package.json
+./node_modules/destr/package.json
+./node_modules/detect-libc/package.json
+./node_modules/detect-node-es/package.json
+./node_modules/devalue/package.json
+./node_modules/devlop/package.json
+./node_modules/dfa/package.json
+./node_modules/diff/package.json
+./node_modules/dom-serializer/package.json
+./node_modules/domelementtype/package.json
+./node_modules/domhandler/package.json
+./node_modules/domutils/package.json
+./node_modules/dset/package.json
+./node_modules/electron-to-chromium/package.json
+./node_modules/embla-carousel-react/package.json
+./node_modules/embla-carousel-reactive-utils/package.json
+./node_modules/embla-carousel/package.json
+./node_modules/emoji-regex-xs/package.json
+./node_modules/entities/package.json
+./node_modules/error-stack-parser-es/package.json
+./node_modules/es-module-lexer/package.json
+./node_modules/es-toolkit/package.json
+./node_modules/esbuild/package.json
+./node_modules/escalade/package.json
+./node_modules/escape-string-regexp/package.json
+./node_modules/estree-walker/package.json
+./node_modules/eventemitter3/package.json
+./node_modules/events/package.json
+./node_modules/extend/package.json
+./node_modules/fast-deep-equal/package.json
+./node_modules/fast-string-truncated-width/package.json
+./node_modules/fast-string-width/package.json
+./node_modules/fast-wrap-ansi/package.json
+./node_modules/fdir/package.json
+./node_modules/fflate/package.json
+./node_modules/flattie/package.json
+./node_modules/fontace/package.json
+./node_modules/fontkit/package.json
+./node_modules/fontkitten/package.json
+./node_modules/gensync/package.json
+./node_modules/get-nonce/package.json
+./node_modules/get-tsconfig/package.json
+./node_modules/github-slugger/package.json
+./node_modules/h3/package.json
+./node_modules/hast-util-from-html/package.json
+./node_modules/hast-util-from-parse5/package.json
+./node_modules/hast-util-is-element/package.json
+./node_modules/hast-util-parse-selector/package.json
+./node_modules/hast-util-raw/package.json
+./node_modules/hast-util-to-html/package.json
+./node_modules/hast-util-to-parse5/package.json
+./node_modules/hast-util-to-text/package.json
+./node_modules/hast-util-whitespace/package.json
+./node_modules/hastscript/package.json
+./node_modules/hsl-to-hex/package.json
+./node_modules/hsl-to-rgb-for-reals/package.json
+./node_modules/html-escaper/package.json
+./node_modules/html-void-elements/package.json
+./node_modules/html2canvas/package.json
+./node_modules/html2canvas/tsconfig.json
+./node_modules/http-cache-semantics/package.json
+./node_modules/hyphen/package.json
+./node_modules/iceberg-js/package.json
+./node_modules/immer/package.json
+./node_modules/inherits/package.json
+./node_modules/input-otp/package.json
+./node_modules/internmap/package.json
+./node_modules/iron-webcrypto/package.json
+./node_modules/is-docker/package.json
+./node_modules/is-inside-container/package.json
+./node_modules/is-plain-obj/package.json
+./node_modules/is-url/package.json
+./node_modules/is-wsl/package.json
+./node_modules/jay-peg/package.json
+./node_modules/js-md5/package.json
+./node_modules/js-tokens/package.json
+./node_modules/js-yaml/package.json
+./node_modules/jsesc/package.json
+./node_modules/json5/package.json
+./node_modules/jsonc-parser/package.json
+./node_modules/kleur/package.json
+./node_modules/linebreak/package.json
+./node_modules/longest-streak/package.json
+./node_modules/loose-envify/package.json
+./node_modules/lru-cache/package.json
+./node_modules/lucide-react/package.json
+./node_modules/magic-string/package.json
+./node_modules/magicast/package.json
+./node_modules/markdown-table/package.json
+./node_modules/mdast-util-definitions/package.json
+./node_modules/mdast-util-find-and-replace/package.json
+./node_modules/mdast-util-from-markdown/package.json
+./node_modules/mdast-util-gfm-autolink-literal/package.json
+./node_modules/mdast-util-gfm-footnote/package.json
+./node_modules/mdast-util-gfm-strikethrough/package.json
+./node_modules/mdast-util-gfm-table/package.json
+./node_modules/mdast-util-gfm-task-list-item/package.json
+./node_modules/mdast-util-gfm/package.json
+./node_modules/mdast-util-phrasing/package.json
+./node_modules/mdast-util-to-hast/package.json
+./node_modules/mdast-util-to-markdown/package.json
+./node_modules/mdast-util-to-string/package.json
+./node_modules/mdn-data/package.json
+./node_modules/media-engine/package.json
+./node_modules/micromark-core-commonmark/package.json
+./node_modules/micromark-extension-gfm-autolink-literal/package.json
+./node_modules/micromark-extension-gfm-footnote/package.json
+./node_modules/micromark-extension-gfm-strikethrough/package.json
+./node_modules/micromark-extension-gfm-table/package.json
+./node_modules/micromark-extension-gfm-tagfilter/package.json
+./node_modules/micromark-extension-gfm-task-list-item/package.json
+./node_modules/micromark-extension-gfm/package.json
+./node_modules/micromark-factory-destination/package.json
+./node_modules/micromark-factory-label/package.json
+./node_modules/micromark-factory-space/package.json
+./node_modules/micromark-factory-title/package.json
+./node_modules/micromark-factory-whitespace/package.json
+./node_modules/micromark-util-character/package.json
+./node_modules/micromark-util-chunked/package.json
+./node_modules/micromark-util-classify-character/package.json
+./node_modules/micromark-util-combine-extensions/package.json
+./node_modules/micromark-util-decode-numeric-character-reference/package.json
+./node_modules/micromark-util-decode-string/package.json
+./node_modules/micromark-util-encode/package.json
+./node_modules/micromark-util-html-tag-name/package.json
+./node_modules/micromark-util-normalize-identifier/package.json
+./node_modules/micromark-util-resolve-all/package.json
+./node_modules/micromark-util-sanitize-uri/package.json
+./node_modules/micromark-util-subtokenize/package.json
+./node_modules/micromark-util-symbol/package.json
+./node_modules/micromark-util-types/package.json
+./node_modules/micromark/package.json
+./node_modules/miniflare/package.json
+./node_modules/mrmime/package.json
+./node_modules/ms/package.json
+./node_modules/nanoid/package.json
+./node_modules/neotraverse/package.json
+./node_modules/next-themes/package.json
+./node_modules/nlcst-to-string/package.json
+./node_modules/node-fetch-native/package.json
+./node_modules/node-mock-http/package.json
+./node_modules/node-releases/package.json
+./node_modules/normalize-path/package.json
+./node_modules/normalize-svg-path/package.json
+./node_modules/nth-check/package.json
+./node_modules/object-assign/package.json
+./node_modules/obug/package.json
+./node_modules/ofetch/package.json
+./node_modules/ohash/package.json
+./node_modules/oniguruma-parser/package.json
+./node_modules/oniguruma-to-es/package.json
+./node_modules/p-limit/package.json
+./node_modules/p-queue/package.json
+./node_modules/p-timeout/package.json
+./node_modules/package-manager-detector/package.json
+./node_modules/pako/package.json
+./node_modules/parse-latin/package.json
+./node_modules/parse-svg-path/package.json
+./node_modules/parse5/package.json
+./node_modules/path-to-regexp/package.json
+./node_modules/pathe/package.json
+./node_modules/piccolore/package.json
+./node_modules/picocolors/package.json
+./node_modules/picomatch/package.json
+./node_modules/png-js/package.json
+./node_modules/postcss-value-parser/package.json
+./node_modules/postcss/package.json
+./node_modules/prismjs/package.json
+./node_modules/prop-types/package.json
+./node_modules/property-information/package.json
+./node_modules/queue/package.json
+./node_modules/radix3/package.json
+./node_modules/react-day-picker/package.json
+./node_modules/react-dom/package.json
+./node_modules/react-hook-form/package.json
+./node_modules/react-is/package.json
+./node_modules/react-redux/package.json
+./node_modules/react-refresh/package.json
+./node_modules/react-remove-scroll-bar/package.json
+./node_modules/react-remove-scroll/package.json
+./node_modules/react-resizable-panels/package.json
+./node_modules/react-style-singleton/package.json
+./node_modules/react/package.json
+./node_modules/readdirp/package.json
+./node_modules/recharts/package.json
+./node_modules/redux-thunk/package.json
+./node_modules/redux/package.json
+./node_modules/regex-recursion/package.json
+./node_modules/regex-utilities/package.json
+./node_modules/regex/package.json
+./node_modules/rehype-parse/package.json
+./node_modules/rehype-raw/package.json
+./node_modules/rehype-stringify/package.json
+./node_modules/rehype/package.json
+./node_modules/remark-gfm/package.json
+./node_modules/remark-parse/package.json
+./node_modules/remark-rehype/package.json
+./node_modules/remark-smartypants/package.json
+./node_modules/remark-stringify/package.json
+./node_modules/require-from-string/package.json
+./node_modules/reselect/package.json
+./node_modules/resolve-pkg-maps/package.json
+./node_modules/restructure/package.json
+./node_modules/retext-latin/package.json
+./node_modules/retext-smartypants/package.json
+./node_modules/retext-stringify/package.json
+./node_modules/retext/package.json
+./node_modules/rollup/package.json
+./node_modules/safe-buffer/package.json
+./node_modules/sax/package.json
+./node_modules/scheduler/package.json
+./node_modules/semver/package.json
+./node_modules/sharp/package.json
+./node_modules/shiki/package.json
+./node_modules/sisteransi/package.json
+./node_modules/smol-toml/package.json
+./node_modules/sonner/package.json
+./node_modules/source-map-js/package.json
+./node_modules/space-separated-tokens/package.json
+./node_modules/string_decoder/package.json
+./node_modules/stringify-entities/package.json
+./node_modules/supports-color/package.json
+./node_modules/svg-arc-to-cubic-bezier/package.json
+./node_modules/svgo/package.json
+./node_modules/tailwind-merge/package.json
+./node_modules/text-segmentation/package.json
+./node_modules/tiny-inflate/package.json
+./node_modules/tiny-invariant/package.json
+./node_modules/tinyclip/package.json
+./node_modules/tinyexec/package.json
+./node_modules/tinyglobby/package.json
+./node_modules/trim-lines/package.json
+./node_modules/trough/package.json
+./node_modules/tslib/package.json
+./node_modules/typescript/package.json
+./node_modules/ufo/package.json
+./node_modules/ultrahtml/package.json
+./node_modules/uncrypto/package.json
+./node_modules/undici/package.json
+./node_modules/unenv/package.json
+./node_modules/unicode-properties/package.json
+./node_modules/unicode-trie/package.json
+./node_modules/unified/package.json
+./node_modules/unifont/package.json
+./node_modules/unist-util-find-after/package.json
+./node_modules/unist-util-is/package.json
+./node_modules/unist-util-modify-children/package.json
+./node_modules/unist-util-position/package.json
+./node_modules/unist-util-remove-position/package.json
+./node_modules/unist-util-stringify-position/package.json
+./node_modules/unist-util-visit-children/package.json
+./node_modules/unist-util-visit-parents/package.json
+./node_modules/unist-util-visit/package.json
+./node_modules/unstorage/package.json
+./node_modules/update-browserslist-db/package.json
+./node_modules/use-callback-ref/package.json
+./node_modules/use-sidecar/package.json
+./node_modules/use-sync-external-store/package.json
+./node_modules/util-deprecate/package.json
+./node_modules/utrie/package.json
+./node_modules/vaul/package.json
+./node_modules/vfile-location/package.json
+./node_modules/vfile-message/package.json
+./node_modules/vfile/package.json
+./node_modules/victory-vendor/package.json
+./node_modules/vite-compatible-readable-stream/package.json
+./node_modules/vite/package.json
+./node_modules/vitefu/package.json
+./node_modules/web-namespaces/package.json
+./node_modules/which-pm-runs/package.json
+./node_modules/workerd/package.json
+./node_modules/wrangler
+./node_modules/wrangler/package.json
+./node_modules/wrangler/wrangler-dist
+./node_modules/ws/package.json
+./node_modules/xxhash-wasm/package.json
+./node_modules/yallist/package.json
+./node_modules/yargs-parser/package.json
+./node_modules/yocto-queue/package.json
+./node_modules/yoga-layout/package.json
+./node_modules/youch-core/package.json
+./node_modules/youch/package.json
+./node_modules/zod/package.json
+./node_modules/zwitch/package.json
+./package-lock.json
+./package-lock.wonday-backup.json
+./package.json
+./package.wonday-backup.json
+./src/components/MirakaLoadingScreen.tsx.backup-instagram-loader
+./src/pages/index.miraka-backup.astro
+./tsconfig.json
+./wrangler.jsonc
+./wrangler.jsonc.backup-before-dev-fix
+
+===== ENV KEYS ONLY =====
+--- .env ---
+1:PUBLIC_SUPABASE_URL=***HIDDEN***
+2:PUBLIC_SUPABASE_ANON_KEY=***HIDDEN***
+3:SUPABASE_SERVICE_ROLE_KEY=***HIDDEN***
+5:SUPABASE_URL=***HIDDEN***
+6:SUPABASE_SERVICE_ROLE=***HIDDEN***
+--- .env.local ---
+1:PUBLIC_SUPABASE_URL=***HIDDEN***
+2:PUBLIC_SUPABASE_ANON_KEY=***HIDDEN***
+3:SUPABASE_SERVICE_ROLE_KEY=***HIDDEN***
+5:SUPABASE_URL=***HIDDEN***
+6:SUPABASE_SERVICE_ROLE=***HIDDEN***
+--- .dev.vars ---
+missing
+
+===== ASTRO CONFIG =====
+import { defineConfig } from 'astro/config';
+import react from '@astrojs/react';
+import cloudflare from '@astrojs/cloudflare';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig({
+  output: 'server',
+  adapter: cloudflare(),
+  integrations: [react()],
+  vite: {
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, './src')
+      }
+    }
+  }
+});
+
+===== WRANGLER CONFIG =====
+
+
+{
+  "name": "miraka-co-portal",
+  "compatibility_date": "2025-01-04",
+  "compatibility_flags": ["nodejs_compat"],
+  // Environment variables are bound at runtime by Cloudflare Workers
+  // These should be configured in the Cloudflare Dashboard under Workers > Settings > Variables
+  "vars": {
+    // Public variables (these can be strings)
+    "PUBLIC_SUPABASE_URL": "https://bmyshfmcfpiztllidenr.supabase.co",
+    "PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJteXNoZm1jZnBpenRsbGlkZW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ1MTY4NDYsImV4cCI6MjA4MDA5Mjg0Nn0.5ydFm5AntUn7cJVXWHo_yBIY88fBJSyuMgafVftJ3Qg",
+    "WEBFLOW_API_HOST": "https://api-cdn.webflow.com/v2",
+    "EDGE_FUNCTION_BASE": "https://bmyshfmcfpiztllidenr.supabase.co/functions/v1",
+    "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJteXNoZm1jZnBpenRsbGlkZW5yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NDUxNjg0NiwiZXhwIjoyMDgwMDkyODQ2fQ.ohS70-i_zeXDFnwhnWG4fuE6fWn7dh8uY-l21LSoT6M",
+    "WEBFLOW_SITE_API_TOKEN": "806af73e09f45c87c40e78a534f4e568424ae3708eb8d4285dfdadf43f99570e",
+    "WEBFLOW_CMS_SITE_API_TOKEN": "fcdd18de9e639fca8a29cf53cffb2ef39bd49b1134bb866fbee6a384fe72b6f0",
+    "GOOGLE_API_KEY": "AlzaSyDYBSXu2L9doMeKNI6XQ-rnDh8UuAy4PAw",
+    "GOOGLE_MAPS_SERVER_KEY": "your-google-maps-server-key-here",
+    "OWNER_MOD_KEY": "673779477",
+    "ADMIN_USERNAME": "admin",
+    "ADMIN_PASSWORD_HASH": "$2b$10$Mp|HOhyD8ZfJmarpMvJKleFmDQOjXggIrdBEZriEKPbCgDunWWafK",
+    "SUPABASE_URL": "https://bmyshfmcfpiztllidenr.supabase.co",
+    "SUPABASE_SERVICE_ROLE": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJteXNoZm1jZnBpenRsbGlkZW5yIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NDUxNjg0NiwiZXhwIjoyMDgwMDkyODQ2fQ.ohS70-i_zeXDFnwhnWG4fuE6fWn7dh8uY-l21LSoT6M",
+    "GITHUB_TOKEN": "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",
+    "EDGE_FUNCTION_BASE": "https://bmyshfmcfpiztllidenr.supabase.co"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "SESSION",
+      "id": "8e891175480c42d6bb544759e43dc911"
+    }
+  ],
+  // Sensitive secrets should be set using: wrangler secret put <KEY>
+  // Or configured in Cloudflare Dashboard > Workers > Settings > Variables > Encrypt
+  // Required secrets:
+  // - GOOGLE_API_KEY
+  // - SUPABASE_SERVICE_ROLE_KEY
+  // - SUPABASE_SERVICE_ROLE (same as above for compatibility)
+  // - WEBFLOW_SITE_API_TOKEN
+  // - WEBFLOW_CMS_SITE_API_TOKEN
+  // - OWNER_MOD_KEY
+  // - ADMIN_USERNAME
+  // - ADMIN_PASSWORD_HASH
+  // - MASTER_ALBUM_KEY
+}
+
+
+
+===== MIDDLEWARE =====
+import { defineMiddleware } from 'astro:middleware';
+
+export const onRequest = defineMiddleware(async (_context, next) => {
+  return next();
+});
+
+===== CURRENT INDEX =====
+---
+import OPCLogin from '../components/OPCLogin';
+---
+
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orange Pro Clean Portal Login</title>
+    <meta
+      name="description"
+      content="Login für das Orange Pro Clean Kunden-, Einsatz- und Dispatch-Portal."
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      href="https://cdn.prod.website-files.com/6944470386300e196e5fc347/694ff7f9812baa5c05309365_Orange%20Pro%20Clean%20GmbH%20WEBICON.png"
+    />
+  </head>
+  <body style="margin:0;">
+    <OPCLogin client:load />
+  </body>
+</html>
+
+===== LOGIN FILES =====
+src/components/Login.tsx
+--- src/components/Login.tsx ---
+/**
+ * Login Component
+ * 
+ * Miraka & Co Portal Login Page
+ * Clean, minimal, corporate design
+ */
+
+import React, { useState } from 'react';
+import { supabase, getUserProfile, getDashboardRoute } from '../lib/supabase';
+
+export default function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      // Validate inputs
+      if (!email || !password) {
+        setError('Please enter both email and password');
+        setLoading(false);
+        return;
+      }
+
+      // Sign in with Supabase
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (authError) {
+        setError(authError.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!authData.user) {
+        setError('Authentication failed. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      // Get user profile with role
+      const profile = await getUserProfile(authData.user.id);
+
+      if (!profile) {
+        setError('Failed to load user profile. Please contact support.');
+        setLoading(false);
+        return;
+      }
+
+      // Redirect based on role
+      const dashboardPath = getDashboardRoute(profile.role);
+      window.location.href = dashboardPath;
+
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('An unexpected error occurred. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="miraka-login-container">
+      <div className="miraka-login-card">
+        {/* Logo */}
+        <div className="miraka-login-logo">
+          <h1>Miraka & Co</h1>
+          <p>Client Portal</p>
+        </div>
+
+        {/* Login Form */}
+        <form onSubmit={handleSubmit} className="miraka-login-form">
+          {error && (
+            <div className="miraka-error-message">
+src/components/OPCLogin.tsx
+--- src/components/OPCLogin.tsx ---
+import { useEffect, useState, type FormEvent } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+const ORANGE_PRO_CLEAN_LOGO =
+  'https://cdn.prod.website-files.com/6944470386300e196e5fc347/6949534529e8342842456097_REGULAR%20COLOR%20ORANGE%20PRO%20CLEAN%20LOGO%20ORIGINAL.png';
+
+function validateEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function getSupabaseBrowserClient() {
+  const url = import.meta.env.PUBLIC_SUPABASE_URL;
+  const anonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !anonKey) {
+    throw new Error('PUBLIC_SUPABASE_URL oder PUBLIC_SUPABASE_ANON_KEY fehlt.');
+  }
+
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+}
+
+export default function OPCLogin() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const [ready, setReady] = useState(false);
+  const [configError, setConfigError] = useState('');
+  const [error, setError] = useState('');
+
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      getSupabaseBrowserClient();
+      setReady(true);
+    } catch (err: any) {
+      setConfigError(err?.message || 'Supabase-Konfiguration fehlt.');
+      setReady(true);
+    }
+  }, []);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setError('');
+    setEmailError('');
+    setPasswordError('');
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      setEmailError('Dieses Feld ist erforderlich.');
+      return;
+    }
+
+    if (!validateEmail(cleanEmail)) {
+      setEmailError('Bitte geben Sie eine gültige E-Mail-Adresse ein.');
+      return;
+    }
+
+    if (!password) {
+      setPasswordError('Dieses Feld ist erforderlich.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setPasswordError('Das Passwort muss mindestens 6 Zeichen lang sein.');
+      return;
+    }
+
+    setLoading(true);
+
+src/components/LoginWrapper.tsx
+--- src/components/LoginWrapper.tsx ---
+import { TranslationProvider } from '../lib/TranslationContext';
+import MirakaLogin from './MirakaLogin';
+
+export default function LoginWrapper() {
+  return (
+    <TranslationProvider>
+      <MirakaLogin />
+    </TranslationProvider>
+  );
+}
+
+===== OPC API FILES =====
+total 248
+drwxr-xr-x@ 10 ermirandmiraka  admin    320 May 17 19:29 .
+drwxrwxr-x@ 23 ermirandmiraka  admin    736 May 17 18:06 ..
+-rw-r--r--   1 ermirandmiraka  admin   6081 May 16 23:42 client-email-action.ts
+-rw-r--r--   1 ermirandmiraka  admin  15988 May 17 15:52 convert-inquiry.ts
+-rw-r--r--   1 ermirandmiraka  admin  20000 May 17 17:04 create-client.ts
+-rw-r--r--@  1 ermirandmiraka  admin   6230 May 15 21:46 create-service-job.ts
+-rw-r--r--   1 ermirandmiraka  admin  26085 May 17 19:13 grant-client-portal-access.ts
+-rw-r--r--   1 ermirandmiraka  admin  11356 May 17 19:30 resolve-login.ts
+-rw-r--r--   1 ermirandmiraka  admin   3300 May 16 23:46 send-job-thank-you-email.ts
+-rw-r--r--   1 ermirandmiraka  admin  26537 May 17 19:13 update-client-details.ts
+
+===== DYNAMIC ENV USAGE =====
+src/components/work-os/EnsureAuthCookies.tsx:4:const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/components/work-os/EnsureAuthCookies.tsx:5:const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/components/ProjectCardView.tsx:29:        const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/components/ProjectCardView.tsx:30:        const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/components/OPCLogin.tsx:12:  const url = import.meta.env.PUBLIC_SUPABASE_URL;
+src/components/OPCLogin.tsx:13:  const anonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/components/ProjectsResponsiveView.tsx:35:        const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/components/ProjectsResponsiveView.tsx:36:        const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/components/TicketsPage.tsx:264:      const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/components/TicketsPage.tsx:265:      const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/lib/supabase-admin.ts:36:  const url = import.meta.env.PUBLIC_SUPABASE_URL;
+src/lib/supabase-server.ts:13:  const url = runtimeEnv?.PUBLIC_SUPABASE_URL ?? import.meta.env.PUBLIC_SUPABASE_URL;
+src/lib/supabase-server.ts:14:  const anon = runtimeEnv?.PUBLIC_SUPABASE_ANON_KEY ?? import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/lib/base-url.ts:17:  const envBaseUrl = typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL 
+src/lib/supabase-client.ts:24:  const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/lib/supabase-client.ts:25:  const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/work-os/debug-auth.astro:48:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/work-os/debug-auth.astro:49:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/supabase-diagnostic.astro:5:const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/supabase-diagnostic.astro:6:const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/verify-supabase.astro:5:const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/verify-supabase.astro:6:const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/check-env.astro:3:const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/check-env.astro:4:const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/logout.astro:4:const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || '';
+src/pages/logout.astro:5:const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
+src/pages/api/clients/list.ts:6:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/clients/list.ts:7:    const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
+src/pages/api/tickets/test-create.ts:16:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/tickets/test-create.ts:17:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/workspaces.ts:15:    const user = await requireAuth(cookies, locals?.runtime?.env);
+src/pages/api/work-os/workspaces.ts:33:    const supabase = createServerSupabaseClient(cookies, locals?.runtime?.env);
+src/pages/api/work-os/workspaces.ts:123:    const user = await requireAuth(cookies, locals?.runtime?.env);
+src/pages/api/work-os/workspaces.ts:142:    const supabase = createServerSupabaseClient(cookies, locals?.runtime?.env);
+src/pages/api/work-os/boards/[boardId]/items.ts:35:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/boards/[boardId]/items.ts:36:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/boards/[boardId]/items.ts:133:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/boards/[boardId]/items.ts:134:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/boards/[boardId]/archive.ts:34:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/boards/[boardId]/archive.ts:35:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/boards/[boardId]/index.ts:34:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/boards/[boardId]/index.ts:35:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/boards/[boardId]/index.ts:110:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/boards/[boardId]/index.ts:111:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/boards/[boardId]/index.ts:264:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/boards/[boardId]/index.ts:265:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/boards/index.ts:15:    const user = await requireAuth(cookies, locals?.runtime?.env);
+src/pages/api/work-os/boards/index.ts:25:    const supabase = createServerSupabaseClient(cookies, locals?.runtime?.env);
+src/pages/api/work-os/boards/index.ts:103:    const user = await requireAuth(cookies, locals?.runtime?.env);
+src/pages/api/work-os/boards/index.ts:113:    const supabase = createServerSupabaseClient(cookies, locals?.runtime?.env);
+src/pages/api/work-os/items/[itemId]/comments.ts:35:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/items/[itemId]/comments.ts:36:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/items/[itemId]/comments.ts:116:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/items/[itemId]/comments.ts:117:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/items/[itemId]/files/[fileId].ts:42:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/items/[itemId]/files/[fileId].ts:43:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/items/[itemId]/files/[fileId].ts:127:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/items/[itemId]/files/[fileId].ts:128:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/items/[itemId]/files.ts:35:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/items/[itemId]/files.ts:36:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/items/[itemId]/files.ts:116:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/items/[itemId]/files.ts:117:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/metrics.ts:25:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/metrics.ts:26:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/work-os/activities.ts:25:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/work-os/activities.ts:26:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/tools/business-scraper/search.ts:259:    const runtimeEnv = locals?.runtime?.env as Record<string, string> | undefined;
+src/pages/api/tools/business-scraper/export.ts:252:    const runtimeEnv = locals?.runtime?.env as Record<string, string> | undefined;
+src/pages/api/test-google-api.ts:4:  const GOOGLE_API_KEY = import.meta.env.GOOGLE_API_KEY || import.meta.env.GOOGLE_API_KEY || '';
+src/pages/api/test-login.ts:20:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || 
+src/pages/api/test-login.ts:22:    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || 
+src/pages/api/opc/update-client-details.ts:99:function getEnvValue(locals: any, key: string) {
+src/pages/api/opc/update-client-details.ts:104:  return importMetaEnv[key] || processEnv[key] || runtimeEnv[key] || '';
+src/pages/api/opc/update-client-details.ts:162:    getEnvValue(locals, 'PUBLIC_SUPABASE_URL') ||
+src/pages/api/opc/update-client-details.ts:163:    getEnvValue(locals, 'SUPABASE_URL');
+src/pages/api/opc/update-client-details.ts:165:  const anonKey = getEnvValue(locals, 'PUBLIC_SUPABASE_ANON_KEY');
+src/pages/api/opc/update-client-details.ts:168:    getEnvValue(locals, 'SUPABASE_SERVICE_ROLE_KEY') ||
+src/pages/api/opc/update-client-details.ts:169:    getEnvValue(locals, 'SUPABASE_SERVICE_ROLE');
+src/pages/api/opc/send-job-thank-you-email.ts:28:    const supabaseUrl = import.meta.env.SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/opc/client-email-action.ts:27:  const supabaseUrl = import.meta.env.SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/opc/create-client.ts:148:function getEnvValue(locals: any, key: string) {
+src/pages/api/opc/create-client.ts:149:  const runtimeEnv = locals?.runtime?.env;
+src/pages/api/opc/create-client.ts:162:    getEnvValue(locals, 'SUPABASE_URL') ||
+src/pages/api/opc/create-client.ts:163:    getEnvValue(locals, 'PUBLIC_SUPABASE_URL');
+src/pages/api/opc/create-client.ts:165:  const serviceRoleKey = getEnvValue(locals, 'SUPABASE_SERVICE_ROLE_KEY');
+src/pages/api/opc/resolve-login.ts:15:function getEnvValue(key: string) {
+src/pages/api/opc/resolve-login.ts:19:  return importMetaEnv[key] || processEnv[key] || '';
+src/pages/api/opc/resolve-login.ts:24:    getEnvValue('PUBLIC_SUPABASE_URL') ||
+src/pages/api/opc/resolve-login.ts:25:    getEnvValue('SUPABASE_URL');
+src/pages/api/opc/resolve-login.ts:27:  const anonKey = getEnvValue('PUBLIC_SUPABASE_ANON_KEY');
+src/pages/api/opc/resolve-login.ts:30:    getEnvValue('SUPABASE_SERVICE_ROLE_KEY') ||
+src/pages/api/opc/resolve-login.ts:31:    getEnvValue('SUPABASE_SERVICE_ROLE') ||
+src/pages/api/opc/resolve-login.ts:32:    getEnvValue('SUPABASE_SERVICE_KEY');
+src/pages/api/opc/create-service-job.ts:6:const SUPABASE_URL = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/opc/create-service-job.ts:7:const SUPABASE_ANON_KEY = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/opc/grant-client-portal-access.ts:40:function getEnvValue(locals: any, key: string) {
+src/pages/api/opc/grant-client-portal-access.ts:45:  return importMetaEnv[key] || processEnv[key] || runtimeEnv[key] || '';
+src/pages/api/opc/grant-client-portal-access.ts:103:    getEnvValue(locals, 'PUBLIC_SUPABASE_URL') ||
+src/pages/api/opc/grant-client-portal-access.ts:104:    getEnvValue(locals, 'SUPABASE_URL');
+src/pages/api/opc/grant-client-portal-access.ts:106:  const anonKey = getEnvValue(locals, 'PUBLIC_SUPABASE_ANON_KEY');
+src/pages/api/opc/grant-client-portal-access.ts:109:    getEnvValue(locals, 'SUPABASE_SERVICE_ROLE_KEY') ||
+src/pages/api/opc/grant-client-portal-access.ts:110:    getEnvValue(locals, 'SUPABASE_SERVICE_ROLE') ||
+src/pages/api/opc/grant-client-portal-access.ts:111:    getEnvValue(locals, 'SUPABASE_SERVICE_KEY');
+src/pages/api/opc/grant-client-portal-access.ts:547:    getEnvValue({}, 'PUBLIC_SITE_URL') ||
+src/pages/api/opc/grant-client-portal-access.ts:548:    getEnvValue({}, 'PUBLIC_APP_URL') ||
+src/pages/api/opc/grant-client-portal-access.ts:549:    getEnvValue({}, 'PUBLIC_BASE_URL') ||
+src/pages/api/opc/grant-client-portal-access.ts:550:    getEnvValue({}, 'SITE_URL');
+src/pages/api/opc/grant-client-portal-access.ts:560:    getEnvValue(locals, 'CLIENT_PORTAL_REDIRECT_URL') ||
+src/pages/api/opc/grant-client-portal-access.ts:561:    getEnvValue(locals, 'PUBLIC_CLIENT_PORTAL_URL');
+src/pages/api/invoices/generate-number.ts:14:    const supabase = getSupabaseAdmin(locals?.runtime?.env);
+src/pages/api/projects/create.ts:7:  const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL
+src/pages/api/projects/create.ts:8:  const supabaseKey = import.meta.env.SUPABASE_SERVICE_ROLE || import.meta.env.SUPABASE_SERVICE_ROLE
+src/pages/api/env-diagnostic.ts:9:      hasRuntimeEnv: !!locals?.runtime?.env,
+src/pages/api/env-diagnostic.ts:77:    availableRuntimeKeys: locals?.runtime?.env ? Object.keys(locals.runtime.env) : [],
+src/pages/api/diagnostic.ts:10:      hasEnv: !!locals?.runtime?.env,
+src/pages/api/diagnostic.ts:11:      envKeys: locals?.runtime?.env ? Object.keys(locals.runtime.env) : []
+src/pages/api/test-clients.ts:6:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+src/pages/api/test-clients.ts:7:    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+src/pages/api/profile/notifications.ts:30:  const runtimeEnv = locals?.runtime?.env;
+src/pages/api/profile/update.ts:53:  const runtimeEnv = locals?.runtime?.env;
+src/pages/api/env-check.ts:13:      hasRuntimeEnv: !!locals?.runtime?.env,
+src/pages/api/supabase-test.ts:12:    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || 
+src/pages/api/supabase-test.ts:14:    const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || 
+
+===== GIT STATUS =====

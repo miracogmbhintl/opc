@@ -1,0 +1,359 @@
+/* ==========================================
+   MIRAKA & CO AUTHENTICATION UI STYLES
+   ========================================== */
+
+/* Color Palette */
+:root {
+  --miraka-dark-text: #111827;
+  --miraka-light-text: #374151;
+  --miraka-background: #F7F7F9;
+  --miraka-card-white: #FFFFFF;
+  --miraka-divider: rgba(0, 0, 0, 0.08);
+  --miraka-primary: #2A5F8A;
+  --miraka-primary-hover: #244F73;
+  --miraka-primary-disabled: #9DB5C8;
+  --miraka-input-focus: #E9F3F8;
+  --miraka-error: #B91C1C;
+  --miraka-success: #059669;
+  --miraka-success-bg: #D1FAE5;
+}
+
+/* Base Auth Container */
+.miraka-auth-page {
+  min-height: 100vh;
+  background: var(--miraka-background);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'Helvetica Neue', sans-serif;
+}
+
+/* Auth Card */
+.miraka-auth-card {
+  max-width: 460px;
+  width: 100%;
+  background: var(--miraka-card-white);
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  padding: 48px 40px;
+  animation: fadeInUp 0.4s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Logo */
+.miraka-auth-logo {
+  display: block;
+  margin: 0 auto 32px;
+  max-width: 180px;
+  height: auto;
+}
+
+/* Auth Header */
+.miraka-auth-header {
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.miraka-auth-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--miraka-dark-text);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.02em;
+}
+
+.miraka-auth-subtitle {
+  font-size: 14px;
+  color: var(--miraka-light-text);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Form Elements */
+.miraka-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.miraka-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.miraka-form-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--miraka-dark-text);
+  letter-spacing: 0.01em;
+}
+
+.miraka-form-input {
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--miraka-divider);
+  border-radius: 8px;
+  font-size: 15px;
+  color: var(--miraka-dark-text);
+  background: var(--miraka-card-white);
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.miraka-form-input::placeholder {
+  color: #9CA3AF;
+}
+
+.miraka-form-input:focus {
+  outline: none;
+  border-color: var(--miraka-primary);
+  background: var(--miraka-input-focus);
+  box-shadow: 0 0 0 3px rgba(42, 95, 138, 0.1);
+}
+
+.miraka-form-input:disabled {
+  background: #F9FAFB;
+  color: #9CA3AF;
+  cursor: not-allowed;
+}
+
+/* Password Input Wrapper */
+.miraka-password-wrapper {
+  position: relative;
+}
+
+.miraka-password-wrapper .miraka-form-input {
+  padding-right: 48px;
+}
+
+.miraka-password-toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 8px;
+  cursor: pointer;
+  color: var(--miraka-light-text);
+  font-size: 18px;
+  line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.miraka-password-toggle:hover {
+  color: var(--miraka-dark-text);
+}
+
+/* Password Strength */
+.miraka-password-strength {
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.miraka-password-strength.weak {
+  color: var(--miraka-error);
+}
+
+.miraka-password-strength.medium {
+  color: #F59E0B;
+}
+
+.miraka-password-strength.strong {
+  color: var(--miraka-success);
+}
+
+/* Buttons */
+.miraka-btn {
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.miraka-btn-primary {
+  background: var(--miraka-primary);
+  color: white;
+}
+
+.miraka-btn-primary:hover:not(:disabled) {
+  background: var(--miraka-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(42, 95, 138, 0.2);
+}
+
+.miraka-btn-primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.miraka-btn-primary:disabled {
+  background: var(--miraka-primary-disabled);
+  cursor: not-allowed;
+}
+
+.miraka-btn-secondary {
+  background: transparent;
+  color: var(--miraka-primary);
+  border: 1px solid var(--miraka-divider);
+}
+
+.miraka-btn-secondary:hover:not(:disabled) {
+  background: var(--miraka-input-focus);
+  border-color: var(--miraka-primary);
+}
+
+/* Link Buttons */
+.miraka-link-btn {
+  background: none;
+  border: none;
+  color: var(--miraka-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  transition: color 0.2s ease;
+}
+
+.miraka-link-btn:hover {
+  color: var(--miraka-primary-hover);
+  text-decoration: underline;
+}
+
+.miraka-forgot-link {
+  margin-top: 6px;
+  display: block;
+  font-size: 13px;
+  color: var(--miraka-light-text);
+}
+
+.miraka-back-link {
+  background: none;
+  border: none;
+  color: var(--miraka-light-text);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  transition: color 0.2s ease;
+}
+
+.miraka-back-link:hover {
+  color: var(--miraka-dark-text);
+}
+
+/* Messages */
+.miraka-message {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.miraka-message-error {
+  background: #FEE2E2;
+  color: var(--miraka-error);
+  border: 1px solid #FCA5A5;
+}
+
+.miraka-message-success {
+  background: var(--miraka-success-bg);
+  color: var(--miraka-success);
+  border: 1px solid #6EE7B7;
+}
+
+/* Loading Spinner */
+.miraka-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Footer */
+.miraka-auth-footer {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--miraka-divider);
+  text-align: center;
+}
+
+.miraka-auth-footer p {
+  font-size: 12px;
+  color: var(--miraka-light-text);
+  margin: 0;
+}
+
+/* Demo Credentials Box */
+.miraka-demo-box {
+  margin-top: 24px;
+  padding: 16px;
+  background: #F9FAFB;
+  border: 1px solid var(--miraka-divider);
+  border-radius: 8px;
+}
+
+.miraka-demo-box h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--miraka-dark-text);
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.miraka-demo-box select {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--miraka-divider);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--miraka-dark-text);
+  background: white;
+  cursor: pointer;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .miraka-auth-card {
+    padding: 36px 28px;
+  }
+
+  .miraka-auth-title {
+    font-size: 24px;
+  }
+}

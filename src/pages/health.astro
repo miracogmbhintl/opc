@@ -1,0 +1,15 @@
+---
+// Minimal health check endpoint
+const data = {
+  status: 'ok',
+  timestamp: new Date().toISOString(),
+  message: 'Worker is running'
+};
+
+return new Response(JSON.stringify(data, null, 2), {
+  status: 200,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+---

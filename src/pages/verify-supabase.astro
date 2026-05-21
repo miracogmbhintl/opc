@@ -1,0 +1,206 @@
+---
+import { baseUrl } from '../lib/base-url';
+
+// Simple verification that runs server-side
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+let connectionTest: any = { status: 'pending' };
+
+if (supabaseUrl && supabaseKey) {
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/`, {
+      method: 'GET',
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    connectionTest = {
+      status: response.ok ? 'success' : 'error',
+      statusCode: response.status,
+      statusText: response.statusText,
+      url: supabaseUrl
+    };
+
+    if (!response.ok) {
+      connectionTest.errorText = await response.text();
+    }
+  } catch (error: any) {
+    connectionTest = {
+      status: 'error',
+      error: error.message,
+      url: supabaseUrl
+    };
+  }
+}
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width" />
+  <title>Supabase Verification</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #F2F2F2;
+      padding: 40px 20px;
+      color: #1A1A1A;
+    }
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #FFFFFF;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      text-align: center;
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: #000000;
+    }
+    .status {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 40px;
+    }
+    .status.success {
+      background: #D1FAE5;
+    }
+    .status.error {
+      background: #FEE2E2;
+    }
+    .message {
+      font-size: 18px;
+      margin-bottom: 24px;
+      line-height: 1.6;
+      color: #333333;
+    }
+    .details {
+      background: #FAFAFA;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: left;
+      margin-top: 20px;
+      font-family: monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      border: 1px solid #E5E5E5;
+    }
+    .button {
+      display: inline-block;
+      background: #000000;
+      color: #FFFFFF;
+      padding: 14px 28px;
+      border-radius: 12px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      margin: 8px;
+      transition: background 0.2s ease;
+    }
+    .button:hover {
+      background: #333333;
+    }
+    .button.secondary {
+      background: transparent;
+      color: #000000;
+      border: 2px solid #E5E5E5;
+    }
+    .button.secondary:hover {
+      background: #FAFAFA;
+    }
+    .success-text {
+      color: #059669;
+      font-weight: 600;
+    }
+    .error-text {
+      color: #DC2626;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      {connectionTest.status === 'success' ? (
+        <>
+          <div class="status success">✓</div>
+          <h1>Supabase Connected!</h1>
+          <p class="message">
+            Your Supabase configuration is working correctly. 
+            <span class="success-text">All systems operational.</span>
+          </p>
+          
+          <div style="margin: 32px 0;">
+            <a href={`${baseUrl}/`} class="button">
+              Go to Login Page →
+            </a>
+          </div>
+
+          <div class="details">
+            <strong>Connection Details:</strong><br/>
+            Status: {connectionTest.statusCode} {connectionTest.statusText}<br/>
+            URL: {connectionTest.url}<br/>
+            Test: PASSED ✓
+          </div>
+        </>
+      ) : (
+        <>
+          <div class="status error">✗</div>
+          <h1>Connection Issue</h1>
+          <p class="message">
+            There's a problem with your Supabase configuration.
+            <span class="error-text">Please check the details below.</span>
+          </p>
+
+          <div class="details">
+            <strong>Error Details:</strong><br/>
+            {connectionTest.statusCode && `Status Code: ${connectionTest.statusCode} ${connectionTest.statusText}`}<br/>
+            {connectionTest.error && `Error: ${connectionTest.error}`}<br/>
+            {connectionTest.errorText && `Response: ${connectionTest.errorText}`}<br/>
+            URL: {connectionTest.url || 'NOT SET'}<br/>
+            <br/>
+            <strong>Common Fixes:</strong><br/>
+            1. Check PUBLIC_SUPABASE_URL is correct<br/>
+            2. Check PUBLIC_SUPABASE_ANON_KEY is correct<br/>
+            3. Verify you're using the ANON key (not service role)<br/>
+            4. Restart your dev server after .env changes
+          </div>
+
+          <div style="margin-top: 32px;">
+            <a href={`${baseUrl}/supabase-diagnostic`} class="button">
+              Full Diagnostic →
+            </a>
+            <button onclick="window.location.reload()" class="button secondary">
+              Test Again
+            </button>
+          </div>
+        </>
+      )}
+
+      <div style="margin-top: 40px; padding-top: 24px; border-top: 1px solid #E5E5E5;">
+        <a href={`${baseUrl}/`} class="button secondary">← Back to Home</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

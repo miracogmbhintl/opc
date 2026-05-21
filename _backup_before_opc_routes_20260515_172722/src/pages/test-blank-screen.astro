@@ -1,0 +1,219 @@
+---
+// Minimal test page to diagnose blank screen
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blank Screen Test</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+    
+    .container {
+      text-align: center;
+      max-width: 800px;
+      padding: 40px;
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    
+    h1 {
+      font-size: 48px;
+      margin-bottom: 20px;
+      animation: fadeIn 1s ease-in;
+    }
+    
+    .status {
+      font-size: 20px;
+      margin: 20px 0;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+    }
+    
+    .test-item {
+      margin: 12px 0;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .pass {
+      color: #22C55E;
+      font-weight: bold;
+    }
+    
+    .fail {
+      color: #DC2626;
+      font-weight: bold;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    button {
+      margin: 20px 10px;
+      padding: 14px 28px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background: white;
+      color: #667eea;
+    }
+    
+    button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    
+    #react-test {
+      margin-top: 30px;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔬 Blank Screen Diagnostic</h1>
+    
+    <div class="status">
+      <p>If you can see this page, the Astro server is working! ✅</p>
+    </div>
+    
+    <div id="test-results">
+      <div class="test-item">
+        <span>HTML Rendering:</span>
+        <span class="pass">✅ PASS</span>
+      </div>
+      <div class="test-item">
+        <span>CSS Loading:</span>
+        <span class="pass">✅ PASS</span>
+      </div>
+      <div class="test-item">
+        <span>JavaScript Execution:</span>
+        <span id="js-test" class="fail">⏳ Testing...</span>
+      </div>
+      <div class="test-item">
+        <span>Console Access:</span>
+        <span id="console-test" class="fail">⏳ Testing...</span>
+      </div>
+      <div class="test-item">
+        <span>Fetch API:</span>
+        <span id="fetch-test" class="fail">⏳ Testing...</span>
+      </div>
+      <div class="test-item">
+        <span>LocalStorage:</span>
+        <span id="storage-test" class="fail">⏳ Testing...</span>
+      </div>
+    </div>
+    
+    <div id="react-test">
+      <p style="margin-bottom: 12px;">React Hydration Test:</p>
+      <div id="react-root" style="padding: 20px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;">
+        <span id="react-status" class="fail">⏳ Loading React...</span>
+      </div>
+    </div>
+    
+    <div style="margin-top: 30px;">
+      <button onclick="window.location.href='/emergency-login'">Go to Emergency Login</button>
+      <button onclick="window.location.href='/'">Go to Main App</button>
+      <button onclick="window.location.href='/diagnostic-production'">Production Diagnostic</button>
+    </div>
+    
+    <div style="margin-top: 20px; font-size: 14px; opacity: 0.8;">
+      <p>Current Time: {new Date().toISOString()}</p>
+      <p>Environment: {import.meta.env.MODE}</p>
+    </div>
+  </div>
+  
+  <script>
+    // Test 1: JavaScript Execution
+    document.getElementById('js-test').textContent = '✅ PASS';
+    document.getElementById('js-test').className = 'pass';
+    
+    // Test 2: Console Access
+    try {
+      console.log('✅ Console test passed');
+      document.getElementById('console-test').textContent = '✅ PASS';
+      document.getElementById('console-test').className = 'pass';
+    } catch (e) {
+      document.getElementById('console-test').textContent = '❌ FAIL: ' + e.message;
+    }
+    
+    // Test 3: Fetch API
+    fetch('/api/env-check')
+      .then(response => {
+        document.getElementById('fetch-test').textContent = '✅ PASS';
+        document.getElementById('fetch-test').className = 'pass';
+      })
+      .catch(err => {
+        document.getElementById('fetch-test').textContent = '⚠️ PARTIAL: ' + err.message;
+      });
+    
+    // Test 4: LocalStorage
+    try {
+      localStorage.setItem('test', 'value');
+      const value = localStorage.getItem('test');
+      localStorage.removeItem('test');
+      document.getElementById('storage-test').textContent = '✅ PASS';
+      document.getElementById('storage-test').className = 'pass';
+    } catch (e) {
+      document.getElementById('storage-test').textContent = '❌ FAIL: ' + e.message;
+    }
+  </script>
+  
+  <!-- React Test -->
+  <script type="module">
+    import { createRoot } from 'react-dom/client';
+    import { createElement } from 'react';
+    
+    try {
+      const TestComponent = () => {
+        return createElement('div', { 
+          style: { color: '#22C55E', fontWeight: 'bold' } 
+        }, '✅ React is working!');
+      };
+      
+      const root = createRoot(document.getElementById('react-root'));
+      root.render(createElement(TestComponent));
+      
+      document.getElementById('react-status').textContent = '✅ React Hydration Success';
+      document.getElementById('react-status').className = 'pass';
+      
+      console.log('✅ React test passed');
+    } catch (error) {
+      console.error('❌ React test failed:', error);
+      document.getElementById('react-status').textContent = '❌ FAIL: ' + error.message;
+      document.getElementById('react-status').className = 'fail';
+    }
+  </script>
+</body>
+</html>

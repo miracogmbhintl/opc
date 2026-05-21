@@ -1,0 +1,68 @@
+---
+import Layout from '../layouts/main.astro';
+import SimpleFileUploader from '../components/SimpleFileUploader';
+---
+
+<Layout>
+  <div style="padding: 40px; max-width: 800px; margin: 0 auto;">
+    <h1 style="font-size: 28px; font-weight: 600; margin-bottom: 8px; color: #1A1A1A;">
+      Test File Upload
+    </h1>
+    <p style="font-size: 15px; color: #6B7280; margin-bottom: 32px;">
+      Test the direct file upload functionality
+    </p>
+
+    <div id="uploader-root"></div>
+
+    <div style="margin-top: 32px; padding: 16px; background: #F9FAFB; border-radius: 12px;">
+      <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1A1A1A;">
+        Instructions:
+      </h3>
+      <ol style="font-size: 14px; color: #6B7280; line-height: 1.8;">
+        <li>Make sure you've run the <code>fix-file-upload-rls.sql</code> in Supabase</li>
+        <li>Make sure the <code>project-files</code> storage bucket exists</li>
+        <li>Replace the test project ID below with a real project ID from your database</li>
+        <li>Select a file and click Upload</li>
+        <li>Check the browser console for detailed logs</li>
+        <li>Check your Supabase <code>project_files</code> table for the new record</li>
+        <li>Check your Storage bucket for the uploaded file</li>
+      </ol>
+    </div>
+
+    <div style="margin-top: 24px; padding: 16px; background: #FEF3C7; border: 1px solid #FCD34D; border-radius: 12px;">
+      <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 8px; color: #78350F;">
+        ⚠️ Important
+      </h3>
+      <p style="font-size: 14px; color: #78350F; margin: 0;">
+        Update the projectId in the script below to match a real project in your database!
+      </p>
+    </div>
+  </div>
+
+  <script>
+    import { createRoot } from 'react-dom/client';
+    import { createElement } from 'react';
+    import SimpleFileUploader from '../components/SimpleFileUploader';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const root = document.getElementById('uploader-root');
+      
+      if (root) {
+        const reactRoot = createRoot(root);
+        
+        // ⚠️ REPLACE THIS WITH A REAL PROJECT ID FROM YOUR DATABASE
+        const testProjectId = 'YOUR_PROJECT_ID_HERE';
+        
+        reactRoot.render(
+          createElement(SimpleFileUploader, {
+            projectId: testProjectId,
+            onUploadComplete: () => {
+              console.log('✅ Upload completed successfully!');
+              alert('File uploaded successfully! Check console for details.');
+            }
+          })
+        );
+      }
+    });
+  </script>
+</Layout>

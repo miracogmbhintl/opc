@@ -1,0 +1,31 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import OwnerDashboardHome from '../../components/OwnerDashboardHome';
+import '../../styles/miraka-portal.css';
+import '../../styles/miraka-dashboard.css';
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - Orange Pro Clean</title>
+  <link
+    rel="icon"
+    type="image/png"
+    href="https://cdn.prod.website-files.com/6944470386300e196e5fc347/694ff7f9812baa5c05309365_Orange%20Pro%20Clean%20GmbH%20WEBICON.png"
+  />
+</head>
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    title="Orange Pro Clean Dashboard"
+    requiredRole="owner"
+    currentPath="/miraka-co-portal/owner-dashboard"
+    hideTopBar={true}
+  >
+    <OwnerDashboardHome client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>

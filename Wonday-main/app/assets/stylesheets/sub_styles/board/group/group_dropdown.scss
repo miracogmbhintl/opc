@@ -1,0 +1,83 @@
+// GROUP TITLES
+.gold { @include group-title($color: $gold); }
+.salmon { @include group-title($color: $salmon); }
+.green { @include group-title($color: $green); }
+.blue { @include group-title($color: $blue); }
+.brown { @include group-title($color: $brown); }
+.gray { @include group-title($color: $gray); }
+.indigo { @include group-title($color: $indigo); }
+
+// GROUP OPTIONS BUTTONS
+.gold-btn { @include group-options-btn($color: $gold); }
+.salmon-btn { @include group-options-btn($color: $salmon); }
+.green-btn { @include group-options-btn($color: $green); }
+.blue-btn { @include group-options-btn($color: $blue); }
+.brown-btn { @include group-options-btn($color: $brown); }
+.gray-btn { @include group-options-btn($color: $gray); }
+.indigo-btn { @include group-options-btn($color: $indigo); }
+
+
+.group-options-btn {
+    &:hover {
+        cursor: pointer;
+    }
+}
+
+.group-dropdown {
+    position: absolute;
+    background-color: white;
+    margin-top: 80px;
+    z-index: 500;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+
+    .group-option {
+        padding: 5px;
+        text-align: left;
+        background-color: transparent;
+        border: 1px solid lightgray;
+        width: 100%;
+
+        &:first-child {
+            border-radius: 5px 0 0 0;
+            &:hover {
+                cursor: auto;
+            }
+        }
+
+        &:last-child {
+            border-radius: 0 0 0 5px;
+        }
+
+        &:hover {
+            cursor: pointer;
+            background-color: rgb(241, 241, 241);
+        }
+    }
+
+    .color-change-wrapper {
+        @include flex;
+        position: relative;
+        width: 180px;
+    }
+
+    div.colors-picker {
+        @include flex;
+        position: absolute;
+        margin-left: -1px;
+        padding: 5px;
+        width: 260px;
+        justify-content: space-between;
+        background-color: white;
+        border: 1px solid lightgray;
+        border-radius: 0 3px 3px 0;
+    }
+
+    div.colors-picker-false {
+        position: relative;
+        display: none;
+    }
+}
+
+.group-dropdown-false {
+    display: none;
+}

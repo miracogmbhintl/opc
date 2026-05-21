@@ -1,0 +1,284 @@
+
+---
+// Emergency minimal login page - no React, no complexity
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Login - Miraka & Co</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #F2F2F2;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .container {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    
+    h1 {
+      font-size: 24px;
+      margin-bottom: 24px;
+      text-align: center;
+      color: #1A1A1A;
+    }
+    
+    .form-group {
+      margin-bottom: 18px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #1A1A1A;
+    }
+    
+    input {
+      width: 100%;
+      height: 48px;
+      padding: 0 16px;
+      border: 1.5px solid #E5E5E5;
+      border-radius: 12px;
+      font-size: 15px;
+      transition: border-color 0.2s;
+    }
+    
+    input:focus {
+      outline: none;
+      border-color: #1A1A1A;
+    }
+    
+    button {
+      width: 100%;
+      height: 48px;
+      background: #1A1A1A;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 8px;
+    }
+    
+    button:hover {
+      background: #2A2A2A;
+    }
+    
+    button:disabled {
+      background: #999;
+      cursor: not-allowed;
+    }
+    
+    .error {
+      background: #FEE2E2;
+      border: 1px solid #EF4444;
+      color: #991B1B;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+    
+    .success {
+      background: #D1FAE5;
+      border: 1px solid #10B981;
+      color: #065F46;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+    
+    .logo {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    
+    .logo img {
+      max-width: 180px;
+      height: auto;
+    }
+    
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      background: #F5F5F5;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <img src="https://cdn.prod.website-files.com/68dc2b9c31cb83ac9f84a1af/68e0480bc44f1d28032afb51_LOGO%20MIRAKA%20%26%20CO%20PLAIN%20TEXT.png" alt="Miraka & Co.">
+    </div>
+    
+    <h1>Emergency Login</h1>
+    
+    <div id="message"></div>
+    
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" required placeholder="your@email.com">
+      </div>
+      
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" required placeholder="••••••••">
+      </div>
+      
+      <button type="submit" id="submitBtn">Sign In</button>
+    </form>
+    
+    <div class="status" id="status">
+      Environment check: <span id="envStatus">Checking...</span>
+    </div>
+  </div>
+
+  <script type="module">
+    // Import Supabase
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+    
+    const SUPABASE_URL = 'https://bmyshfmcfpiztllidenr.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJteXNoZm1jZnBpenRsbGlkZW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzYzNDU1NjQsImV4cCI6MjA1MTkyMTU2NH0.nHSAjH4U-qQm50sn2_ELM2P3C7hE1SdO9sMIEjoBwrE';
+    
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+    
+    const messageEl = document.getElementById('message');
+    const statusEl = document.getElementById('envStatus');
+    const form = document.getElementById('loginForm');
+    const submitBtn = document.getElementById('submitBtn');
+    
+    // Check environment
+    async function checkEnv() {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          statusEl.textContent = '❌ Connection failed: ' + error.message;
+          statusEl.style.color = '#DC2626';
+          return;
+        }
+        
+        statusEl.textContent = '✅ Connected to Supabase';
+        statusEl.style.color = '#10B981';
+        
+        // If already logged in
+        if (data?.session) {
+          showMessage('Already logged in! Redirecting...', 'success');
+          setTimeout(() => {
+            window.location.href = '/dashboard';
+          }, 1000);
+        }
+      } catch (err) {
+        statusEl.textContent = '❌ Error: ' + err.message;
+        statusEl.style.color = '#DC2626';
+      }
+    }
+    
+    function showMessage(msg, type = 'error') {
+      messageEl.innerHTML = `<div class="${type}">${msg}</div>`;
+    }
+    
+    // Handle login
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'SIGNING IN...';
+      messageEl.innerHTML = '';
+      
+      try {
+        console.log('Attempting login with:', email);
+        
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+        
+        if (authError) {
+          throw new Error(authError.message);
+        }
+        
+        if (!authData.user) {
+          throw new Error('No user returned');
+        }
+        
+        console.log('User authenticated:', authData.user.id);
+        
+        // Get profile
+        const { data: profile, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('role, name, full_name')
+          .eq('id', authData.user.id)
+          .single();
+        
+        if (profileError) {
+          throw new Error('Profile error: ' + profileError.message);
+        }
+        
+        showMessage('✅ Login successful! Redirecting...', 'success');
+        
+        // Redirect based on role
+        let targetPath = '//';
+        switch (profile.role) {
+          case 'owner':
+            targetPath += 'owner-dashboard';
+            break;
+          case 'admin':
+            targetPath += 'admin-dashboard';
+            break;
+          case 'client':
+            targetPath += 'client-dashboard';
+            break;
+        }
+        
+        console.log('Redirecting to:', targetPath);
+        setTimeout(() => {
+          window.location.href = targetPath;
+        }, 1000);
+        
+      } catch (err) {
+        console.error('Login error:', err);
+        showMessage('❌ ' + err.message, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'SIGN IN';
+      }
+    });
+    
+    // Run check on load
+    checkEnv();
+  </script>
+</body>
+</html>
+

@@ -1,0 +1,190 @@
+// ANIMATIONS
+@keyframes popup {
+    0% { transform: translateY(0px) rotate(100deg); }
+
+    50% { transform: translateY(-2.2rem) rotate(120deg); }
+
+    100% { transform: translateY(0px) rotate(100deg); }
+}
+
+@keyframes getstarted {
+    50% { transform: scale(105%); }
+    65% { transform: scale(101%); }
+    80% { transform: scale(102%); }
+}
+
+// MIXINS
+@mixin modal-bg($background-color: transparent) {
+    position: absolute;
+    z-index: 100;
+    float: left;
+    width: 100vw;
+    height: 100vh;
+    background-color: $background-color;
+}
+
+@mixin text-input() {
+    padding: 5px;
+    margin: 0;
+    border: 1px solid transparent;
+}
+
+@mixin group-title($color: $salmon) {
+
+    input {
+        @include text-input;
+        padding: 0 5px;
+        border-radius: 0;
+        font-size: 1.2rem;
+        color: $color;
+
+        &:hover {
+            border: 1px dashed rgb(169, 169, 169);
+        }
+
+    }
+}
+
+@mixin group-options-btn($color: $salmon) {
+    border-radius: 100%;
+    color: white;
+    height: 1rem;
+    width: 1rem;
+    background-color: $color;
+    border: 1px solid $color;
+    font-size: .8rem;
+    padding: 0;
+
+    &:hover {
+        cursor: pointer;
+        background-color: white;
+        color: $color;
+    }
+
+    &:active {
+        color: white;
+        background-color: $color;
+    }
+}
+
+@mixin roboto-lightweight {
+    font-family: $roboto;
+    font-weight: 300;
+}
+
+@mixin flex($flex-direction: row, $justify-content: space-between) {
+    display: flex;
+    flex-direction: $flex-direction;
+    justify-content: $justify-content;
+}
+
+@mixin signup-title {
+    @include roboto-lightweight;
+    margin-bottom: 10px;
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: #333333;
+}
+
+@mixin signup-subtitle {
+    @include roboto-lightweight;
+    margin-bottom: 30px;
+    color: #585858;
+}
+
+@mixin get-started {
+    background-color: rgb(73, 88, 255);
+    border-radius: 60px;
+    color: white;
+    margin: 0 24px 0 0;
+    text-align: center;
+    vertical-align: middle;
+    min-width: 130px;
+    padding: 11px 5px;
+
+    &:hover {
+        color: rgb(233, 233, 233);
+        background-color: rgb(65, 79, 224);
+    }
+}
+
+@mixin login-btn {
+    height: 3rem;
+    width: 70%;
+    margin: 0 auto;
+    padding: 10px 0;
+    border: none;
+    border-radius: 65px;
+    background-color: $mid-blue;
+    box-shadow: 0 3px 0 $mid-blue;
+    color: white;
+    font-size: 1.2rem;
+
+    &:hover {
+        cursor: pointer;
+        background-color: $mid-blue;
+    }
+}
+
+@mixin signup-btn {
+    @include login-btn();
+    height: 2.5rem;
+    width: 93%;
+    border-radius: 5px;
+    margin-top: 15px;
+    margin-left: 5px;
+    background-color: $deep-blue;
+    box-shadow: none;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+@mixin workspace-sidebar-collapse-transition {
+    transition: width 80ms, padding-left 80ms, border-radius 80ms;
+}
+
+@mixin workspace-sidebar-collapsed-btn-transition {
+    transition: width 300ms, box-shadow 300ms, border-width 300ms;
+    transition-delay: 100ms;
+}
+
+@mixin div-visibility-toggle {
+    transition-delay: 200ms;
+}
+
+@mixin expandSquare {
+    display: block;
+    width: 1.2rem;
+    height: 1.2rem;
+    border-radius: 2px;
+    animation-name: popup;
+    animation-duration: 700ms;
+}
+
+// FONTS
+$roboto: 'Roboto', sans-serif;
+$nunito: 'Nunito', sans-serif;
+$arial: Arial, Helvetica, sans-serif;
+
+
+// COLORS
+$input-border-color: 1px solid rgb(130,130,130);
+
+$gold: rgb(255, 187, 0);
+$salmon: rgb(250, 134, 114);
+$green: rgb(151, 211, 102);
+$blue: rgb(77, 180, 224);
+$brown: rgb(184, 143, 126);
+$gray: rgb(133, 133, 133);
+$indigo: rgb(139, 116, 214);
+
+$pale-gold: rgb(255, 226, 172);
+$pale-salmon: rgb(255, 194, 176);
+$pale-green: rgb(210, 240, 185);
+$pale-blue: rgb(174, 224, 255);
+$pale-brown: rgb(221, 193, 182);
+$pale-gray: rgb(211, 211, 211);
+$pale-indigo: rgb(217, 206, 250);
+
+$mid-blue: rgb(26, 151, 209);
+$deep-blue: rgb(21, 107, 235);

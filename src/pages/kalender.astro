@@ -1,0 +1,46 @@
+---
+import MirakaDashboardShell from '../components/MirakaDashboardShell';
+import OPCCalendarPage from '../components/opc/calendar/OPCCalendarPage';
+
+export const prerender = false;
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kalender - Orange Pro Clean</title>
+  <link
+    rel="icon"
+    type="image/png"
+    href="https://cdn.prod.website-files.com/6944470386300e196e5fc347/694ff7f9812baa5c05309365_Orange%20Pro%20Clean%20GmbH%20WEBICON.png"
+  />
+</head>
+
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    requiredRole={['owner', 'admin', 'dispatch', 'employee']}
+    currentPath="/kalender"
+    fullWidth={true}
+    hideTopBar={true}
+  >
+    <OPCCalendarPage client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
+
+<style>
+  :global(html),
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    font-family: Inter, Helvetica, Arial, sans-serif;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+</style>

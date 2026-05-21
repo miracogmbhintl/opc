@@ -1,0 +1,13 @@
+---
+import Layout from '../../layouts/main.astro';
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import ProjectsResponsiveView from '../../components/ProjectsResponsiveView';
+import { baseUrl } from '../../lib/base-url';
+---
+
+<Layout>
+  <MirakaDashboardShell client:only="react" baseUrl={baseUrl}>
+    <ProjectsResponsiveView client:only="react" baseUrl={baseUrl} />
+  </MirakaDashboardShell>
+</Layout>
+

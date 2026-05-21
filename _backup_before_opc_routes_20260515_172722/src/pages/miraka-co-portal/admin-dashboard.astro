@@ -1,0 +1,25 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import AdminDashboardHome from '../../components/AdminDashboardHome';
+import '../../styles/miraka-portal.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Dashboard - Miraka & Co</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+</head>
+<body>
+  <MirakaDashboardShell 
+    client:only="react"
+    title="Admin Dashboard"
+    requiredRole="admin"
+    currentPath="/miraka-co-portal/admin-dashboard"
+  >
+    <AdminDashboardHome client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>

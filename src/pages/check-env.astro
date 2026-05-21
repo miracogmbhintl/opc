@@ -1,0 +1,54 @@
+---
+// Simple page to check what environment variables are available
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+const supabaseKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+---
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Environment Check</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 40px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    .status {
+      margin: 20px 0;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+    .ok { color: #22c55e; }
+    .error { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <h1>Environment Variables Check</h1>
+  
+  <div class="status">
+    <h2>PUBLIC_SUPABASE_URL</h2>
+    <p class={supabaseUrl ? 'ok' : 'error'}>
+      {supabaseUrl ? `✅ SET: ${supabaseUrl}` : '❌ NOT SET'}
+    </p>
+  </div>
+
+  <div class="status">
+    <h2>PUBLIC_SUPABASE_ANON_KEY</h2>
+    <p class={supabaseKey ? 'ok' : 'error'}>
+      {supabaseKey ? `✅ SET: ${supabaseKey.substring(0, 30)}...` : '❌ NOT SET'}
+    </p>
+  </div>
+
+  <div class="status">
+    <h2>All Environment Variables (Public only)</h2>
+    <pre>{JSON.stringify({
+      PUBLIC_SUPABASE_URL: supabaseUrl || 'NOT SET',
+      PUBLIC_SUPABASE_ANON_KEY: supabaseKey ? supabaseKey.substring(0, 30) + '...' : 'NOT SET',
+      NODE_ENV: import.meta.env.MODE
+    }, null, 2)}</pre>
+  </div>
+</body>
+</html>

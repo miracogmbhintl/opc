@@ -1,0 +1,92 @@
+
+# build output
+dist/
+
+# generated types
+.astro/
+
+# dependencies
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# environment variables
+.env
+.env.production
+.env.local
+
+# macOS-specific files
+.DS_Store
+
+# jetbrains setting folder
+.idea/
+
+# wrangler files
+.wrangler
+.dev.vars*
+
+# system recovery and temporary files
+lost+found/
+tmp/
+
+.env.local
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Wrangler / Cloudflare local generated files
+.wrangler/
+wrangler/.dev.vars
+worker-configuration.d.ts
+worker-configuration.ts
+src/worker-configuration.d.ts
+src/worker-configuration.ts
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Wrangler / Cloudflare local generated files
+.wrangler/
+wrangler/.dev.vars
+worker-configuration.d.ts
+worker-configuration.ts
+src/worker-configuration.d.ts
+src/worker-configuration.ts
+
+# Security cleanup
+_local_security_backups_OUT_OF_GIT/
+_backup_*/
+OPC_AUDIT_*.txt
+opc-google-calendar-files.txt
+fix-*.py
+patch-google-*.py
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Generated Cloudflare types
+worker-configuration.d.ts
+worker-configuration.ts
+src/worker-configuration.d.ts
+src/worker-configuration.ts
+
+# Security removed local legacy files
+_legacy_security_removed/
+.env.local
+.env.local

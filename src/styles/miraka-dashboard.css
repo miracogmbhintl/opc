@@ -1,0 +1,654 @@
+
+:root {
+    --miraka-bg: #F7F7F9;
+    --miraka-text: #111827;
+    --miraka-primary: #2A5F8A;
+    --miraka-focus: #E9F3F8;
+    --miraka-border: #DDDDDD;
+    --miraka-white: #FFFFFF;
+    --miraka-card-bg: #FFFFFF;
+    --miraka-hover: #F3F4F6;
+    --miraka-shadow: rgba(0, 0, 0, .08);
+    --font-primary: "Helvetica Neue", Helvetica, Arial, sans-serif
+}
+
+.miraka-portal {
+    font-family: var(--font-primary);
+    background: var(--miraka-bg);
+    color: var(--miraka-text);
+    min-height: 100vh
+}
+
+.miraka-portal * {
+    box-sizing: border-box
+}
+
+.miraka-login-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--miraka-bg);
+    padding: 20px
+}
+
+.miraka-login-card {
+    background: var(--miraka-white);
+    border-radius: 20px;
+    padding: 48px 40px;
+    width: 100%;
+    max-width: 440px;
+    box-shadow: 0 4px 20px var(--miraka-shadow)
+}
+
+.miraka-login-logo {
+    text-align: center;
+    margin-bottom: 32px
+}
+
+.miraka-login-logo h1 {
+    font-family: var(--font-primary);
+    font-weight: 700;
+    font-size: 28px;
+    color: var(--miraka-text);
+    margin: 0 0 8px;
+    letter-spacing: -.5px
+}
+
+.miraka-login-logo p {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0;
+    font-weight: 400
+}
+
+.miraka-form-group {
+    margin-bottom: 20px
+}
+
+.miraka-form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--miraka-text);
+    margin-bottom: 8px
+}
+
+.miraka-input {
+    width: 100%;
+    height: 48px;
+    padding: 0 16px;
+    border: 1px solid var(--miraka-border);
+    border-radius: 12px;
+    font-size: 15px;
+    font-family: var(--font-primary);
+    color: var(--miraka-text);
+    background: var(--miraka-white);
+    transition: all .2s ease
+}
+
+.miraka-input:focus {
+    outline: none;
+    border-color: var(--miraka-primary);
+    background: var(--miraka-focus);
+    box-shadow: 0 0 0 3px #2a5f8a1a
+}
+
+.miraka-input::placeholder {
+    color: #9ca3af
+}
+
+.miraka-input-error {
+    border-color: #ef4444
+}
+
+.miraka-error-text {
+    font-size: 13px;
+    color: #ef4444;
+    margin-top: 6px;
+    display: block
+}
+
+.miraka-btn-primary {
+    width: 100%;
+    height: 48px;
+    background: var(--miraka-primary);
+    color: var(--miraka-white);
+    border: none;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: var(--font-primary);
+    cursor: pointer;
+    transition: all .2s ease;
+    margin-top: 8px
+}
+
+.miraka-btn-primary:hover {
+    background: #234a6b;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px #2a5f8a4d
+}
+
+.miraka-btn-primary:active {
+    transform: translateY(0)
+}
+
+.miraka-btn-primary:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    transform: none
+}
+
+.miraka-forgot-password {
+    text-align: right;
+    margin-top: 12px
+}
+
+.miraka-forgot-password a {
+    font-size: 14px;
+    color: var(--miraka-primary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: color .2s ease
+}
+
+.miraka-forgot-password a:hover {
+    color: #234a6b;
+    text-decoration: underline
+}
+
+.miraka-dashboard-layout {
+    display: flex;
+    min-height: 100vh;
+    background: var(--miraka-bg)
+}
+
+.miraka-sidebar {
+    width: 260px;
+    background: var(--miraka-white);
+    border-right: 1px solid var(--miraka-border);
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 100
+}
+
+.miraka-sidebar-logo {
+    padding: 24px 20px;
+    border-bottom: 1px solid var(--miraka-border)
+}
+
+.miraka-sidebar-logo h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--miraka-text);
+    margin: 0;
+    letter-spacing: -.5px
+}
+
+.miraka-sidebar-logo p {
+    font-size: 12px;
+    color: #6b7280;
+    margin: 4px 0 0
+}
+
+.miraka-sidebar-nav {
+    flex: 1;
+    padding: 16px 0;
+    overflow-y: auto
+}
+
+.miraka-nav-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 20px;
+    color: #6b7280;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all .2s ease;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    width: 100%;
+    text-align: left
+}
+
+.miraka-nav-item:hover {
+    background: var(--miraka-hover);
+    color: var(--miraka-text)
+}
+
+.miraka-nav-item.active {
+    background: var(--miraka-focus);
+    color: var(--miraka-primary);
+    font-weight: 600;
+    border-right: 3px solid var(--miraka-primary)
+}
+
+.miraka-nav-item svg {
+    width: 18px;
+    height: 18px;
+    margin-right: 12px
+}
+
+.miraka-sidebar-footer {
+    padding: 16px 20px;
+    border-top: 1px solid var(--miraka-border)
+}
+
+.miraka-main-content {
+    flex: 1;
+    margin-left: 260px;
+    display: flex;
+    flex-direction: column
+}
+
+.miraka-topbar {
+    height: 64px;
+    background: var(--miraka-white);
+    border-bottom: 1px solid var(--miraka-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    position: sticky;
+    top: 0;
+    z-index: 90
+}
+
+.miraka-topbar-title h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--miraka-text);
+    margin: 0
+}
+
+.miraka-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px
+}
+
+.miraka-user-menu {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .2s ease
+}
+
+.miraka-user-menu:hover {
+    background: var(--miraka-hover)
+}
+
+.miraka-user-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--miraka-primary);
+    color: var(--miraka-white);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 14px
+}
+
+.miraka-user-info {
+    display: flex;
+    flex-direction: column
+}
+
+.miraka-user-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--miraka-text)
+}
+
+.miraka-user-role {
+    font-size: 12px;
+    color: #6b7280;
+    text-transform: capitalize
+}
+
+.miraka-content-area {
+    flex: 1;
+    padding: 32px;
+    overflow-y: auto
+}
+
+.miraka-card {
+    background: var(--miraka-white);
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 2px 8px var(--miraka-shadow);
+    border: 1px solid var(--miraka-border)
+}
+
+.miraka-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px
+}
+
+.miraka-card-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--miraka-text);
+    margin: 0
+}
+
+.miraka-table-container {
+    overflow-x: auto
+}
+
+.miraka-table {
+    width: 100%;
+    border-collapse: collapse
+}
+
+.miraka-table thead {
+    background: var(--miraka-hover);
+    border-bottom: 2px solid var(--miraka-border)
+}
+
+.miraka-table th {
+    padding: 14px 16px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: .5px
+}
+
+.miraka-table td {
+    padding: 16px;
+    font-size: 14px;
+    color: var(--miraka-text);
+    border-bottom: 1px solid var(--miraka-border)
+}
+
+.miraka-table tbody tr {
+    transition: background .2s ease
+}
+
+.miraka-table tbody tr:hover {
+    background: var(--miraka-hover)
+}
+
+.miraka-btn {
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font-primary);
+    cursor: pointer;
+    transition: all .2s ease;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+}
+
+.miraka-btn-primary {
+    background: var(--miraka-primary);
+    color: var(--miraka-white)
+}
+
+.miraka-btn-primary:hover {
+    background: #234a6b;
+    transform: translateY(-1px)
+}
+
+.miraka-btn-secondary {
+    background: transparent;
+    color: var(--miraka-text);
+    border: 1px solid var(--miraka-border)
+}
+
+.miraka-btn-secondary:hover {
+    background: var(--miraka-hover)
+}
+
+.miraka-btn-ghost {
+    background: transparent;
+    color: var(--miraka-text);
+    border: none
+}
+
+.miraka-btn-ghost:hover {
+    background: var(--miraka-hover)
+}
+
+.miraka-btn-danger {
+    background: #ef4444;
+    color: var(--miraka-white)
+}
+
+.miraka-btn-danger:hover {
+    background: #dc2626
+}
+
+.miraka-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: #00000080;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px
+}
+
+.miraka-modal {
+    background: var(--miraka-white);
+    border-radius: 20px;
+    padding: 32px;
+    width: 100%;
+    max-width: 520px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px #0000004d
+}
+
+.miraka-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px
+}
+
+.miraka-modal-header h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--miraka-text);
+    margin: 0
+}
+
+.miraka-modal-close {
+    background: transparent;
+    border: none;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center
+}
+
+.miraka-modal-close:hover {
+    color: var(--miraka-text)
+}
+
+.miraka-modal-footer {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 24px
+}
+
+.miraka-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px
+}
+
+.miraka-badge-success {
+    background: #d1fae5;
+    color: #065f46
+}
+
+.miraka-badge-warning {
+    background: #fef3c7;
+    color: #92400e
+}
+
+.miraka-badge-danger {
+    background: #fee2e2;
+    color: #991b1b
+}
+
+.miraka-badge-info {
+    background: var(--miraka-focus);
+    color: var(--miraka-primary)
+}
+
+.miraka-loader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px
+}
+
+.miraka-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--miraka-border);
+    border-top-color: var(--miraka-primary);
+    border-radius: 50%;
+    animation: miraka-spin .8s linear infinite
+}
+
+@keyframes miraka-spin {
+    to {
+        transform: rotate(360deg)
+    }
+}
+
+@media (max-width: 768px) {
+    .miraka-sidebar {
+        transform: translateX(-100%);
+        transition: transform .3s ease
+    }
+
+    .miraka-sidebar.open {
+        transform: translateX(0)
+    }
+
+    .miraka-main-content {
+        margin-left: 0
+    }
+
+    .miraka-content-area {
+        padding: 20px
+    }
+
+    .miraka-topbar {
+        padding: 0 16px
+    }
+}
+
+.miraka-password-strength {
+    margin-top: 8px;
+    display: flex;
+    gap: 4px
+}
+
+.miraka-strength-bar {
+    height: 4px;
+    flex: 1;
+    background: var(--miraka-border);
+    border-radius: 2px;
+    transition: background .3s ease
+}
+
+.miraka-strength-bar.active {
+    background: var(--miraka-primary)
+}
+
+.miraka-strength-bar.weak {
+    background: #ef4444
+}
+
+.miraka-strength-bar.medium {
+    background: #f59e0b
+}
+
+.miraka-strength-bar.strong {
+    background: #10b981
+}
+
+.miraka-strength-text {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 4px
+}
+
+.miraka-success-state {
+    text-align: center;
+    padding: 40px
+}
+
+.miraka-success-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 16px;
+    background: #d1fae5;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #059669
+}
+
+.miraka-success-state h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--miraka-text);
+    margin: 0 0 8px
+}
+
+.miraka-success-state p {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0
+}
+
+/* Settings Cards Grid - Responsive */
+@media (max-width: 1024px) {
+  .stats-cards-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .stats-cards-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+

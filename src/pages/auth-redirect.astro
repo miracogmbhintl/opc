@@ -1,0 +1,26 @@
+---
+import AuthRedirectHandler from '../components/AuthRedirectHandler';
+import '../styles/global.css';
+import '../styles/miraka-unified.css';
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Laden - Orange Pro Clean</title>
+  <link rel="icon" type="image/png" href="https://cdn.prod.website-files.com/6944470386300e196e5fc347/694ff7f9812baa5c05309365_Orange%20Pro%20Clean%20GmbH%20WEBICON.png" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Helvetica Neue', sans-serif;
+      background: #F2F2F2;
+    }
+  </style>
+</head>
+<body>
+  <AuthRedirectHandler client:only="react" />
+</body>
+</html>

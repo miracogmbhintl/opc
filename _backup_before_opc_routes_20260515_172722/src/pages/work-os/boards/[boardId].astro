@@ -1,0 +1,24 @@
+---
+import MainLayout from '../../../layouts/main.astro';
+import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
+import BoardView from '../../../components/work-os/BoardView';
+import EnsureAuthCookies from '../../../components/work-os/EnsureAuthCookies';
+
+const { boardId } = Astro.params;
+---
+
+<MainLayout>
+  <MirakaDashboardShell 
+    client:only="react"
+    currentPath="work-os"
+    hideTopBar={true}
+    fullWidth={true}
+  >
+    <EnsureAuthCookies client:only="react">
+      <BoardView client:only="react" boardId={boardId || ''} />
+    </EnsureAuthCookies>
+  </MirakaDashboardShell>
+</MainLayout>
+
+
+

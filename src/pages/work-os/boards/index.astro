@@ -1,0 +1,23 @@
+---
+import MainLayout from '../../../layouts/main.astro';
+import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
+import BoardsPageContainer from '../../../components/work-os/BoardsPageContainer';
+import EnsureAuthCookies from '../../../components/work-os/EnsureAuthCookies';
+---
+
+<MainLayout>
+  <MirakaDashboardShell 
+    client:only="react"
+    currentPath="work-os"
+    hideTopBar={true}
+    fullWidth={true}
+  >
+    <EnsureAuthCookies client:only="react">
+      <BoardsPageContainer client:only="react" />
+    </EnsureAuthCookies>
+  </MirakaDashboardShell>
+</MainLayout>
+
+
+
+

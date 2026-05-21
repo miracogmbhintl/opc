@@ -1,0 +1,11 @@
+---
+import MainLayout from '../../layouts/main.astro';
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import ProjectChatPage from '../../components/ProjectChatPage';
+---
+
+<MainLayout>
+  <MirakaDashboardShell client:only="react">
+    <ProjectChatPage client:only="react" />
+  </MirakaDashboardShell>
+</MainLayout>

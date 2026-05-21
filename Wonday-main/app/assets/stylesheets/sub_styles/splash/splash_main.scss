@@ -1,0 +1,259 @@
+// NAV_HEADER
+.splash-nav-btns {
+    padding: 10px;
+    position: sticky;
+}
+
+#logo, #networking-btns, #networking-btns li a, #login-btn, #get-started-btn {
+    font-family: $roboto;
+    text-decoration: none;
+    color: rgb(34, 34, 34);
+    font-size: 1.1rem;
+    font-weight: 300;
+    margin: 8px 15px;
+
+    &:hover {
+        color: rgb(73, 88, 255);
+    }
+}
+
+.splash-nav-btns {
+    @include flex;
+    position: sticky;
+    height: 70px;
+    width: 100%;
+}
+
+.left-side-splash-btns, .right-side-splash-btns {
+    @include flex;
+}
+
+.left-side-splash-btns {
+    margin-left: 5px;
+}
+
+#networking-btns {
+    @include flex;
+    align-items: center;
+    min-width: 38vw;
+    margin-left: 36px;
+}
+
+.right-side-splash-btns {
+    width: 20%;
+    align-self: flex-end;
+    align-items: center;
+    height: 100%;
+}
+
+#get-started-btn {
+    @include get-started();
+}
+
+#get-started-text {
+    font-size: 1rem;
+}
+
+#logo {
+    font-size: 1.8rem;
+    font-weight: 700;
+    font-family: $nunito;
+    color: rgb(56, 56, 56);
+
+    &:hover {
+        color: rgb(41, 41, 41);
+    }
+}
+
+#logo-com {
+    font-size: 1.1rem;
+    font-family: $nunito;
+    color: rgb(56, 56, 56);
+}
+
+#w-logo {
+    height: 1.2rem;
+    margin-top: -5px;
+    margin-right: 10px;
+}
+
+
+// MAIN CONTENT
+.yellow-banner {
+    display: block;
+    width: 100%;
+    height: 70px;
+    background-color: rgb(219, 252, 130);
+    text-align: center;
+    padding: 25px 0;
+
+    p {
+        font-size: 1.2rem;
+        @include roboto-lightweight;
+        
+        span {
+            @include roboto-lightweight;
+            font-weight: 700;
+        }
+    }
+}
+
+
+.splash-main {
+    display: block;
+    height: calc(100vh - 70px - 70px);
+    text-align: center;
+    
+    h1 {
+        padding-top: 2rem;
+        padding-bottom: 10px;
+        font-size: 4rem;
+        font-weight: 700;
+        color: #333333;
+    }
+
+    p {
+        @include roboto-lightweight;
+        margin-top: 1rem;
+        font-size: 1.5rem;
+    }
+
+    .splash-use-cases {
+        @include flex($justify-content: space-around);
+        width: 80%;
+        margin: 0 auto;
+
+        label {
+            margin: .5rem 0;
+            padding: .7rem 1rem .6rem 1rem;
+            border-radius: 2rem;
+            background-color: rgb(243, 243, 243);
+
+            &:hover { cursor: pointer; }
+        }
+
+        .my-checkbox {
+            display: inline-block;
+            width: 1.2rem;
+            height: 1.2rem;
+            margin-right: .3rem;
+            margin-top: -.2rem;
+            padding: .05rem;
+            border: 1px solid black;
+            border-radius: 2px;
+            background-color: white;
+
+            &:hover { cursor: pointer; }
+        }
+
+        .checked-label { background-color: rgb(219, 239, 255); }
+
+        #indigo-checkbox { border: 1px solid $indigo; }
+        .indigo-checked-box { background-color: $indigo; color: white }
+
+        #green-checkbox { border: 1px solid $green; }
+        .green-checked-box { background-color: $green; color: white }
+
+        #pink-checkbox { border: 1px solid rgb(255, 105, 130); }
+        .pink-checked-box { background-color: rgb(255, 105, 130); color: white }
+
+        #salmon-checkbox { border: 1px solid $salmon; }
+        .salmon-checked-box { background-color: $salmon; color: white }
+
+        #blue-checkbox { border: 1px solid $blue; }
+        .blue-checked-box { background-color: $blue; color: white }
+
+        #tangerine-checkbox { border: 1px solid rgb(255, 177, 32); }
+        .tangerine-checked-box { background-color: rgb(255, 177, 32); color: white }
+
+        #red-checkbox { border: 1px solid rgb(224, 70, 59); }
+        .red-checked-box { background-color: rgb(223, 96, 87); color: white }
+
+        #teal-checkbox { border: 1px solid rgb(92, 184, 184); }
+        .teal-checked-box { background-color: rgb(92, 184, 184); color: white }
+
+        #purple-checkbox { border: 1px solid rgb(173, 134, 199); }
+        .purple-checked-box { background-color: rgb(173, 134, 199); color: white }
+
+        #darkgreen-checkbox { border: 1px solid rgb(87, 179, 133); }
+        .darkgreen-checked-box { background-color: rgb(87, 179, 133); color: white }
+    }
+
+    .splash-use-cases-top { margin-top: 1.8rem; }
+
+    .splash-use-cases-bottom { width: 68%; }
+
+    #get-started-btn-bigger {
+        @include get-started();
+        display: block;
+        position: relative;
+        z-index: 200;
+        width: 240px;
+        padding: 14px 0;
+        height: 50px;
+        margin: 2rem auto;
+        font-size: 1.2rem;
+        text-decoration: none;
+    }
+
+    .get-started-animated {
+        animation-name: getstarted;
+        animation-delay: 700ms;
+        animation-duration: 300ms;
+    }
+}
+
+#animated-square {
+    margin: 0 auto;
+    margin-top: -4rem;
+}
+
+.indigo-sq-color {
+    @include expandSquare;
+    background-color: $indigo;
+}
+
+.green-sq-color {
+    @include expandSquare;
+    background-color: $green;
+}
+
+.pink-sq-color {
+    @include expandSquare;
+    background-color: rgb(255, 105, 130);
+}
+
+.salmon-sq-color {
+    @include expandSquare;
+    background-color: $salmon;
+}
+
+.blue-sq-color {
+    @include expandSquare;
+    background-color: $blue;
+}
+
+.tangerine-sq-color {
+    @include expandSquare;
+    background-color: rgb(255, 177, 32);
+}
+
+.red-sq-color {
+    @include expandSquare;
+    background-color: rgb(223, 96, 87);
+}
+
+.teal-sq-color {
+    @include expandSquare;
+    background-color: rgb(92, 184, 184);
+}
+
+.purple-sq-color {
+    @include expandSquare;
+    background-color: rgb(173, 134, 199);
+}
+
+.darkgreen-sq-color {
+    @include expandSquare;
+    background-color: rgb(87, 179, 133);
+}

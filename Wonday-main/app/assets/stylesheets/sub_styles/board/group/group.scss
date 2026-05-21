@@ -1,0 +1,218 @@
+.group-container {
+    margin: 28px 0;
+    width: 99%;
+    min-width: 600px;
+}
+
+.group-header {
+    @include flex;
+    justify-content: flex-start;
+    align-items: center;
+    position: relative;
+}
+
+.group-upper {
+    @include flex;
+    width: 100%;
+}
+
+.group-left {
+    width: 50%;
+}
+
+.group-right {
+    display: block;
+    width: 50%;
+    margin: 0;
+    padding-top: 15px; 
+}
+
+.group-right-header {
+    @include flex;
+    position: relative;
+
+    h2 {
+        flex: 1;
+        border: 1px solid transparent;
+        text-transform: capitalize;
+        text-align: center;
+        padding: 5px;
+        margin-bottom: 11px;
+        
+        &:hover {
+            cursor: default;
+        }
+    }
+}
+
+.toggle-choose-column {
+    width: 1rem;
+
+    i {
+        margin-top: .4rem;
+
+        &:hover {
+            cursor: pointer;
+            color: $deep-blue;
+        }
+
+        &:active { opacity: 1; }
+    }
+}
+
+.choose-columns-true {
+    @include flex;
+    position: absolute;
+    width: 90%;
+    z-index: 500;
+    background-color: white;
+    border-radius: 3px;
+    box-shadow: 0 0 1.1rem rgba(110, 110, 110, 0.2);
+}
+
+.remove-columns, .add-columns {
+    width: 50%;
+    padding: .5rem;
+
+    h4 { font-weight: 700; }
+    p {
+        margin-top: .2rem;
+        padding: .2rem;
+        border-radius: 5px;
+
+        &:hover {
+            cursor: pointer;
+            background-color: rgb(238, 238, 238);
+            color: $deep-blue;
+        }
+    }
+}
+
+.remove-columns { border-right: 1px solid rgb(231, 231, 231); }
+
+.group-right-main {
+    position: static;
+    display: block;
+    width: 100%;
+}
+
+.tasks-list {
+    width: 100%;
+    margin: 0 0 0 30px;
+    padding: 0;
+
+    .task-title-container {
+        @include flex;
+        overflow: hidden;
+        padding: 0;
+        margin: 0 0 1px 0;
+        background-color: rgb(245, 245, 245);
+        border-bottom: 1px solid lightgray;
+
+        &:last-child {
+            border: none
+        }
+
+        input {
+            width: calc(100% - 42px);
+            margin: 0;
+            color: black;
+            font-size: .9rem;
+            background-color: transparent;
+
+            &:hover {
+                color: rgb(65, 130, 209);
+            }
+        }
+    }
+}
+
+.tasks-list i {
+    font-size: 1rem;
+    width: 18px;
+    padding-left: 18px;
+    height: calc(2rem + 2px);
+    overflow: hidden;
+
+    &:hover {
+        cursor: pointer;
+        opacity: .8;
+        width: calc(2rem + 2px);
+        padding: .6rem;
+    }
+
+    &:active {
+        opacity: 1;
+    }
+}
+
+i.i-gold {color: $gold; background-color: $pale-gold; }
+i.i-salmon {color: $salmon; background-color: $pale-salmon;}
+i.i-green {color: $green; background-color: $pale-green; }
+i.i-blue {color: $blue; background-color: $pale-blue; }
+i.i-brown {color: $brown; background-color: $pale-brown; }
+i.i-gray {color: $gray; background-color: $pale-gray; }
+i.i-indigo {color: $indigo; background-color: $pale-indigo; }
+
+.add-task-container {
+    @include flex;
+    margin-left: calc(2rem - 2px);
+    padding: 0;
+    border: 1px solid lightgray;
+
+    .add-color {
+        margin-top: 1px;
+        width: 2rem; 
+        height: 2rem; 
+    }
+    .add-color-gold {background-color: $pale-gold; }
+    .add-color-salmon {background-color: $pale-salmon; }
+    .add-color-green {background-color: $pale-green; }
+    .add-color-blue {background-color: $pale-blue; }
+    .add-color-brown {background-color: $pale-brown; }
+    .add-color-gray {background-color: $pale-gray; }
+    .add-color-indigo {background-color: $pale-indigo; }
+
+    form {
+        @include flex;
+        width: calc(100% - 2rem - 2px);
+        margin: 0;
+        justify-content: space-between;
+        overflow: hidden;
+
+        input {
+            margin: 0;
+            width: calc(100% - 60px);
+            padding: 0 0 0 5px;
+            font-size: .9rem;
+            color: black;
+        }
+
+        button {
+            margin: 0;
+            height: 34px;
+            width: 50px;
+            border: none;
+            text-align: center;
+            background-color: rgb(42, 106, 255);
+            color: white;
+
+            &:hover {
+                cursor: pointer;
+            }
+        }
+    }
+}
+
+#change-task-title {
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+.task-input {
+    width: 255px;
+    min-width: 0;
+    overflow: hidden;
+}

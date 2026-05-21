@@ -1,0 +1,15 @@
+---
+import Layout from '../layouts/main.astro';
+import ClientDetail from '../components/ClientDetail';
+import { baseUrl } from '../lib/base-url';
+
+// Use a test client ID - replace with a real one from your database
+const testClientId = '00000000-0000-0000-0000-000000000000'; // Replace with real ID
+---
+
+<Layout>
+  <div style="padding: 40px; max-width: 1400px; margin: 0 auto;">
+    <h1 style="margin-bottom: 24px;">Direct Client Detail Test (No Dashboard Shell)</h1>
+    <ClientDetail client:only="react" clientId={testClientId} baseUrl={baseUrl} />
+  </div>
+</Layout>

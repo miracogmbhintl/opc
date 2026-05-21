@@ -1,0 +1,27 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import TicketsPageWrapper from '../../components/TicketsPageWrapper';
+import '../../styles/miraka-portal.css';
+import '../../styles/miraka-dashboard.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Support Tickets - Miraka & Co</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+</head>
+<body>
+  <MirakaDashboardShell 
+    client:only="react"
+    requiredRole={['owner', 'admin', 'client']}
+    currentPath="/miraka-co-portal/tickets"
+    fullWidth={true}
+  >
+    <TicketsPageWrapper client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
+

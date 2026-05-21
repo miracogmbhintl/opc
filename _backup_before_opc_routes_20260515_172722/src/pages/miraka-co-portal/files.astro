@@ -1,0 +1,28 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import FilesManager from '../../components/FilesManager';
+import '../../styles/miraka-portal.css';
+---
+
+<!DOCTYPE html>
+<html lang="en" style="height: 100vh; overflow: hidden; margin: 0; padding: 0;">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Files - Miraka & Co</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+</head>
+<body style="height: 100vh; overflow: hidden; margin: 0; padding: 0;">
+  <MirakaDashboardShell 
+    client:only="react"
+    requiredRole={["owner", "admin", "client"]}
+    currentPath="/miraka-co-portal/files"
+  >
+    <FilesManager client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
+
+
+
+

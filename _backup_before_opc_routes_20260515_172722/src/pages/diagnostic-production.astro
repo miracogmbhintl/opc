@@ -1,0 +1,190 @@
+---
+// Production Diagnostic Page - Server-Side Only
+const runtime = Astro.locals.runtime;
+
+const diagnostics = {
+  timestamp: new Date().toISOString(),
+  environment: {
+    hasRuntime: !!runtime,
+    hasEnv: !!runtime?.env,
+    nodeEnv: import.meta.env.MODE,
+    isProd: import.meta.env.PROD,
+    isDev: import.meta.env.DEV,
+  },
+  supabase: {
+    publicUrl: runtime?.env?.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL || 'NOT SET',
+    publicAnonKey: runtime?.env?.PUBLIC_SUPABASE_ANON_KEY ? '✅ SET (hidden)' : '❌ NOT SET',
+    serviceRoleKey: runtime?.env?.SUPABASE_SERVICE_ROLE_KEY ? '✅ SET (hidden)' : '❌ NOT SET',
+  },
+  google: {
+    apiKey: runtime?.env?.GOOGLE_API_KEY ? '✅ SET (hidden)' : '❌ NOT SET',
+  },
+  webflow: {
+    apiHost: runtime?.env?.WEBFLOW_API_HOST || import.meta.env.WEBFLOW_API_HOST || 'NOT SET',
+    siteToken: runtime?.env?.WEBFLOW_SITE_API_TOKEN ? '✅ SET (hidden)' : '❌ NOT SET',
+    cmsToken: runtime?.env?.WEBFLOW_CMS_SITE_API_TOKEN ? '✅ SET (hidden)' : '❌ NOT SET',
+  },
+  kvNamespace: {
+    session: !!runtime?.env?.SESSION,
+  }
+};
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Production Diagnostic</title>
+  <style>
+    body {
+      font-family: 'Monaco', 'Courier New', monospace;
+      background: #1A1A1A;
+      color: #F2F2F2;
+      padding: 40px;
+      line-height: 1.6;
+      margin: 0;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 {
+      color: #F37021;
+      margin-bottom: 30px;
+      font-size: 32px;
+    }
+    h2 {
+      color: #FFA07A;
+      margin-top: 30px;
+      margin-bottom: 15px;
+      font-size: 20px;
+      border-bottom: 1px solid #444;
+      padding-bottom: 8px;
+    }
+    pre {
+      background: #2A2A2A;
+      padding: 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      border-left: 4px solid #F37021;
+    }
+    .status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-left: 8px;
+    }
+    .status.ok {
+      background: #22C55E;
+      color: #000;
+    }
+    .status.error {
+      background: #DC2626;
+      color: #FFF;
+    }
+    .key-value {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      gap: 16px;
+      margin: 8px 0;
+      padding: 12px;
+      background: #2A2A2A;
+      border-radius: 6px;
+    }
+    .key {
+      color: #FFA07A;
+      font-weight: 600;
+    }
+    .value {
+      color: #F2F2F2;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Production Diagnostic</h1>
+    
+    <div class="key-value">
+      <div class="key">Diagnostic Time:</div>
+      <div class="value">{diagnostics.timestamp}</div>
+    </div>
+
+    <h2>Environment</h2>
+    <div class="key-value">
+      <div class="key">Runtime Available:</div>
+      <div class="value">{diagnostics.environment.hasRuntime ? '✅ Yes' : '❌ No'}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">Runtime.env Available:</div>
+      <div class="value">{diagnostics.environment.hasEnv ? '✅ Yes' : '❌ No'}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">Mode:</div>
+      <div class="value">{diagnostics.environment.nodeEnv}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">Is Production:</div>
+      <div class="value">{diagnostics.environment.isProd ? '✅ Yes' : '⚠️ No'}</div>
+    </div>
+
+    <h2>Supabase Configuration</h2>
+    <div class="key-value">
+      <div class="key">PUBLIC_SUPABASE_URL:</div>
+      <div class="value">{diagnostics.supabase.publicUrl}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">PUBLIC_SUPABASE_ANON_KEY:</div>
+      <div class="value">{diagnostics.supabase.publicAnonKey}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">SUPABASE_SERVICE_ROLE_KEY:</div>
+      <div class="value">{diagnostics.supabase.serviceRoleKey}</div>
+    </div>
+
+    <h2>Google API Configuration</h2>
+    <div class="key-value">
+      <div class="key">GOOGLE_API_KEY:</div>
+      <div class="value">{diagnostics.google.apiKey}</div>
+    </div>
+
+    <h2>Webflow Configuration</h2>
+    <div class="key-value">
+      <div class="key">WEBFLOW_API_HOST:</div>
+      <div class="value">{diagnostics.webflow.apiHost}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">WEBFLOW_SITE_API_TOKEN:</div>
+      <div class="value">{diagnostics.webflow.siteToken}</div>
+    </div>
+    <div class="key-value">
+      <div class="key">WEBFLOW_CMS_SITE_API_TOKEN:</div>
+      <div class="value">{diagnostics.webflow.cmsToken}</div>
+    </div>
+
+    <h2>KV Namespace (Sessions)</h2>
+    <div class="key-value">
+      <div class="key">SESSION KV Binding:</div>
+      <div class="value">{diagnostics.kvNamespace.session ? '✅ Connected' : '❌ Not Connected'}</div>
+    </div>
+
+    <h2>Full Diagnostic JSON</h2>
+    <pre>{JSON.stringify(diagnostics, null, 2)}</pre>
+
+    <h2>Next Steps</h2>
+    <div style="background: #2A2A2A; padding: 20px; border-radius: 8px; margin-top: 20px;">
+      <p style="margin: 0 0 12px 0; color: #F37021; font-weight: 600;">If you see ❌ NOT SET for any variables:</p>
+      <ol style="margin: 8px 0; padding-left: 24px;">
+        <li>Go to Cloudflare Dashboard</li>
+        <li>Navigate to Workers & Pages → Your Site</li>
+        <li>Go to Settings → Environment Variables</li>
+        <li>Add missing variables under "Production" environment</li>
+        <li>Redeploy your site</li>
+      </ol>
+    </div>
+  </div>
+</body>
+</html>

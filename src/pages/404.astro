@@ -1,0 +1,70 @@
+
+
+---
+import Layout from '../layouts/main.astro';
+import { NotFound } from '../site-components/NotFound';
+import { DevLinkProvider } from '../site-components/DevLinkProvider';
+import '../site-components/global.css';
+---
+
+<Layout>
+  <div id="not-found-root" style="min-height: 100vh; width: 100%; display: flex; align-items: center; justify-content: center;"></div>
+
+  <script>
+    import { createRoot } from 'react-dom/client';
+    import { createElement } from 'react';
+    import { DevLinkProvider } from '../site-components/DevLinkProvider';
+    import { NotFound } from '../site-components/NotFound';
+    import '../site-components/global.css';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const root = document.getElementById('not-found-root');
+      
+      if (root) {
+        const rootInstance = createRoot(root);
+        rootInstance.render(
+          createElement(DevLinkProvider, null,
+            createElement(NotFound)
+          )
+        );
+      }
+    });
+  </script>
+</Layout>
+
+<style is:global>
+  /* Ensure 404 page takes full height and centers content */
+  #not-found-root {
+    min-height: 100vh;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+  }
+
+  /* Ensure the utility page wrap from Webflow is centered */
+  .utility-page-wrap {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+
+  .utility-page-content {
+    text-align: center;
+    max-width: 600px;
+    width: 100%;
+  }
+
+  /* Ensure body doesn't hide overflow */
+  body:has(#not-found-root) {
+    overflow: visible !important;
+    min-height: 100vh;
+  }
+</style>
+
+

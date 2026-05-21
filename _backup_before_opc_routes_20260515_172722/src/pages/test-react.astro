@@ -1,0 +1,40 @@
+---
+import TestComponent from '../components/TestComponent';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React Test</title>
+  
+  <script is:inline>
+    console.log('🧪 Test page loading...');
+    
+    window.addEventListener('error', function(e) {
+      console.error('❌ Error:', e.error || e.message);
+      document.body.innerHTML += `
+        <div style="position: fixed; top: 20px; right: 20px; background: #fee; border: 2px solid #c00; padding: 20px; border-radius: 8px; max-width: 400px; z-index: 9999;">
+          <strong style="color: #c00;">ERROR:</strong><br>
+          ${e.message}<br>
+          <small>${e.filename || ''}</small>
+        </div>
+      `;
+    });
+  </script>
+</head>
+<body style="margin: 0; padding: 0; background: #F2F2F2;">
+  <TestComponent client:only="react" />
+  
+  <script is:inline>
+    console.log('✓ Test page HTML loaded');
+    
+    setTimeout(() => {
+      console.log('🔍 Checking for React...');
+      const hasReact = document.querySelector('[data-reactroot], [data-react-root]');
+      console.log('React found:', !!hasReact);
+    }, 1000);
+  </script>
+</body>
+</html>

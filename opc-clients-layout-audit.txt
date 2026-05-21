@@ -1,0 +1,5266 @@
+===== ROUTES =====
+--- src/pages/kunden.astro ---
+---
+import ClientsManagement from '../components/ClientsManagement';
+import '../styles/miraka-portal.css';
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kunden - Orange Pro Clean</title>
+  <link
+    rel="icon"
+    type="image/png"
+    href="https://cdn.prod.website-files.com/6944470386300e196e5fc347/694ff7f9812baa5c05309365_Orange%20Pro%20Clean%20GmbH%20WEBICON.png"
+  />
+</head>
+<body>
+  <ClientsManagement client:only="react" />
+</body>
+</html>
+--- src/pages/kunde/[id].astro ---
+---
+import Layout from '../../layouts/main.astro';
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import ClientDetail from '../../components/ClientDetail';
+import { baseUrl } from '../../lib/base-url';
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect(`${baseUrl}/kunden`);
+}
+---
+
+<Layout>
+  <MirakaDashboardShell
+    client:only="react"
+    requiredRole={["owner", "admin"]}
+    currentPath={`/kunde/${id}`}
+    hideTopBar={true}
+  >
+    <ClientDetail client:only="react" clientId={id} baseUrl={baseUrl} />
+  </MirakaDashboardShell>
+</Layout>
+===== CLIENT COMPONENTS =====
+--- src/components/ClientsPage.tsx ---
+import ClientsManagement from './ClientsManagement';
+
+export default function ClientsPage() {
+  return <ClientsManagement />;
+}
+--- src/components/ClientDetail.tsx ---
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { supabase } from '../lib/supabase';
+import {
+  ArrowLeft,
+  Briefcase,
+  Building2,
+  Calendar,
+  Check,
+  ChevronDown,
+  Clock,
+  Edit2,
+  FileText,
+  KeyRound,
+  LockKeyhole,
+  Mail,
+  MapPin,
+  Save,
+  Send,
+  User,
+  X
+} from 'lucide-react';
+
+type ClientStatus = 'active' | 'pending' | 'inactive' | 'archived' | string;
+type EmailAction = 'account_setup' | 'password_reset' | 'magic_link' | 'portal_invite';
+
+interface OpcClientDetail {
+  id: string;
+  contact_id: string | null;
+  status: ClientStatus;
+  client_type: string;
+  billing_name: string;
+  billing_email: string;
+  billing_phone_e164: string;
+  billing_address: string;
+  internal_notes: string;
+  company_name: string;
+  full_name: string;
+  email: string;
+  phone_raw: string;
+  phone_e164: string;
+  lifecycle_stage: string;
+  primary_site_id: string | null;
+  primary_site_name: string;
+  primary_site_type: string;
+  primary_site_address: string;
+  primary_site_postal_code: string;
+  primary_site_city: string;
+  primary_site_country: string;
+  active_site_count: number;
+  onboarding_case_count: number;
+  last_activity_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+interface OpcClientUser {
+  id: string;
+  status: string;
+  email: string | null;
+  can_access_client_portal: boolean;
+  invited_at: string | null;
+  activated_at: string | null;
+  last_login_at: string | null;
+}
+
+interface OpcJob {
+  job_id: string;
+  title: string;
+  status: string;
+  priority?: string | null;
+  planned_start: string | null;
+  planned_end: string | null;
+  service_category?: string | null;
+  estimated_hours?: string | number | null;
+  final_hours?: string | number | null;
+  report_status?: string | null;
+  site_name?: string | null;
+  address_text?: string | null;
+  city?: string | null;
+  job_created_at?: string | null;
+  job_updated_at?: string | null;
+}
+
+interface ClientDetailProps {
+  clientId: string;
+  baseUrl?: string;
+}
+
+const pageFont =
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+
+const BRAND = {
+  text: '#111827',
+  muted: '#6B7280',
+  faint: '#9CA3AF',
+  border: '#E5E7EB',
+  borderStrong: '#D1D5DB',
+  black: '#0F1115',
+  card: '#FFFFFF',
+  green: '#166534',
+  amber: '#92400E',
+  red: '#991B1B'
+};
+
+function valueOrDash(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return '—';
+  return String(value);
+}
+
+function cleanText(value?: string | null) {
+  const text = String(value || '').trim();
+  return text || '';
+}
+
+function parseAddressParts(address?: string | null, postalCode?: string | null, city?: string | null) {
+  const rawAddress = cleanText(address);
+  const rawPostal = cleanText(postalCode);
+  const rawCity = cleanText(city);
+
+  if (!rawAddress) {
+    return {
+      addressText: '',
+      postalCode: rawPostal,
+      city: rawCity,
+    };
+  }
+
+  const match = rawAddress.match(/^(.*?)[,\s]+(\d{4})[,\s]+(.+)$/);
+
+  if (!match) {
+    return {
+      addressText: rawAddress,
+      postalCode: rawPostal,
+      city: rawCity,
+    };
+  }
+
+  return {
+    addressText: cleanText(match[1]),
+    postalCode: rawPostal || cleanText(match[2]),
+    city: rawCity || cleanText(match[3]),
+  };
+}
+
+function buildAddressLine(address?: string | null, postalCode?: string | null, city?: string | null) {
+  const street = cleanText(address);
+  const zip = cleanText(postalCode);
+  const town = cleanText(city);
+  const cityLine = [zip, town].filter(Boolean).join(' ');
+
+  return [street, cityLine].filter(Boolean).join(', ');
+}
+
+const SITE_TYPE_OPTIONS = [
+  { value: 'office', label: 'Büro' },
+  { value: 'residential', label: 'Privat / Wohnung' },
+  { value: 'construction_site', label: 'Baustelle' },
+  { value: 'staircase', label: 'Treppenhaus' },
+  { value: 'commercial', label: 'Gewerbe' },
+  { value: 'mixed', label: 'Gemischt' },
+  { value: 'other', label: 'Sonstiges' },
+];
+
+function normalizeSiteType(value?: string | null) {
+  const normalized = cleanText(value).toLowerCase();
+
+  const labelMap: Record<string, string> = {
+    büro: 'office',
+    buero: 'office',
+    office: 'office',
+    wohnung: 'residential',
+    privat: 'residential',
+    residential: 'residential',
+    baustelle: 'construction_site',
+    construction_site: 'construction_site',
+    treppenhaus: 'staircase',
+    staircase: 'staircase',
+    gewerbe: 'commercial',
+    commercial: 'commercial',
+    gemischt: 'mixed',
+    mixed: 'mixed',
+    sonstiges: 'other',
+    other: 'other',
+  };
+
+  return labelMap[normalized] || 'other';
+}
+
+function getSiteTypeLabel(value?: string | null) {
+  const dbValue = normalizeSiteType(value);
+  return SITE_TYPE_OPTIONS.find((item) => item.value === dbValue)?.label || 'Sonstiges';
+}
+
+function normalizeStatus(status?: string | null) {
+  return String(status || '').trim().toLowerCase();
+}
+
+function isCompletedJob(status?: string | null) {
+  return ['completed', 'report_approved', 'approved', 'sent_to_client'].includes(normalizeStatus(status));
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return new Intl.DateTimeFormat('de-CH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  }).format(date);
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return new Intl.DateTimeFormat('de-CH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function getStatusLabel(status?: string | null) {
+  const map: Record<string, string> = {
+    active: 'Aktiv',
+    pending: 'Offen',
+    inactive: 'Inaktiv',
+    archived: 'Archiviert',
+    scheduled: 'Geplant',
+    assigned: 'Zugewiesen',
+    confirmed: 'Bestätigt',
+    on_site: 'Vor Ort',
+    in_progress: 'In Arbeit',
+    completed: 'Abgeschlossen',
+    report_pending: 'Bericht offen',
+    report_approved: 'Bericht freigegeben',
+    cancelled: 'Storniert',
+    draft: 'Entwurf',
+    approved: 'Freigegeben',
+    sent_to_client: 'An Kunde gesendet',
+    invited: 'Eingeladen'
+  };
+
+  return map[status || ''] || valueOrDash(status);
+}
+
+function getStatusStyle(status?: string | null) {
+  switch (normalizeStatus(status)) {
+    case 'active':
+    case 'completed':
+    case 'approved':
+    case 'report_approved':
+      return { background: '#F0FDF4', color: '#166534', border: '#BBF7D0' };
+    case 'pending':
+    case 'scheduled':
+    case 'draft':
+      return { background: '#F9FAFB', color: '#6B7280', border: '#E5E7EB' };
+    case 'assigned':
+    case 'confirmed':
+    case 'in_progress':
+      return { background: '#ECFEFF', color: '#155E75', border: '#A5F3FC' };
+    case 'report_pending':
+    case 'sent_to_client':
+    case 'invited':
+      return { background: '#FFFBEB', color: '#92400E', border: '#FDE68A' };
+    case 'inactive':
+    case 'archived':
+    case 'cancelled':
+      return { background: '#FEF2F2', color: '#991B1B', border: '#FCA5A5' };
+    default:
+      return { background: '#F9FAFB', color: '#6B7280', border: '#E5E7EB' };
+  }
+}
+
+function normaliseClient(row: any): OpcClientDetail {
+  const addressParts = parseAddressParts(
+    row.primary_site_address || row.address_text,
+    row.primary_site_postal_code || row.postal_code,
+    row.primary_site_city || row.city
+  );
+
+  return {
+    id: row.client_id || row.id,
+    contact_id: row.contact_id || null,
+    status: row.client_status || row.status || 'active',
+    client_type: row.client_type || 'unknown',
+    billing_name: row.billing_name || row.company_name || 'Unbekannt',
+    billing_email: row.billing_email || row.email || '',
+    billing_phone_e164: row.billing_phone_e164 || row.phone_e164 || row.phone_raw || '',
+    billing_address: row.billing_address || row.primary_site_address || row.address_text || '',
+    internal_notes: row.internal_notes || '',
+    company_name: row.company_name || row.billing_name || 'Unbekannt',
+    full_name: row.full_name || row.contact_person || 'Unbekannt',
+    email: row.email || row.billing_email || '',
+    phone_raw: row.phone_raw || row.billing_phone_e164 || '',
+    phone_e164: row.phone_e164 || row.billing_phone_e164 || '',
+    lifecycle_stage: row.lifecycle_stage || 'client',
+    primary_site_id: row.primary_site_id || row.client_site_id || null,
+    primary_site_name: row.primary_site_name || row.site_name || row.company_name || row.billing_name || '',
+    primary_site_type: row.primary_site_type || row.site_type || '',
+    primary_site_address: addressParts.addressText,
+    primary_site_postal_code: addressParts.postalCode,
+    primary_site_city: addressParts.city,
+    primary_site_country: row.country || row.primary_site_country || 'Schweiz',
+    active_site_count: Number(row.active_site_count || 0),
+    onboarding_case_count: Number(row.onboarding_case_count || 0),
+    last_activity_at: row.last_activity_at || null,
+    created_at: row.client_created_at || row.created_at || '',
+    updated_at: row.client_updated_at || row.updated_at || null
+  };
+}
+
+function getInitials(name?: string) {
+  if (!name) return 'K';
+
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
+}
+
+export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailProps) {
+  const [resolvedClientId, setResolvedClientId] = useState(clientId);
+  const [client, setClient] = useState<OpcClientDetail | null>(null);
+  const [editedClient, setEditedClient] = useState<OpcClientDetail | null>(null);
+  const [clientUser, setClientUser] = useState<OpcClientUser | null>(null);
+  const [jobs, setJobs] = useState<OpcJob[]>([]);
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  const [mounted, setMounted] = useState(false);
+  const [loadingClient, setLoadingClient] = useState(true);
+  const [loadingJobs, setLoadingJobs] = useState(true);
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [emailAction, setEmailAction] = useState<EmailAction>('account_setup');
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [grantingPortal, setGrantingPortal] = useState(false);
+  const [sendingThankYouJobId, setSendingThankYouJobId] = useState<string | null>(null);
+
+  const [error, setError] = useState('');
+  const [jobError, setJobError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const appBaseUrl = baseUrl || '';
+  const displayClient = editMode ? editedClient : client;
+  const isAdminOrOwner = userRole === 'owner' || userRole === 'admin';
+  const hasPortalAccess = Boolean(clientUser?.can_access_client_portal);
+
+  const statusStyle = useMemo(
+    () => getStatusStyle(displayClient?.status),
+    [displayClient?.status]
+  );
+
+  const portalStatusStyle = useMemo(
+    () => getStatusStyle(clientUser?.status || (hasPortalAccess ? 'active' : 'inactive')),
+    [clientUser?.status, hasPortalAccess]
+  );
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted || !clientId) return;
+    void loadPageData();
+  }, [mounted, clientId]);
+
+  async function loadPageData() {
+    setError('');
+    setJobError('');
+    setSuccessMessage('');
+    setLoadingClient(true);
+    setLoadingJobs(true);
+
+    try {
+      await checkUserRole();
+      const opcClientId = await resolveClientId(clientId);
+      setResolvedClientId(opcClientId);
+
+      await Promise.all([
+        loadClientData(opcClientId),
+        loadClientJobs(opcClientId),
+        loadClientUser(opcClientId)
+      ]);
+    } finally {
+      setLoadingClient(false);
+      setLoadingJobs(false);
+    }
+  }
+
+  async function checkUserRole() {
+    try {
+      const { data } = await supabase
+        .from('opc_current_user_access')
+        .select('staff_role, is_staff')
+        .maybeSingle();
+
+      if (data?.is_staff && data?.staff_role) {
+        setUserRole(String(data.staff_role));
+      }
+    } catch {
+      setUserRole(null);
+    }
+  }
+
+  async function resolveClientId(inputId: string) {
+    const { data: directClient } = await supabase
+      .from('opc_client_detail_view')
+      .select('client_id')
+      .eq('client_id', inputId)
+      .maybeSingle();
+
+    if (directClient?.client_id) return directClient.client_id;
+
+    const { data: legacyLink } = await supabase
+      .from('opc_legacy_client_links')
+      .select('opc_client_id')
+      .eq('legacy_client_id', inputId)
+      .maybeSingle();
+
+    if (legacyLink?.opc_client_id) return legacyLink.opc_client_id;
+
+    return inputId;
+  }
+
+  async function loadClientData(opcClientId: string) {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('opc_client_detail_view')
+        .select('*')
+        .eq('client_id', opcClientId)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!data) throw new Error('Kunde wurde nicht gefunden.');
+
+      const normalised = normaliseClient(data);
+
+      setClient(normalised);
+      setEditedClient(normalised);
+    } catch (err: any) {
+      setClient(null);
+      setEditedClient(null);
+      setError(err?.message || 'Kundendaten konnten nicht geladen werden.');
+    }
+  }
+
+  async function loadClientUser(opcClientId: string) {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('opc_client_users')
+        .select('id, status, email, can_access_client_portal, invited_at, activated_at, last_login_at')
+        .eq('client_id', opcClientId)
+        .in('status', ['active', 'invited'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+
+      setClientUser((data || null) as OpcClientUser | null);
+    } catch {
+      setClientUser(null);
+    }
+  }
+
+  async function loadClientJobs(opcClientId: string) {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('opc_my_portal_job_feed')
+        .select('*')
+        .eq('client_id', opcClientId)
+        .order('planned_start', { ascending: false })
+        .limit(24);
+
+      if (fetchError) throw fetchError;
+
+      setJobs((data || []) as OpcJob[]);
+    } catch (err: any) {
+      setJobs([]);
+      setJobError(err?.message || 'Einsätze konnten nicht geladen werden.');
+    }
+  }
+
+  async function handleSave() {
+    if (!editedClient || !client) return;
+
+    setSaving(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch(`${appBaseUrl}/api/opc/update-client-details`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          clientId: resolvedClientId,
+          editedClient
+        })
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Änderungen konnten nicht gespeichert werden.');
+      }
+
+      await loadClientData(resolvedClientId);
+
+      setClient((prev) =>
+        prev
+          ? {
+              ...prev,
+              primary_site_id: result.primarySiteId || prev.primary_site_id,
+              contact_id: result.contactId || prev.contact_id,
+              active_site_count: result.primarySiteId
+                ? Math.max(1, prev.active_site_count || 0)
+                : prev.active_site_count
+            }
+          : prev
+      );
+
+      setEditedClient((prev) =>
+        prev
+          ? {
+              ...prev,
+              primary_site_id: result.primarySiteId || prev.primary_site_id,
+              contact_id: result.contactId || prev.contact_id,
+              active_site_count: result.primarySiteId
+                ? Math.max(1, prev.active_site_count || 0)
+                : prev.active_site_count
+            }
+          : prev
+      );
+
+      setEditMode(false);
+      setSuccessMessage('Änderungen wurden gespeichert.');
+    } catch (err: any) {
+      console.error('[ClientDetail] Save failed:', err);
+      setError(err?.message || 'Änderungen konnten nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function grantPortalAccess() {
+    if (!client) return;
+
+    setGrantingPortal(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('/api/opc/grant-client-portal-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: resolvedClientId })
+      });
+
+      const result = (await response.json()) as any;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Portalzugang konnte nicht freigeschaltet werden.');
+      }
+
+      await Promise.all([
+        loadClientUser(resolvedClientId),
+        loadClientData(resolvedClientId)
+      ]);
+
+      setSuccessMessage('Portalzugang wurde freigeschaltet. Der Kunde kann jetzt eingeladen werden.');
+    } catch (err: any) {
+      setError(err?.message || 'Portalzugang konnte nicht freigeschaltet werden.');
+    } finally {
+      setGrantingPortal(false);
+    }
+  }
+
+  async function sendClientEmailAction() {
+    if (!client) return;
+
+    setSendingEmail(true);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('/api/opc/client-email-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId: resolvedClientId,
+          action: emailAction
+        })
+      });
+
+      const result = (await response.json()) as any;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'E-Mail konnte nicht gesendet werden.');
+      }
+
+      await loadClientUser(resolvedClientId);
+
+      const labels: Record<EmailAction, string> = {
+        account_setup: 'Konto-Setup E-Mail wurde gesendet.',
+        password_reset: 'Passwort-zurücksetzen E-Mail wurde gesendet.',
+        magic_link: 'Magic-Link E-Mail wurde gesendet.',
+        portal_invite: 'Portal-Einladung wurde gesendet.'
+      };
+
+      setSuccessMessage(labels[emailAction]);
+    } catch (err: any) {
+      setError(err?.message || 'E-Mail konnte nicht gesendet werden.');
+    } finally {
+      setSendingEmail(false);
+    }
+  }
+
+  async function sendThankYouEmail(job: OpcJob) {
+    setSendingThankYouJobId(job.job_id);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('/api/opc/send-job-thank-you-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: job.job_id })
+      });
+
+      const result = (await response.json()) as any;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Danke-E-Mail konnte nicht gesendet werden.');
+      }
+
+      setSuccessMessage('Danke-E-Mail wurde gesendet.');
+    } catch (err: any) {
+      setError(err?.message || 'Danke-E-Mail konnte nicht gesendet werden.');
+    } finally {
+      setSendingThankYouJobId(null);
+    }
+  }
+
+  function handleCancel() {
+    setEditedClient(client);
+    setEditMode(false);
+    setError('');
+    setSuccessMessage('');
+  }
+
+  function copyBillingAddressToSite() {
+    setEditedClient((prev) => {
+      if (!prev) return prev;
+
+      const parsed = parseAddressParts(prev.billing_address);
+
+      return {
+        ...prev,
+        primary_site_address: parsed.addressText,
+        primary_site_postal_code: parsed.postalCode,
+        primary_site_city: parsed.city,
+        primary_site_country: prev.primary_site_country || 'CH',
+        primary_site_name: prev.primary_site_name || prev.billing_name || prev.company_name || 'Hauptstandort',
+        primary_site_type: prev.primary_site_type || 'other',
+      };
+    });
+  }
+
+  function copySiteAddressToBilling() {
+    setEditedClient((prev) => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        billing_address: buildAddressLine(
+          prev.primary_site_address,
+          prev.primary_site_postal_code,
+          prev.primary_site_city
+        ),
+      };
+    });
+  }
+
+  function updateEditedClient<K extends keyof OpcClientDetail>(key: K, value: OpcClientDetail[K]) {
+    setEditedClient((prev) => {
+      if (!prev) return prev;
+      return { ...prev, [key]: value };
+    });
+  }
+
+  function renderField(
+    label: string,
+    value: string | number | null | undefined,
+    field?: keyof OpcClientDetail,
+    options?: {
+      type?: 'text' | 'email' | 'tel' | 'textarea' | 'select';
+      selectOptions?: { value: string; label: string }[];
+      disabled?: boolean;
+    }
+  ) {
+    const inputType = options?.type || 'text';
+
+    return (
+      <div>
+        <label style={styles.label}>{label}</label>
+
+        {editMode && field && !options?.disabled ? (
+          inputType === 'textarea' ? (
+            <textarea
+              value={String(editedClient?.[field] || '')}
+              onChange={(event) => updateEditedClient(field, event.target.value as any)}
+              rows={4}
+              style={{ ...styles.input, resize: 'vertical', minHeight: '96px' }}
+            />
+          ) : inputType === 'select' ? (
+            <select
+              value={String(editedClient?.[field] || '')}
+              onChange={(event) => updateEditedClient(field, event.target.value as any)}
+              style={styles.input}
+            >
+              {(options?.selectOptions || []).map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type={inputType}
+              value={String(editedClient?.[field] || '')}
+              onChange={(event) => updateEditedClient(field, event.target.value as any)}
+              style={styles.input}
+            />
+          )
+        ) : (
+          <p style={styles.value}>{valueOrDash(value)}</p>
+        )}
+      </div>
+    );
+  }
+
+  if (!mounted) return null;
+
+  if (loadingClient) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.loadingCard}>
+          <div style={styles.spinner} />
+          <p style={styles.mutedText}>Kundendaten werden geladen.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !client) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.errorCard}>
+          <p style={styles.errorText}>{error}</p>
+          <a href={`${appBaseUrl}/kunden`} style={styles.primaryLink}>
+            <ArrowLeft size={16} />
+            Zurück zu Kunden
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (!client || !displayClient) return null;
+
+  return (
+    <div style={styles.page}>
+      <div style={styles.header}>
+        <a href={`${appBaseUrl}/kunden`} style={styles.backLink}>
+          <ArrowLeft size={16} />
+          Zurück zu Kunden
+        </a>
+
+        <div style={styles.headerMain}>
+          <div style={styles.headerIdentity}>
+            <div style={styles.avatar}>
+              {getInitials(displayClient.billing_name || displayClient.company_name)}
+            </div>
+
+            <div style={{ minWidth: 0 }}>
+              <div style={styles.statusRow}>
+                <span style={{ ...styles.statusBadge, ...statusStyle }}>
+                  {getStatusLabel(displayClient.status)}
+                </span>
+
+                <span style={styles.smallMuted}>
+                  Erstellt am {formatDate(displayClient.created_at)}
+                </span>
+              </div>
+
+              <h1 style={styles.title}>
+                {displayClient.billing_name || displayClient.company_name || 'Kundendetails'}
+              </h1>
+
+              <p style={styles.subtitle}>
+                {valueOrDash(displayClient.full_name)} · {valueOrDash(displayClient.email || displayClient.billing_email)}
+              </p>
+            </div>
+          </div>
+
+          <div style={styles.actionRow}>
+            {!editMode ? (
+              isAdminOrOwner && (
+                <button onClick={() => setEditMode(true)} style={styles.darkButton}>
+                  <Edit2 size={16} />
+                  Bearbeiten
+                </button>
+              )
+            ) : (
+              <>
+                <button onClick={handleCancel} disabled={saving} style={styles.lightButton}>
+                  <X size={16} />
+                  Abbrechen
+                </button>
+                <button onClick={handleSave} disabled={saving} style={styles.darkButton}>
+                  <Save size={16} />
+                  {saving ? 'Speichern...' : 'Speichern'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {successMessage && (
+        <div style={styles.successAlert}>
+          <Check size={16} />
+          {successMessage}
+        </div>
+      )}
+
+      {error && (
+        <div style={styles.errorAlert}>
+          {error}
+        </div>
+      )}
+
+      <div style={styles.metricsGrid}>
+        <div style={styles.metricCard}>
+          <Building2 size={18} />
+          <div>
+            <strong>{displayClient.active_site_count}</strong>
+            <span>Standort(e)</span>
+          </div>
+        </div>
+
+        <div style={styles.metricCard}>
+          <Briefcase size={18} />
+          <div>
+            <strong>{jobs.length}</strong>
+            <span>Einsätze</span>
+          </div>
+        </div>
+
+        <div style={styles.metricCard}>
+          <LockKeyhole size={18} />
+          <div>
+            <strong>{hasPortalAccess ? 'Aktiv' : 'Intern'}</strong>
+            <span>Portalzugang</span>
+          </div>
+        </div>
+
+        <div style={styles.metricCard}>
+          <Clock size={18} />
+          <div>
+            <strong>{formatDate(displayClient.last_activity_at)}</strong>
+            <span>Letzte Aktivität</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.topGrid}>
+        <section style={styles.card}>
+          <div style={styles.cardTitleRow}>
+            <Building2 size={18} />
+            <h2 style={styles.cardTitle}>Kundendaten</h2>
+          </div>
+
+          <div style={styles.fieldStack}>
+            {renderField('Rechnungsname', displayClient.billing_name, 'billing_name')}
+            {renderField('Firmenname', displayClient.company_name, 'company_name')}
+            {renderField('Kundentyp', displayClient.client_type, 'client_type', {
+              type: 'select',
+              selectOptions: [
+                { value: 'geschaeftskunden', label: 'Geschäftskunde' },
+                { value: 'privatkunden', label: 'Privatkunde' },
+                { value: 'baukunden', label: 'Baukunde' },
+                { value: 'unknown', label: 'Unbekannt' }
+              ]
+            })}
+            {renderField('Status', getStatusLabel(displayClient.status), 'status', {
+              type: 'select',
+              selectOptions: [
+                { value: 'active', label: 'Aktiv' },
+                { value: 'pending', label: 'Offen' },
+                { value: 'inactive', label: 'Inaktiv' },
+                { value: 'archived', label: 'Archiviert' }
+              ]
+            })}
+          </div>
+        </section>
+
+        <section style={styles.card}>
+          <div style={styles.cardTitleRow}>
+            <User size={18} />
+            <h2 style={styles.cardTitle}>Kontakt</h2>
+          </div>
+
+          <div style={styles.fieldStack}>
+            {renderField('Kontaktperson', displayClient.full_name, 'full_name')}
+            {renderField('E-Mail', displayClient.email || displayClient.billing_email, 'email', { type: 'email' })}
+            {renderField('Telefon', displayClient.phone_e164 || displayClient.phone_raw || displayClient.billing_phone_e164, 'phone_raw', { type: 'tel' })}
+            {renderField('Lifecycle', displayClient.lifecycle_stage, undefined, { disabled: true })}
+          </div>
+        </section>
+
+        <section style={styles.cardWide}>
+          <div style={styles.cardTitleRow}>
+            <LockKeyhole size={18} />
+            <h2 style={styles.cardTitle}>Portal & E-Mail Aktionen</h2>
+          </div>
+
+          <div style={styles.portalStatusBox}>
+            <div>
+              <span style={styles.label}>Portalstatus</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span style={{ ...styles.statusBadge, ...portalStatusStyle }}>
+                  {hasPortalAccess ? getStatusLabel(clientUser?.status || 'active') : 'Kein Portalzugang'}
+                </span>
+
+                {clientUser?.email && (
+                  <span style={styles.smallMuted}>{clientUser.email}</span>
+                )}
+              </div>
+            </div>
+
+            {!hasPortalAccess && isAdminOrOwner && (
+              <button
+                type="button"
+                onClick={grantPortalAccess}
+                disabled={grantingPortal}
+                style={styles.darkButton}
+              >
+                <LockKeyhole size={16} />
+                {grantingPortal ? 'Wird freigeschaltet...' : 'Portal freischalten'}
+              </button>
+            )}
+          </div>
+
+          <div style={styles.emailActionGrid}>
+            <div style={{ position: 'relative' }}>
+              <select
+                value={emailAction}
+                onChange={(event) => setEmailAction(event.target.value as EmailAction)}
+                style={styles.select}
+              >
+                <option value="account_setup">Konto Setup senden</option>
+                <option value="password_reset">Passwort zurücksetzen</option>
+                <option value="magic_link">Magic Link senden</option>
+                <option value="portal_invite">Portal Einladung erneut senden</option>
+              </select>
+
+              <ChevronDown size={16} style={styles.selectIcon} />
+            </div>
+
+            <button
+              type="button"
+              onClick={sendClientEmailAction}
+              disabled={sendingEmail}
+              style={styles.darkButton}
+            >
+              <Send size={16} />
+              {sendingEmail ? 'Wird gesendet...' : 'E-Mail senden'}
+            </button>
+          </div>
+
+          <p style={styles.helperText}>
+            Konto Setup, Passwort zurücksetzen, Magic Link und Portal Einladung laufen über Supabase Auth SMTP.
+            Freie E-Mails wie Danke-Nachrichten benötigen einen separaten Custom-Mailer.
+          </p>
+        </section>
+      </div>
+
+      <div style={styles.infoGrid}>
+        <section style={styles.card}>
+          <div style={styles.cardTitleRow}>
+            <MapPin size={18} />
+            <h2 style={styles.cardTitle}>Standort</h2>
+          </div>
+
+          {editMode && (
+            <div
+              style={{
+                display: 'flex',
+                gap: '10px',
+                flexWrap: 'wrap',
+                marginTop: '16px',
+                paddingLeft: '24px',
+                paddingRight: '24px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={copyBillingAddressToSite}
+                style={{
+                  height: '38px',
+                  padding: '0 13px',
+                  borderRadius: '12px',
+                  border: `1px solid ${BRAND.border}`,
+                  background: '#FFFFFF',
+                  color: BRAND.text,
+                  fontSize: '12px',
+                  fontWeight: 760,
+                  cursor: 'pointer',
+                  fontFamily: pageFont,
+                }}
+              >
+                Standort aus Rechnungsadresse übernehmen
+              </button>
+
+              <button
+                type="button"
+                onClick={copySiteAddressToBilling}
+                style={{
+                  height: '38px',
+                  padding: '0 13px',
+                  borderRadius: '12px',
+                  border: `1px solid ${BRAND.black}`,
+                  background: BRAND.black,
+                  color: '#FFFFFF',
+                  fontSize: '12px',
+                  fontWeight: 760,
+                  cursor: 'pointer',
+                  fontFamily: pageFont,
+                }}
+              >
+                Rechnungsadresse = Standort
+              </button>
+            </div>
+          )}
+
+          <div style={styles.fieldStack}>
+            {renderField('Standortname', displayClient.primary_site_name, 'primary_site_name')}
+            {renderField('Standorttyp', getSiteTypeLabel(displayClient.primary_site_type), 'primary_site_type', {
+              type: 'select',
+              selectOptions: SITE_TYPE_OPTIONS,
+            })}
+            {renderField('Adresse', displayClient.primary_site_address, 'primary_site_address')}
+            {renderField('PLZ', displayClient.primary_site_postal_code, 'primary_site_postal_code')}
+            {renderField('Ort', displayClient.primary_site_city, 'primary_site_city')}
+            {renderField('Land', displayClient.primary_site_country, 'primary_site_country')}
+          </div>
+        </section>
+
+        <section style={styles.card}>
+          <div style={styles.cardTitleRow}>
+            <FileText size={18} />
+            <h2 style={styles.cardTitle}>Verrechnung & Notizen</h2>
+          </div>
+
+          <div style={styles.fieldStack}>
+            {renderField('Rechnungs-E-Mail', displayClient.billing_email, 'billing_email', { type: 'email' })}
+            {renderField('Rechnungstelefon', displayClient.billing_phone_e164, 'billing_phone_e164', { type: 'tel' })}
+            {renderField('Rechnungsadresse', displayClient.billing_address, 'billing_address')}
+            {renderField('Interne Notizen', displayClient.internal_notes, 'internal_notes', { type: 'textarea' })}
+          </div>
+        </section>
+      </div>
+
+      <section style={styles.jobsCard}>
+        <div style={styles.jobsHeader}>
+          <div style={styles.cardTitleRow}>
+            <Briefcase size={18} />
+            <h2 style={styles.cardTitle}>Einsätze</h2>
+            <span style={styles.countBadge}>{jobs.length}</span>
+          </div>
+        </div>
+
+        {jobError && <div style={styles.errorAlert}>{jobError}</div>}
+
+        {loadingJobs ? (
+          <div style={styles.loadingInline}>
+            <div style={styles.spinner} />
+            <span>Einsätze werden geladen.</span>
+          </div>
+        ) : jobs.length === 0 ? (
+          <div style={styles.emptyState}>
+            <Briefcase size={36} />
+            <h3>Keine Einsätze gefunden</h3>
+            <p>Für diesen Kunden sind aktuell keine Einsätze sichtbar.</p>
+          </div>
+        ) : (
+          <div style={styles.jobGrid}>
+            {jobs.map((job) => {
+              const jobStatusStyle = getStatusStyle(job.status);
+              const thankYouAllowed = isCompletedJob(job.status);
+
+              return (
+                <div key={job.job_id} style={styles.jobCard}>
+                  <a href={`${appBaseUrl}/einsatz/${job.job_id}`} style={styles.jobLink}>
+                    <div style={styles.jobTopRow}>
+                      <span style={{ ...styles.statusBadge, ...jobStatusStyle }}>
+                        {getStatusLabel(job.status)}
+                      </span>
+
+                      <span style={styles.smallMuted}>
+                        {getStatusLabel(job.report_status)}
+                      </span>
+                    </div>
+
+                    <h3 style={styles.jobTitle}>
+                      {job.title || job.service_category || 'Einsatz'}
+                    </h3>
+
+                    <div style={styles.jobMeta}>
+                      <span>
+                        <Calendar size={13} />
+                        {formatDateTime(job.planned_start)}
+                      </span>
+                      <span>
+                        <Clock size={13} />
+                        {formatDateTime(job.planned_end)}
+                      </span>
+                      <span>
+                        <MapPin size={13} />
+                        {valueOrDash(job.site_name || job.address_text)}
+                      </span>
+                    </div>
+
+                    <div style={styles.jobFooter}>
+                      <span>{valueOrDash(job.service_category)}</span>
+                      <span>{valueOrDash(job.final_hours || job.estimated_hours)} Std.</span>
+                    </div>
+                  </a>
+
+                  {thankYouAllowed && (
+                    <button
+                      type="button"
+                      onClick={() => sendThankYouEmail(job)}
+                      disabled={sendingThankYouJobId === job.job_id}
+                      style={styles.jobEmailButton}
+                    >
+                      <Mail size={14} />
+                      {sendingThankYouJobId === job.job_id ? 'Wird gesendet...' : 'Danke-E-Mail senden'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <style>{`
+        @keyframes opcSpin {
+          to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 980px) {
+          .client-detail-top-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .client-detail-info-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .client-detail-email-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 768px) {
+          body {
+            padding-bottom: 140px;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+const baseButton: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '8px',
+  height: '46px',
+  padding: '0 18px',
+  borderRadius: '14px',
+  fontSize: '14px',
+  fontWeight: 760,
+  cursor: 'pointer',
+  fontFamily: pageFont,
+  whiteSpace: 'nowrap'
+};
+
+const styles: Record<string, any> = {
+  page: {
+    padding: '0 0 160px',
+    fontFamily: pageFont,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    color: BRAND.text
+  },
+  header: {
+    marginBottom: '24px'
+  },
+  backLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    color: BRAND.muted,
+    textDecoration: 'none',
+    fontSize: '14px',
+    fontWeight: 650,
+    marginBottom: '18px'
+  },
+  headerMain: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: '18px',
+    flexWrap: 'wrap'
+  },
+  headerIdentity: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    minWidth: 0,
+    flex: '1 1 auto'
+  },
+  avatar: {
+    width: '58px',
+    height: '58px',
+    borderRadius: '18px',
+    background: BRAND.black,
+    color: '#FFFFFF',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '16px',
+    fontWeight: 820,
+    flexShrink: 0
+  },
+  statusRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    flexWrap: 'wrap',
+    marginBottom: '8px'
+  },
+  statusBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '5px 10px',
+    borderRadius: '999px',
+    border: '1px solid',
+    fontSize: '11px',
+    fontWeight: 820,
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em',
+    whiteSpace: 'nowrap'
+  },
+  smallMuted: {
+    color: BRAND.faint,
+    fontSize: '12px',
+    fontWeight: 650
+  },
+  title: {
+    fontSize: '28px',
+    fontWeight: 820,
+    color: BRAND.text,
+    margin: '0 0 6px 0',
+    letterSpacing: '-0.045em',
+    lineHeight: 1.15,
+    wordBreak: 'break-word'
+  },
+  subtitle: {
+    fontSize: '14px',
+    color: BRAND.muted,
+    margin: 0,
+    fontWeight: 560,
+    wordBreak: 'break-word'
+  },
+  actionRow: {
+    display: 'flex',
+    gap: '10px',
+    flexShrink: 0,
+    flexWrap: 'wrap'
+  },
+  darkButton: {
+    ...baseButton,
+    background: BRAND.black,
+    color: '#FFFFFF',
+    border: `1px solid ${BRAND.black}`
+  },
+  lightButton: {
+    ...baseButton,
+    background: '#FFFFFF',
+    color: BRAND.text,
+    border: `1px solid ${BRAND.border}`
+  },
+  successAlert: {
+    padding: '13px 16px',
+    background: '#F0FDF4',
+    border: '1px solid #BBF7D0',
+    borderRadius: '14px',
+    color: BRAND.green,
+    fontSize: '14px',
+    fontWeight: 700,
+    marginBottom: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  },
+  errorAlert: {
+    padding: '13px 16px',
+    background: '#FEF2F2',
+    border: '1px solid #FCA5A5',
+    borderRadius: '14px',
+    color: BRAND.red,
+    fontSize: '14px',
+    fontWeight: 700,
+    marginBottom: '20px'
+  },
+  metricsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+    gap: '14px',
+    marginBottom: '18px'
+  },
+  metricCard: {
+    background: '#FFFFFF',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '18px',
+    padding: '16px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    color: BRAND.text,
+    boxShadow: '0 1px 2px rgba(15,17,21,0.04)'
+  },
+  topGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) minmax(320px, 1.35fr)',
+    gap: '16px',
+    marginBottom: '18px'
+  },
+  infoGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+    gap: '16px',
+    marginBottom: '20px'
+  },
+  card: {
+    background: '#FFFFFF',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '20px',
+    padding: '20px',
+    boxShadow: '0 1px 2px rgba(15,17,21,0.04)'
+  },
+  cardWide: {
+    background: '#FFFFFF',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '20px',
+    padding: '20px',
+    boxShadow: '0 1px 2px rgba(15,17,21,0.04)'
+  },
+  cardTitleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    color: BRAND.text
+  },
+  cardTitle: {
+    fontSize: '16px',
+    fontWeight: 820,
+    color: BRAND.text,
+    margin: 0,
+    letterSpacing: '-0.02em'
+  },
+  fieldStack: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '14px',
+    marginTop: '16px'
+  },
+  label: {
+    fontSize: '12px',
+    fontWeight: 820,
+    color: BRAND.muted,
+    display: 'block',
+    marginBottom: '5px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.04em'
+  },
+  value: {
+    fontSize: '15px',
+    fontWeight: 650,
+    color: BRAND.text,
+    margin: 0,
+    lineHeight: 1.5,
+    wordBreak: 'break-word'
+  },
+  input: {
+    width: '100%',
+    padding: '10px 12px',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '12px',
+    fontSize: '14px',
+    outline: 'none',
+    boxSizing: 'border-box',
+    fontFamily: 'inherit',
+    background: '#FFFFFF',
+    color: BRAND.text
+  },
+  select: {
+    width: '100%',
+    height: '46px',
+    appearance: 'none',
+    padding: '0 42px 0 13px',
+    borderRadius: '14px',
+    border: `1px solid ${BRAND.border}`,
+    background: '#FFFFFF',
+    color: BRAND.text,
+    outline: 'none',
+    fontSize: '14px',
+    fontWeight: 650,
+    fontFamily: pageFont,
+    boxSizing: 'border-box'
+  },
+  selectIcon: {
+    position: 'absolute',
+    right: '14px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    color: BRAND.muted,
+    pointerEvents: 'none'
+  },
+  portalStatusBox: {
+    marginTop: '16px',
+    padding: '14px',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '16px',
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: '14px',
+    alignItems: 'center',
+    flexWrap: 'wrap'
+  },
+  emailActionGrid: {
+    marginTop: '14px',
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    gap: '12px'
+  },
+  helperText: {
+    margin: '12px 0 0',
+    color: BRAND.muted,
+    fontSize: '12px',
+    fontWeight: 560,
+    lineHeight: 1.55
+  },
+  jobsCard: {
+    background: '#FFFFFF',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '20px',
+    padding: '20px',
+    marginTop: '20px',
+    boxShadow: '0 1px 2px rgba(15,17,21,0.04)'
+  },
+  jobsHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '18px',
+    flexWrap: 'wrap',
+    gap: '12px'
+  },
+  countBadge: {
+    padding: '4px 10px',
+    background: '#F9FAFB',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '999px',
+    fontSize: '12px',
+    fontWeight: 820,
+    color: BRAND.muted
+  },
+  jobGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))',
+    gap: '14px'
+  },
+  jobCard: {
+    background: '#FFFFFF',
+    border: `1px solid ${BRAND.border}`,
+    borderRadius: '16px',
+    padding: '0',
+    overflow: 'hidden'
+  },
+  jobLink: {
+    display: 'block',
+    padding: '16px',
+    textDecoration: 'none',
+    color: BRAND.text
+  },
+  jobTopRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '10px',
+    marginBottom: '12px'
+  },
+  jobTitle: {
+    fontSize: '15px',
+    fontWeight: 820,
+    color: BRAND.text,
+    margin: '0 0 12px 0',
+    lineHeight: 1.35
+  },
+  jobMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '7px',
+    fontSize: '13px',
+    color: BRAND.muted,
+    marginBottom: '14px'
+  },
+  jobFooter: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: '10px',
+    paddingTop: '12px',
+    borderTop: '1px solid #F3F4F6',
+    fontSize: '12px',
+    fontWeight: 820,
+    color: BRAND.muted
+  },
+  jobEmailButton: {
+    width: '100%',
+    height: '42px',
+    border: 'none',
+    borderTop: `1px solid ${BRAND.border}`,
+    background: '#FAFAFA',
+    color: BRAND.text,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    fontSize: '13px',
+    fontWeight: 760,
+    cursor: 'pointer',
+    fontFamily: pageFont
+  },
+  emptyState: {
+    textAlign: 'center',
+    padding: '48px 20px',
+    background: '#F9FAFB',
+    borderRadius: '14px',
+    border: '1px dashed #D1D5DB',
+    color: BRAND.faint
+  },
+  loadingCard: {
+    padding: '80px 20px',
+    textAlign: 'center'
+  },
+  loadingInline: {
+    padding: '32px 20px',
+    textAlign: 'center',
+    color: BRAND.muted,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '12px'
+  },
+  spinner: {
+    width: '30px',
+    height: '30px',
+    border: `3px solid ${BRAND.border}`,
+    borderTopColor: BRAND.black,
+    borderRadius: '50%',
+    animation: 'opcSpin 0.8s linear infinite'
+  },
+  mutedText: {
+    color: BRAND.muted,
+    fontSize: '14px',
+    marginTop: '12px'
+  },
+  errorCard: {
+    textAlign: 'center',
+    padding: '80px 20px'
+  },
+  errorText: {
+    color: '#DC2626',
+    marginBottom: '16px',
+    fontSize: '14px',
+    fontWeight: 700
+  },
+  primaryLink: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '10px 20px',
+    background: BRAND.black,
+    color: '#FFFFFF',
+    fontSize: '14px',
+    fontWeight: 700,
+    borderRadius: '12px',
+    textDecoration: 'none'
+  }
+};
+--- src/components/ClientsManagement.tsx ---
+import { useState, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react';
+import { supabase } from '../lib/supabase';
+import { baseUrl } from '../lib/base-url';
+import {
+  Building2,
+  LockKeyhole,
+  Mail,
+  MapPin,
+  Phone,
+  Plus,
+  Search,
+  UserRound,
+  Users,
+} from 'lucide-react';
+import MirakaDashboardShell from './MirakaDashboardShell';
+
+interface Client {
+  id: string;
+  contact_id?: string;
+  client_name: string;
+  company_name: string;
+  email: string;
+  phone?: string;
+  status: string;
+  client_type: string;
+  created_at: string;
+  address?: string;
+  city?: string;
+  active_site_count?: number;
+  portal_user_id?: string;
+  portal_status?: string;
+  can_access_portal: boolean;
+}
+
+type RawOpcClient = Record<string, any>;
+type ActiveTab = 'all' | 'internal' | 'portal';
+type ClientTypeFilter = 'all' | 'privatkunden' | 'geschaeftskunden' | 'baukunden' | 'unknown';
+
+const BRAND = {
+  text: '#111827',
+  muted: '#6B7280',
+  faint: '#9CA3AF',
+  border: '#E5E7EB',
+  borderStrong: '#D1D5DB',
+  black: '#0F1115',
+  card: '#FFFFFF',
+  green: '#166534',
+  amber: '#92400E',
+};
+
+const pageFont =
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+
+const cardStyle: CSSProperties = {
+  background: BRAND.card,
+  border: `1px solid ${BRAND.border}`,
+  borderRadius: '20px',
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+};
+
+const selectStyle: CSSProperties = {
+  width: '100%',
+  height: '48px',
+  padding: '0 13px',
+  borderRadius: '14px',
+  border: `1px solid ${BRAND.border}`,
+  background: '#FFFFFF',
+  color: BRAND.text,
+  outline: 'none',
+  fontSize: '14px',
+  fontWeight: 620,
+  fontFamily: pageFont,
+  boxSizing: 'border-box',
+};
+
+const clientTypeLabels: Record<string, string> = {
+  privatkunden: 'Privatkunde',
+  geschaeftskunden: 'Geschäftskunde',
+  baukunden: 'Baukunde',
+  unknown: 'Unbekannt',
+};
+
+function getFirstValue(row: RawOpcClient | undefined, keys: string[], fallback = '') {
+  if (!row) return fallback;
+
+  for (const key of keys) {
+    const value = row?.[key];
+
+    if (value !== null && value !== undefined && String(value).trim() !== '') {
+      return String(value);
+    }
+  }
+
+  return fallback;
+}
+
+function normalizeText(value?: string | null) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function formatClientType(type?: string | null) {
+  const normalized = normalizeText(type) || 'unknown';
+
+  return clientTypeLabels[normalized] || normalized;
+}
+
+function formatDate(dateString: string) {
+  if (!dateString) return '-';
+
+  const date = new Date(dateString);
+
+  if (Number.isNaN(date.getTime())) return '-';
+
+  return date.toLocaleDateString('de-CH', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function getInitials(name?: string) {
+  if (!name) return 'K';
+
+  return name
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word.charAt(0).toUpperCase())
+    .join('');
+}
+
+function isCorporateType(type?: string | null) {
+  return normalizeText(type) === 'geschaeftskunden';
+}
+
+function mapOpcClientToClient(row: RawOpcClient, portalMap: Map<string, RawOpcClient>): Client {
+  const id = getFirstValue(row, ['client_id', 'id', 'contact_id']);
+  const contactId = getFirstValue(row, ['contact_id']);
+
+  const companyName = getFirstValue(
+    row,
+    ['company_name', 'billing_name', 'client_name', 'primary_site_name', 'full_name'],
+    'Unbekannt'
+  );
+
+  const contactName = getFirstValue(
+    row,
+    ['full_name', 'client_name', 'contact_person', 'billing_name', 'company_name'],
+    companyName
+  );
+
+  const clientType = getFirstValue(row, ['client_type'], 'unknown');
+  const portalUser = id ? portalMap.get(id) : undefined;
+  const portalStatus = getFirstValue(portalUser || row, ['status', 'portal_status', 'client_user_status']);
+  const portalCanAccess = Boolean(portalUser?.can_access_client_portal);
+  const usablePortalStatus = ['active', 'invited'].includes(normalizeText(portalStatus));
+
+  const hasPortalAccess =
+    (Boolean(portalUser) && portalCanAccess && usablePortalStatus) ||
+    Boolean(row?.can_access_portal) ||
+    Boolean(row?.can_access_client_portal);
+
+  return {
+    id,
+    contact_id: contactId,
+    client_name: contactName,
+    company_name: companyName,
+    email: getFirstValue(row, ['email', 'billing_email']),
+    phone: getFirstValue(row, ['phone_e164', 'billing_phone_e164', 'phone_raw', 'phone']),
+    status: getFirstValue(row, ['client_status', 'status', 'lifecycle_stage'], 'active'),
+    client_type: clientType,
+    created_at: getFirstValue(row, [
+      'client_created_at',
+      'created_at',
+      'converted_at',
+      'last_activity_at',
+      'client_updated_at',
+      'updated_at',
+    ]),
+    address: getFirstValue(row, ['primary_site_address', 'billing_address', 'address_text', 'address']),
+    city: getFirstValue(row, ['primary_site_city', 'city']),
+    active_site_count: Number(row?.active_site_count ?? 0),
+    portal_user_id: getFirstValue(portalUser || row, ['id', 'portal_user_id', 'client_user_id']),
+    portal_status: portalStatus,
+    can_access_portal: hasPortalAccess,
+  };
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const normalized = normalizeText(status) || 'active';
+
+  const isActive = ['active', 'client'].includes(normalized);
+  const isPending = ['pending', 'lead', 'inquiry', 'qualified'].includes(normalized);
+
+  const style = isActive
+    ? { bg: '#F0FDF4', text: BRAND.green, border: '#BBF7D0', label: 'Aktiv' }
+    : isPending
+      ? { bg: '#FFFBEB', text: BRAND.amber, border: '#FDE68A', label: 'Offen' }
+      : { bg: '#F9FAFB', text: BRAND.muted, border: BRAND.border, label: status || 'Unbekannt' };
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '27px',
+        padding: '0 10px',
+        borderRadius: '999px',
+        border: `1px solid ${style.border}`,
+        background: style.bg,
+        color: style.text,
+        fontSize: '11px',
+        fontWeight: 760,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {style.label}
+    </span>
+  );
+}
+
+function PortalBadge({ client }: { client: Client }) {
+  if (client.can_access_portal) {
+    const label = normalizeText(client.portal_status) === 'invited' ? 'Einladung offen' : 'Portal aktiv';
+
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '6px',
+          height: '27px',
+          padding: '0 10px',
+          borderRadius: '999px',
+          border: `1px solid ${BRAND.borderStrong}`,
+          background: '#F9FAFB',
+          color: BRAND.black,
+          fontSize: '11px',
+          fontWeight: 760,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <LockKeyhole size={13} />
+        {label}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        height: '27px',
+        padding: '0 10px',
+        borderRadius: '999px',
+        border: `1px solid ${BRAND.border}`,
+        background: '#FFFFFF',
+        color: BRAND.muted,
+        fontSize: '11px',
+        fontWeight: 760,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <UserRound size={13} />
+      Intern
+    </span>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: number;
+  icon: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        ...cardStyle,
+        minHeight: '112px',
+        padding: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '16px',
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: '26px',
+            lineHeight: 1,
+            fontWeight: 820,
+            letterSpacing: '-0.04em',
+            color: BRAND.text,
+            marginBottom: '12px',
+          }}
+        >
+          {value}
+        </div>
+
+        <div
+          style={{
+            fontSize: '13px',
+            fontWeight: 720,
+            color: BRAND.muted,
+          }}
+        >
+          {label}
+        </div>
+      </div>
+
+      <div
+        style={{
+          width: '38px',
+          height: '38px',
+          borderRadius: '13px',
+          border: `1px solid ${BRAND.border}`,
+          background: '#FAFAFA',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: BRAND.black,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({
+  searchQuery,
+  activeTab,
+}: {
+  searchQuery: string;
+  activeTab: ActiveTab;
+}) {
+  const text =
+    activeTab === 'portal'
+      ? 'Es gibt aktuell keine Kunden mit Portalzugang.'
+      : searchQuery
+        ? 'Passen Sie die Suche oder Filter an.'
+        : 'Legen Sie den ersten Kunden an.';
+
+  return (
+    <div
+      style={{
+        padding: '78px 22px',
+        textAlign: 'center',
+      }}
+    >
+      <Users size={50} strokeWidth={1.5} color="#D1D5DB" style={{ marginBottom: '18px' }} />
+
+      <h3
+        style={{
+          margin: '0 0 8px',
+          fontSize: '17px',
+          fontWeight: 760,
+          color: BRAND.text,
+        }}
+      >
+        Keine Kunden gefunden
+      </h3>
+
+      <p
+        style={{
+          margin: '0 0 22px',
+          fontSize: '14px',
+          fontWeight: 560,
+          color: BRAND.muted,
+        }}
+      >
+        {text}
+      </p>
+
+      <a
+        href={`${baseUrl}/kunde-anlegen`}
+        style={{
+          height: '44px',
+          padding: '0 16px',
+          borderRadius: '13px',
+          background: BRAND.black,
+          color: '#FFFFFF',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '9px',
+          fontSize: '14px',
+          fontWeight: 760,
+          fontFamily: pageFont,
+          textDecoration: 'none',
+        }}
+      >
+        <Plus size={17} />
+        Kunde anlegen
+      </a>
+    </div>
+  );
+}
+
+export default function ClientsManagement() {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
+  const [clientTypeFilter, setClientTypeFilter] = useState<ClientTypeFilter>('all');
+  const [grantingClientId, setGrantingClientId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadClients();
+  }, []);
+
+  async function loadClients() {
+    setLoading(true);
+    setErrorMessage('');
+
+    try {
+      if (!supabase) {
+        setErrorMessage('Datenbankverbindung nicht verfügbar. Bitte prüfen Sie die Supabase-Konfiguration.');
+        return;
+      }
+
+      const [clientsResponse, portalUsersResponse] = await Promise.all([
+        supabase.from('opc_portal_client_cards').select('*'),
+        supabase.from('opc_client_users').select('*').limit(1000),
+      ]);
+
+      if (clientsResponse.error) {
+        throw clientsResponse.error;
+      }
+
+      if (portalUsersResponse.error) {
+        console.warn('Portal users could not be loaded:', portalUsersResponse.error.message);
+      }
+
+      const portalMap = new Map<string, RawOpcClient>();
+
+      (portalUsersResponse.data || []).forEach((portalUser: RawOpcClient) => {
+        if (portalUser.client_id) {
+          portalMap.set(String(portalUser.client_id), portalUser);
+        }
+      });
+
+      const mappedClients = (clientsResponse.data || [])
+        .map((row: RawOpcClient) => mapOpcClientToClient(row, portalMap))
+        .filter((client: Client) => client.id)
+        .sort((a: Client, b: Client) => {
+          const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return bTime - aTime;
+        });
+
+      setClients(mappedClients);
+    } catch (error: any) {
+      console.error('Kunden konnten nicht geladen werden:', error);
+      setErrorMessage(error?.message || 'Kunden konnten nicht geladen werden.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function grantPortalAccess(client: Client) {
+    setGrantingClientId(client.id);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      const response = await fetch('/api/opc/grant-client-portal-access', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          clientId: client.id,
+        }),
+      });
+
+      const result = (await response.json()) as any;
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Portalzugang konnte nicht freigeschaltet werden.');
+      }
+
+      setClients((previousClients) =>
+        previousClients.map((existingClient) =>
+          existingClient.id === client.id
+            ? {
+                ...existingClient,
+                can_access_portal: true,
+                portal_user_id: result.clientUserId,
+                portal_status: result.status || 'invited',
+                client_type: 'geschaeftskunden',
+              }
+            : existingClient
+        )
+      );
+
+      setSuccessMessage('Portalzugang wurde freigeschaltet. Der Kunde ist jetzt unter Portal-Kunden sichtbar.');
+    } catch (error: any) {
+      console.error('Portalzugang konnte nicht freigeschaltet werden:', error);
+      setErrorMessage(error?.message || 'Portalzugang konnte nicht freigeschaltet werden.');
+    } finally {
+      setGrantingClientId(null);
+    }
+  }
+
+  const metrics = useMemo(() => {
+    const portalClients = clients.filter((client) => client.can_access_portal);
+    const internalClients = clients.filter((client) => !client.can_access_portal);
+    const corporateClients = clients.filter((client) => isCorporateType(client.client_type));
+
+    return {
+      total: clients.length,
+      portal: portalClients.length,
+      internal: internalClients.length,
+      corporate: corporateClients.length,
+    };
+  }, [clients]);
+
+  const filteredClients = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return clients.filter((client) => {
+      const matchesTab =
+        activeTab === 'all' ||
+        (activeTab === 'portal' && client.can_access_portal) ||
+        (activeTab === 'internal' && !client.can_access_portal);
+
+      if (!matchesTab) return false;
+
+      const matchesType =
+        clientTypeFilter === 'all' || normalizeText(client.client_type) === clientTypeFilter;
+
+      if (!matchesType) return false;
+
+      if (!query) return true;
+
+      return [
+        client.client_name,
+        client.company_name,
+        client.email,
+        client.phone,
+        client.address,
+        client.city,
+        formatClientType(client.client_type),
+        client.can_access_portal ? 'portal' : 'intern',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [clients, searchQuery, activeTab, clientTypeFilter]);
+
+  function handleClientClick(clientId: string) {
+    window.location.href = `${baseUrl}/kunde/${clientId}`;
+  }
+
+  if (loading) {
+    return (
+      <MirakaDashboardShell hideTopBar={true}>
+        <div
+          style={{
+            minHeight: '60vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: BRAND.muted,
+            fontSize: '14px',
+            fontWeight: 650,
+            fontFamily: pageFont,
+          }}
+        >
+          Kunden werden geladen...
+        </div>
+      </MirakaDashboardShell>
+    );
+  }
+
+  return (
+    <MirakaDashboardShell hideTopBar={true}>
+      <div
+        className="opc-clients-page"
+        style={{
+          padding: 0,
+          fontFamily: pageFont,
+          color: BRAND.text,
+        }}
+      >
+        <div
+          className="opc-clients-tabs"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: '10px',
+            marginBottom: '22px',
+          }}
+        >
+          {[
+            { key: 'all', label: 'Alle Kunden' },
+            { key: 'internal', label: 'Interne Kunden' },
+            { key: 'portal', label: 'Portal-Kunden' },
+          ].map((tab) => {
+            const active = activeTab === tab.key;
+
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key as ActiveTab)}
+                style={{
+                  height: '48px',
+                  borderRadius: '15px',
+                  border: `1px solid ${active ? BRAND.black : BRAND.border}`,
+                  background: active ? BRAND.black : '#FFFFFF',
+                  color: active ? '#FFFFFF' : BRAND.text,
+                  fontSize: '14px',
+                  fontWeight: 760,
+                  cursor: 'pointer',
+                  fontFamily: pageFont,
+                }}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div
+          className="opc-clients-metrics"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gap: '16px',
+            marginBottom: '22px',
+          }}
+        >
+          <MetricCard value={metrics.total} label="Alle Kunden" icon={<Users size={18} />} />
+          <MetricCard value={metrics.internal} label="Interne Kunden" icon={<UserRound size={18} />} />
+          <MetricCard value={metrics.portal} label="Portal-Kunden" icon={<LockKeyhole size={18} />} />
+          <MetricCard value={metrics.corporate} label="Geschäftskunden" icon={<Building2 size={18} />} />
+        </div>
+
+        <section
+          style={{
+            ...cardStyle,
+            padding: '18px',
+            marginBottom: '22px',
+          }}
+        >
+          <div
+            className="opc-clients-controls"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) 220px 190px',
+              gap: '12px',
+              alignItems: 'center',
+            }}
+          >
+            <div style={{ position: 'relative', minWidth: 0 }}>
+              <Search
+                size={17}
+                style={{
+                  position: 'absolute',
+                  left: '14px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: BRAND.faint,
+                  pointerEvents: 'none',
+                }}
+              />
+
+              <input
+                type="text"
+                placeholder="Suche nach Kunde, Kontakt, E-Mail, Telefon oder Standort"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                style={{
+                  width: '100%',
+                  height: '48px',
+                  padding: '0 14px 0 42px',
+                  borderRadius: '14px',
+                  border: `1px solid ${BRAND.border}`,
+                  background: '#FFFFFF',
+                  color: BRAND.text,
+                  outline: 'none',
+                  fontSize: '14px',
+                  fontWeight: 560,
+                  fontFamily: pageFont,
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(event) => {
+                  event.currentTarget.style.borderColor = BRAND.black;
+                }}
+                onBlur={(event) => {
+                  event.currentTarget.style.borderColor = BRAND.border;
+                }}
+              />
+            </div>
+
+            <select
+              value={clientTypeFilter}
+              onChange={(event) => setClientTypeFilter(event.target.value as ClientTypeFilter)}
+              style={selectStyle}
+            >
+              <option value="all">Alle Kundentypen</option>
+              <option value="privatkunden">Privatkunden</option>
+              <option value="geschaeftskunden">Geschäftskunden</option>
+              <option value="baukunden">Baukunden</option>
+              <option value="unknown">Unbekannt</option>
+            </select>
+
+            <a
+              href={`${baseUrl}/kunde-anlegen`}
+              style={{
+                width: '100%',
+                height: '48px',
+                borderRadius: '14px',
+                border: `1px solid ${BRAND.black}`,
+                background: BRAND.black,
+                color: '#FFFFFF',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '9px',
+                fontSize: '14px',
+                fontWeight: 760,
+                fontFamily: pageFont,
+                textDecoration: 'none',
+                whiteSpace: 'nowrap',
+                boxSizing: 'border-box',
+              }}
+            >
+              <Plus size={17} />
+              Kunde anlegen
+            </a>
+          </div>
+        </section>
+
+        {successMessage && (
+          <div
+            style={{
+              marginBottom: '22px',
+              padding: '14px 16px',
+              borderRadius: '14px',
+              border: '1px solid #BBF7D0',
+              background: '#F0FDF4',
+              color: BRAND.green,
+              fontSize: '14px',
+              fontWeight: 650,
+            }}
+          >
+            {successMessage}
+          </div>
+        )}
+
+        {errorMessage && (
+          <div
+            style={{
+              marginBottom: '22px',
+              padding: '14px 16px',
+              borderRadius: '14px',
+              border: '1px solid #FCA5A5',
+              background: '#FEF2F2',
+              color: '#991B1B',
+              fontSize: '14px',
+              fontWeight: 620,
+            }}
+          >
+            {errorMessage}
+          </div>
+        )}
+
+        {filteredClients.length === 0 ? (
+          <section style={cardStyle}>
+            <EmptyState searchQuery={searchQuery} activeTab={activeTab} />
+          </section>
+        ) : (
+          <div
+            className="opc-clients-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+              gap: '18px',
+            }}
+          >
+            {filteredClients.map((client) => (
+              <div
+                key={client.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => handleClientClick(client.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    handleClientClick(client.id);
+                  }
+                }}
+                style={{
+                  ...cardStyle,
+                  padding: '22px',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontFamily: pageFont,
+                  transition: 'transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease',
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.transform = 'translateY(-2px)';
+                  event.currentTarget.style.borderColor = BRAND.borderStrong;
+                  event.currentTarget.style.boxShadow = '0 8px 24px rgba(15, 17, 21, 0.06)';
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.transform = 'translateY(0)';
+                  event.currentTarget.style.borderColor = BRAND.border;
+                  event.currentTarget.style.boxShadow = '0 1px 2px rgba(15, 17, 21, 0.04)';
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '14px',
+                    marginBottom: '22px',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '56px',
+                      height: '56px',
+                      borderRadius: '16px',
+                      background: BRAND.black,
+                      color: '#FFFFFF',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '17px',
+                      fontWeight: 820,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {getInitials(client.company_name || client.client_name)}
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '8px',
+                      alignItems: 'flex-end',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <StatusBadge status={client.status} />
+                    <PortalBadge client={client} />
+                  </div>
+                </div>
+
+                <h3
+                  style={{
+                    fontSize: '18px',
+                    fontWeight: 820,
+                    color: BRAND.text,
+                    margin: '0 0 7px',
+                    lineHeight: 1.2,
+                    letterSpacing: '-0.02em',
+                  }}
+                >
+                  {client.company_name || client.client_name}
+                </h3>
+
+                {client.client_name && client.client_name !== client.company_name && (
+                  <p
+                    style={{
+                      fontSize: '14px',
+                      color: BRAND.muted,
+                      margin: '0 0 15px',
+                      fontWeight: 650,
+                    }}
+                  >
+                    {client.client_name}
+                  </p>
+                )}
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: '9px',
+                    minHeight: '78px',
+                  }}
+                >
+                  {client.email && (
+                    <div style={infoRowStyle}>
+                      <Mail size={15} />
+                      <span>{client.email}</span>
+                    </div>
+                  )}
+
+                  {client.phone && (
+                    <div style={infoRowStyle}>
+                      <Phone size={15} />
+                      <span>{client.phone}</span>
+                    </div>
+                  )}
+
+                  {(client.address || client.city) && (
+                    <div style={infoRowStyle}>
+                      <MapPin size={15} />
+                      <span>{[client.address, client.city].filter(Boolean).join(', ')}</span>
+                    </div>
+                  )}
+                </div>
+
+                {!client.can_access_portal && (
+                  <button
+                    type="button"
+                    disabled={grantingClientId === client.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void grantPortalAccess(client);
+                    }}
+                    style={{
+                      marginTop: '18px',
+                      width: '100%',
+                      height: '42px',
+                      borderRadius: '13px',
+                      border: `1px solid ${BRAND.black}`,
+                      background: BRAND.black,
+                      color: '#FFFFFF',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      fontWeight: 760,
+                      fontFamily: pageFont,
+                      cursor: grantingClientId === client.id ? 'not-allowed' : 'pointer',
+                      opacity: grantingClientId === client.id ? 0.65 : 1,
+                    }}
+                  >
+                    <LockKeyhole size={15} />
+                    {grantingClientId === client.id ? 'Wird freigeschaltet...' : 'Portal freischalten'}
+                  </button>
+                )}
+
+                <div
+                  style={{
+                    marginTop: '20px',
+                    paddingTop: '16px',
+                    borderTop: `1px solid ${BRAND.border}`,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '12px',
+                    fontSize: '12px',
+                    color: BRAND.faint,
+                    fontWeight: 680,
+                  }}
+                >
+                  <span>{client.active_site_count || 0} Standort(e)</span>
+                  <span>{formatClientType(client.client_type)}</span>
+                  <span>{formatDate(client.created_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {filteredClients.length > 0 && (
+          <div
+            style={{
+              marginTop: '15px',
+              fontSize: '13px',
+              fontWeight: 620,
+              color: BRAND.muted,
+            }}
+          >
+            {filteredClients.length} von {clients.length} Kunden
+          </div>
+        )}
+
+        <style>{`
+          @media (max-width: 1180px) {
+            .opc-clients-metrics {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+
+            .opc-clients-controls {
+              grid-template-columns: minmax(0, 1fr) 200px !important;
+            }
+
+            .opc-clients-controls a {
+              grid-column: 1 / -1;
+            }
+          }
+
+          @media (max-width: 820px) {
+            .opc-clients-tabs {
+              grid-template-columns: 1fr !important;
+            }
+
+            .opc-clients-controls {
+              grid-template-columns: 1fr !important;
+            }
+
+            .opc-clients-controls a {
+              grid-column: auto;
+            }
+
+            .opc-clients-grid {
+              grid-template-columns: 1fr !important;
+            }
+          }
+
+          @media (max-width: 620px) {
+            .opc-clients-metrics {
+              grid-template-columns: 1fr !important;
+            }
+          }
+        `}</style>
+      </div>
+    </MirakaDashboardShell>
+  );
+}
+
+const infoRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '9px',
+  fontSize: '13px',
+  color: BRAND.muted,
+  fontWeight: 590,
+  minWidth: 0,
+};
+--- src/components/ClientsTable.tsx ---
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+
+interface Client {
+  id: string;
+  company_name: string;
+  client_name: string;
+  email: string;
+  phone: string | null;
+  status: 'active' | 'pending' | 'inactive';
+  created_at: string;
+}
+
+interface ClientsTableProps {
+  userRole?: string;
+  baseUrl?: string;
+}
+
+export default function ClientsTable({ userRole = '', baseUrl = '' }: ClientsTableProps) {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [filteredClients, setFilteredClients] = useState<Client[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+
+  // Check if user has access
+  const hasAccess = userRole === 'owner' || userRole === 'admin';
+
+  useEffect(() => {
+    if (hasAccess) {
+      loadClients();
+    } else {
+      setLoading(false);
+    }
+  }, [hasAccess]);
+
+  useEffect(() => {
+    // Filter clients based on search query
+    if (searchQuery.trim() === '') {
+      setFilteredClients(clients);
+    } else {
+      const query = searchQuery.toLowerCase();
+      const filtered = clients.filter(client => 
+        client.company_name?.toLowerCase().includes(query) ||
+        client.client_name?.toLowerCase().includes(query) ||
+        client.email?.toLowerCase().includes(query)
+      );
+      setFilteredClients(filtered);
+    }
+  }, [searchQuery, clients]);
+
+  async function loadClients() {
+    setLoading(true);
+    setError(false);
+
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('clients')
+        .select('id, company_name, client_name, email, phone, status, created_at')
+        .order('created_at', { ascending: false });
+
+      if (fetchError) {
+        console.error('Error fetching clients:', fetchError);
+        setError(true);
+      } else {
+        setClients(data || []);
+        setFilteredClients(data || []);
+      }
+    } catch (err) {
+      console.error('Unexpected error:', err);
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggleRowSelection(id: string) {
+    const newSelected = new Set(selectedRows);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedRows(newSelected);
+  }
+
+  function handleRowClick(client: Client, e: React.MouseEvent) {
+    // Prevent navigation when clicking on checkbox, button, or link
+    const target = e.target as HTMLElement;
+    if (
+      target.tagName === 'INPUT' || 
+      target.tagName === 'BUTTON' || 
+      target.tagName === 'A' ||
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('a')
+    ) {
+      return;
+    }
+
+    // Navigate to client detail page
+    window.location.href = `${baseUrl}/kunde/${client.id}`;
+  }
+
+  function handleAction(action: string, client: Client) {
+    console.log(`[${action}] on client`, client.id);
+    
+    if (action === 'view-details') {
+      window.location.href = `${baseUrl}/kunde/${client.id}`;
+    } else if (action === 'edit-client') {
+      window.location.href = `${baseUrl}/kunde/${client.id}`;
+    }
+    
+    setOpenDropdown(null);
+  }
+
+  function formatDate(dateString: string) {
+    if (!dateString) return '—';
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}.${month}.${year}`;
+  }
+
+  function getStatusStyle(status: string) {
+    switch (status) {
+      case 'active':
+        return {
+          backgroundColor: '#D1FAE5',
+          color: '#059669',
+          border: '1px solid #6EE7B7'
+        };
+      case 'pending':
+        return {
+          backgroundColor: '#FEF3C7',
+          color: '#D97706',
+          border: '1px solid #FCD34D'
+        };
+      case 'inactive':
+        return {
+          backgroundColor: '#F3F4F6',
+          color: '#6B7280',
+          border: '1px solid #D1D5DB'
+        };
+      default:
+        return {
+          backgroundColor: '#F3F4F6',
+          color: '#6B7280',
+          border: '1px solid #D1D5DB'
+        };
+    }
+  }
+
+  // Access restricted
+  if (!hasAccess) {
+    return (
+      <div style={{
+        padding: '40px 24px',
+        textAlign: 'center',
+        color: '#6B7280',
+        fontSize: '14px'
+      }}>
+        Access restricted.
+      </div>
+    );
+  }
+
+  // Loading state
+  if (loading) {
+    return (
+      <div style={{
+        padding: '40px 24px',
+        textAlign: 'center',
+        color: '#6B7280',
+        fontSize: '14px'
+      }}>
+        Loading clients…
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div style={{
+        padding: '40px 24px',
+        textAlign: 'center',
+        color: '#6B7280',
+        fontSize: '14px'
+      }}>
+        Unable to load client list.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      width: '100%',
+      backgroundColor: '#FFFFFF',
+      border: '1px solid #ECECEC',
+      borderRadius: '16px',
+      padding: '24px',
+      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)'
+    }}>
+      {/* Header with Search */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '24px',
+        gap: '16px',
+        flexWrap: 'wrap'
+      }}>
+        <h2 style={{
+          fontSize: '20px',
+          fontWeight: 600,
+          color: '#111827',
+          margin: 0,
+          fontFamily: "'Poppins', sans-serif"
+        }}>
+          Clients
+        </h2>
+
+        <input
+          type="text"
+          placeholder="Search clients…"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            padding: '8px 14px',
+            fontSize: '14px',
+            border: '1px solid #DADCE0',
+            borderRadius: '8px',
+            backgroundColor: '#FFFFFF',
+            color: '#111827',
+            outline: 'none',
+            transition: 'border 0.15s ease',
+            minWidth: '240px',
+            fontFamily: "'Inter', sans-serif"
+          }}
+          onFocus={(e) => e.currentTarget.style.borderColor = '#2A5F8A'}
+          onBlur={(e) => e.currentTarget.style.borderColor = '#DADCE0'}
+        />
+      </div>
+
+      {/* No Results */}
+      {filteredClients.length === 0 && !loading && (
+        <div style={{
+          padding: '40px 24px',
+          textAlign: 'center',
+          color: '#6B7280',
+          fontSize: '14px',
+          fontFamily: "'Inter', sans-serif"
+        }}>
+          No clients found for this search.
+        </div>
+      )}
+
+      {/* Table */}
+      {filteredClients.length > 0 && (
+        <div style={{
+          overflowX: 'auto'
+        }}>
+          <table style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            fontSize: '13px',
+            fontFamily: "'Inter', sans-serif"
+          }}>
+            <thead>
+              <tr style={{
+                backgroundColor: '#FAFBFC',
+                borderBottom: '1px solid #E3E6EA'
+              }}>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280',
+                  width: '40px'
+                }}>
+                  <input
+                    type="checkbox"
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      cursor: 'pointer'
+                    }}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedRows(new Set(filteredClients.map(c => c.id)));
+                      } else {
+                        setSelectedRows(new Set());
+                      }
+                    }}
+                    checked={selectedRows.size === filteredClients.length && filteredClients.length > 0}
+                  />
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280'
+                }}>
+                  Company
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280'
+                }}>
+                  Contact Person
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280'
+                }}>
+                  Email
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280'
+                }}
+                className="hide-mobile-phone">
+                  Phone
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280'
+                }}>
+                  Status
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                  color: '#6B7280'
+                }}
+                className="hide-mobile-date">
+                  Created
+                </th>
+                <th style={{
+                  padding: '12px 16px',
+                  textAlign: 'right',
+                  fontWeight: 600,
+                  color: '#6B7280',
+                  width: '60px'
+                }}>
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredClients.map((client) => (
+                <tr
+                  key={client.id}
+                  onClick={(e) => handleRowClick(client, e)}
+                  style={{
+                    borderBottom: '1px solid #E3E6EA',
+                    transition: 'background 0.15s ease',
+                    cursor: 'pointer'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#F9FAFB';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                >
+                  <td style={{
+                    padding: '12px 16px'
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedRows.has(client.id)}
+                      onChange={() => toggleRowSelection(client.id)}
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </td>
+                  <td style={{
+                    padding: '12px 16px',
+                    color: '#111827',
+                    fontWeight: 500
+                  }}>
+                    {client.company_name || '—'}
+                  </td>
+                  <td style={{
+                    padding: '12px 16px',
+                    color: '#111827'
+                  }}>
+                    {client.client_name || '—'}
+                  </td>
+                  <td style={{
+                    padding: '12px 16px'
+                  }}>
+                    <a
+                      href={`mailto:${client.email}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        color: '#2A5F8A',
+                        textDecoration: 'none',
+                        transition: 'color 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#1e4a64';
+                        e.currentTarget.style.textDecoration = 'underline';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = '#2A5F8A';
+                        e.currentTarget.style.textDecoration = 'none';
+                      }}
+                    >
+                      {client.email}
+                    </a>
+                  </td>
+                  <td style={{
+                    padding: '12px 16px',
+                    color: '#6B7280'
+                  }}
+                  className="hide-mobile-phone">
+                    {client.phone || '—'}
+                  </td>
+                  <td style={{
+                    padding: '12px 16px'
+                  }}>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '3px 10px',
+                      borderRadius: '20px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      textTransform: 'capitalize',
+                      ...getStatusStyle(client.status)
+                    }}>
+                      {client.status}
+                    </span>
+                  </td>
+                  <td style={{
+                    padding: '12px 16px',
+                    color: '#6B7280'
+                  }}
+                  className="hide-mobile-date">
+                    {formatDate(client.created_at)}
+                  </td>
+                  <td style={{
+                    padding: '12px 16px',
+                    textAlign: 'right',
+                    position: 'relative'
+                  }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenDropdown(openDropdown === client.id ? null : client.id);
+                      }}
+                      style={{
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '4px 8px',
+                        fontSize: '18px',
+                        color: '#6B7280',
+                        transition: 'color 0.15s ease',
+                        lineHeight: 1
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = '#111827';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = '#6B7280';
+                      }}
+                    >
+                      ⋯
+                    </button>
+
+                    {openDropdown === client.id && (
+                      <>
+                        <div
+                          style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            zIndex: 999
+                          }}
+                          onClick={() => setOpenDropdown(null)}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '100%',
+                            right: '0',
+                            marginTop: '4px',
+                            backgroundColor: '#FFFFFF',
+                            border: '1px solid #E3E6EA',
+                            borderRadius: '8px',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                            minWidth: '160px',
+                            zIndex: 1000,
+                            overflow: 'hidden'
+                          }}
+                        >
+                          <button
+                            onClick={() => handleAction('view-details', client)}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              padding: '10px 16px',
+                              textAlign: 'left',
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              color: '#111827',
+                              transition: 'background 0.15s ease',
+                              fontFamily: "'Inter', sans-serif"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#F9FAFB';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            View Details
+                          </button>
+                          <button
+                            onClick={() => handleAction('edit-client', client)}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              padding: '10px 16px',
+                              textAlign: 'left',
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              color: '#111827',
+                              transition: 'background 0.15s ease',
+                              fontFamily: "'Inter', sans-serif"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#F9FAFB';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            Edit Client
+                          </button>
+                          <button
+                            onClick={() => handleAction('archive-client', client)}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              padding: '10px 16px',
+                              textAlign: 'left',
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              color: '#111827',
+                              transition: 'background 0.15s ease',
+                              fontFamily: "'Inter', sans-serif"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#F9FAFB';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            Archive Client
+                          </button>
+                          <button
+                            onClick={() => handleAction('delete-client', client)}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              padding: '10px 16px',
+                              textAlign: 'left',
+                              backgroundColor: 'transparent',
+                              border: 'none',
+                              borderTop: '1px solid #E3E6EA',
+                              cursor: 'pointer',
+                              fontSize: '13px',
+                              color: '#DC2626',
+                              transition: 'background 0.15s ease',
+                              fontFamily: "'Inter', sans-serif"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#FEE2E2';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                          >
+                            Delete Client
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Responsive Styles */}
+      <style>{`
+        @media (max-width: 768px) {
+          .hide-mobile-phone,
+          .hide-mobile-date {
+            display: none;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+===== CLIENT API ROUTES =====
+--- src/pages/api/clients/list.ts ---
+import type { APIRoute } from 'astro';
+import { createClient } from '@supabase/supabase-js';
+
+export const GET: APIRoute = async () => {
+  try {
+    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+      return new Response(JSON.stringify({ error: 'Missing Supabase credentials' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Use service role key to bypass RLS
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { data: clients, error } = await supabase
+      .from('clients')
+      .select(`
+        id, 
+        client_name, 
+        company_name, 
+        contact_person,
+        status, 
+        email, 
+        phone, 
+        last_activity_at
+      `)
+      .order('last_activity_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching clients:', error);
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Fetch project counts for each client
+    const clientsWithProjectCount = await Promise.all(
+      (clients || []).map(async (client) => {
+        const { count } = await supabase
+          .from('projects')
+          .select('*', { count: 'exact', head: true })
+          .eq('client_id', client.id)
+          .eq('status', 'active');
+        
+        return {
+          ...client,
+          project_count: count || 0
+        };
+      })
+    );
+
+    return new Response(JSON.stringify({ clients: clientsWithProjectCount }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (err) {
+    console.error('Failed to fetch clients:', err);
+    return new Response(JSON.stringify({ error: String(err) }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+};
+
+--- src/pages/api/opc/update-client-details.ts ---
+import type { APIRoute } from 'astro';
+import { createClient } from '@supabase/supabase-js';
+
+export const prerender = false;
+
+type ProfileSource = {
+  source: string;
+  token: string;
+};
+
+type AuthResult = {
+  user: any;
+  session?: any | null;
+  authenticatedVia: string;
+};
+
+type UpdateClientBody = {
+  clientId?: string;
+  id?: string;
+  resolvedClientId?: string;
+  editedClient?: Record<string, any>;
+  client?: Record<string, any>;
+  [key: string]: any;
+};
+
+const ALLOWED_SITE_TYPES = new Set([
+  'office',
+  'residential',
+  'construction_site',
+  'staircase',
+  'commercial',
+  'mixed',
+  'retail',
+  'restaurant',
+  'hotel',
+  'school',
+  'medical',
+  'warehouse',
+  'industrial',
+  'other',
+]);
+
+function jsonResponse(payload: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+function clean(value: unknown) {
+  const text = String(value ?? '').trim();
+  return text || null;
+}
+
+function normalizeEmail(value: unknown) {
+  const text = clean(value);
+  return text ? text.toLowerCase() : null;
+}
+
+function normalizeSiteType(value: unknown) {
+  const text = String(value || '').trim().toLowerCase();
+
+  if (!text) return 'other';
+
+  const map: Record<string, string> = {
+    büro: 'office',
+    buero: 'office',
+    office: 'office',
+    privat: 'residential',
+    wohnung: 'residential',
+    residential: 'residential',
+    baustelle: 'construction_site',
+    construction: 'construction_site',
+    construction_site: 'construction_site',
+    treppenhaus: 'staircase',
+    staircase: 'staircase',
+    gewerbe: 'commercial',
+    commercial: 'commercial',
+    gemischt: 'mixed',
+    mixed: 'mixed',
+    retail: 'retail',
+    restaurant: 'restaurant',
+    hotel: 'hotel',
+    school: 'school',
+    medical: 'medical',
+    warehouse: 'warehouse',
+    industrial: 'industrial',
+    sonstiges: 'other',
+    other: 'other',
+  };
+
+  const mapped = map[text] || text;
+
+  return ALLOWED_SITE_TYPES.has(mapped) ? mapped : 'other';
+}
+
+function getEnvValue(locals: any, key: string) {
+  const importMetaEnv = (import.meta as any)?.env || {};
+  const processEnv = (globalThis as any)?.process?.env || {};
+  const runtimeEnv = {};
+
+  return importMetaEnv[key] || processEnv[key] || runtimeEnv[key] || '';
+}
+
+function decodeBase64Url(input: string) {
+  const base64 = input.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+
+  if (typeof atob === 'function') {
+    return atob(padded);
+  }
+
+  const BufferCtor = (globalThis as any).Buffer;
+  if (BufferCtor) {
+    return BufferCtor.from(padded, 'base64').toString('utf8');
+  }
+
+  throw new Error('No base64 decoder available.');
+}
+
+function decodeJwtPayload(token: string) {
+  try {
+    if (!token.startsWith('eyJ')) return null;
+
+    const parts = token.split('.');
+
+    if (parts.length < 2) return null;
+
+    return JSON.parse(decodeBase64Url(parts[1]));
+  } catch {
+    return null;
+  }
+}
+
+function assertServiceRoleKey(serviceRoleKey: string) {
+  if (!serviceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing.');
+  }
+
+  const lowerKey = serviceRoleKey.toLowerCase();
+
+  if (serviceRoleKey.startsWith('sb_publishable_') || lowerKey.includes('anon')) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is not a service-role key. It looks like an anon or publishable key.'
+    );
+  }
+
+  const jwtPayload = decodeJwtPayload(serviceRoleKey);
+  const role = String(jwtPayload?.role || '').toLowerCase();
+
+  if (role && role !== 'service_role') {
+    throw new Error(
+      `SUPABASE_SERVICE_ROLE_KEY has wrong JWT role "${role}". Expected "service_role".`
+    );
+  }
+}
+
+function getSupabaseConfig(locals: any) {
+  const supabaseUrl =
+    getEnvValue(locals, 'PUBLIC_SUPABASE_URL') ||
+    getEnvValue(locals, 'SUPABASE_URL');
+
+  const anonKey = getEnvValue(locals, 'PUBLIC_SUPABASE_ANON_KEY');
+
+  const serviceRoleKey =
+    getEnvValue(locals, 'SUPABASE_SERVICE_ROLE_KEY') ||
+    getEnvValue(locals, 'SUPABASE_SERVICE_ROLE');
+
+  if (!supabaseUrl) {
+    throw new Error('PUBLIC_SUPABASE_URL or SUPABASE_URL is missing.');
+  }
+
+  if (!anonKey) {
+    throw new Error('PUBLIC_SUPABASE_ANON_KEY is missing.');
+  }
+
+  assertServiceRoleKey(serviceRoleKey);
+
+  return {
+    supabaseUrl,
+    anonKey,
+    serviceRoleKey,
+  };
+}
+
+function getServerSupabase(locals: any) {
+  const { supabaseUrl, serviceRoleKey } = getSupabaseConfig(locals);
+
+  console.log('[opc/update-client-details] Server Supabase project:', {
+    host: (() => {
+      try {
+        return new URL(supabaseUrl).host;
+      } catch {
+        return 'invalid-url';
+      }
+    })(),
+  });
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        'X-OPC-Route': 'update-client-details',
+      },
+    },
+  });
+}
+
+function getAuthSupabase(locals: any) {
+  const { supabaseUrl, anonKey } = getSupabaseConfig(locals);
+
+  return createClient(supabaseUrl, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      headers: {
+        'X-OPC-Route': 'update-client-details-auth',
+      },
+    },
+  });
+}
+
+function parseCookieHeader(cookieHeader: string) {
+  const parsedCookies: Record<string, string> = {};
+
+  cookieHeader.split(';').forEach((part) => {
+    const index = part.indexOf('=');
+    if (index === -1) return;
+
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+
+    if (!key) return;
+
+    parsedCookies[key] = value;
+  });
+
+  return parsedCookies;
+}
+
+function decodeMaybe(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizePossibleAccessToken(value: unknown) {
+  if (!value) return '';
+
+  let token = String(value).trim();
+
+  if (!token) return '';
+
+  token = decodeMaybe(token);
+  token = token.replace(/^Bearer\s+/i, '').trim();
+
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    token = token.slice(1, -1).trim();
+  }
+
+  try {
+    const parsed = JSON.parse(token);
+
+    if (typeof parsed === 'string') {
+      return normalizePossibleAccessToken(parsed);
+    }
+
+    if (parsed?.access_token) {
+      return normalizePossibleAccessToken(parsed.access_token);
+    }
+
+    if (parsed?.currentSession?.access_token) {
+      return normalizePossibleAccessToken(parsed.currentSession.access_token);
+    }
+
+    if (parsed?.session?.access_token) {
+      return normalizePossibleAccessToken(parsed.session.access_token);
+    }
+
+    if (Array.isArray(parsed) && parsed[0]) {
+      return normalizePossibleAccessToken(parsed[0]);
+    }
+  } catch {
+    // Not JSON. Continue.
+  }
+
+  return token;
+}
+
+function normalizePossibleRefreshToken(value: unknown) {
+  if (!value) return '';
+
+  let token = String(value).trim();
+
+  if (!token) return '';
+
+  token = decodeMaybe(token);
+
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    token = token.slice(1, -1).trim();
+  }
+
+  try {
+    const parsed = JSON.parse(token);
+
+    if (typeof parsed === 'string') {
+      return normalizePossibleRefreshToken(parsed);
+    }
+
+    if (parsed?.refresh_token) {
+      return normalizePossibleRefreshToken(parsed.refresh_token);
+    }
+
+    if (parsed?.currentSession?.refresh_token) {
+      return normalizePossibleRefreshToken(parsed.currentSession.refresh_token);
+    }
+
+    if (parsed?.session?.refresh_token) {
+      return normalizePossibleRefreshToken(parsed.session.refresh_token);
+    }
+
+    if (Array.isArray(parsed) && parsed[1]) {
+      return normalizePossibleRefreshToken(parsed[1]);
+    }
+  } catch {
+    // Not JSON. Continue.
+  }
+
+  return token;
+}
+
+function addAccessCandidate(
+  candidates: ProfileSource[],
+  seen: Set<string>,
+  source: string,
+  rawToken: unknown
+) {
+  const token = normalizePossibleAccessToken(rawToken);
+
+  if (!token || seen.has(token)) return;
+
+  seen.add(token);
+  candidates.push({ source, token });
+}
+
+function addRefreshCandidate(
+  candidates: ProfileSource[],
+  seen: Set<string>,
+  source: string,
+  rawToken: unknown
+) {
+  const token = normalizePossibleRefreshToken(rawToken);
+
+  if (!token || seen.has(token)) return;
+
+  seen.add(token);
+  candidates.push({ source, token });
+}
+
+function setSessionCookies(cookies: any, session: any) {
+  const accessToken = session?.access_token;
+  const refreshToken = session?.refresh_token;
+
+  if (accessToken) {
+    cookies.set('sb-access-token', accessToken, {
+      httpOnly: true,
+      secure: import.meta.env.PROD,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60,
+    });
+  }
+
+  if (refreshToken) {
+    cookies.set('sb-refresh-token', refreshToken, {
+      httpOnly: true,
+      secure: import.meta.env.PROD,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 30,
+    });
+  }
+}
+
+async function getAuthenticatedUser(
+  request: Request,
+  cookies: any,
+  authSupabase: any
+): Promise<AuthResult> {
+  const accessCandidates: ProfileSource[] = [];
+  const refreshCandidates: ProfileSource[] = [];
+  const seenAccess = new Set<string>();
+  const seenRefresh = new Set<string>();
+
+  const authHeader =
+    request.headers.get('authorization') ||
+    request.headers.get('Authorization') ||
+    '';
+
+  addAccessCandidate(accessCandidates, seenAccess, 'authorization_header', authHeader);
+
+  const accessCookieNames = [
+    'sb-access-token',
+    'supabase-access-token',
+    'access_token',
+    'access-token',
+    'opc-access-token',
+    'opc_access_token',
+  ];
+
+  const refreshCookieNames = [
+    'sb-refresh-token',
+    'supabase-refresh-token',
+    'refresh_token',
+    'refresh-token',
+    'opc-refresh-token',
+    'opc_refresh_token',
+  ];
+
+  for (const cookieName of accessCookieNames) {
+    addAccessCandidate(
+      accessCandidates,
+      seenAccess,
+      `astro_cookie:${cookieName}`,
+      cookies.get(cookieName)?.value
+    );
+  }
+
+  for (const cookieName of refreshCookieNames) {
+    addRefreshCandidate(
+      refreshCandidates,
+      seenRefresh,
+      `astro_cookie:${cookieName}`,
+      cookies.get(cookieName)?.value
+    );
+  }
+
+  const rawCookieHeader = request.headers.get('cookie') || '';
+  const parsedCookies = parseCookieHeader(rawCookieHeader);
+
+  for (const [cookieName, cookieValue] of Object.entries(parsedCookies)) {
+    const lowerName = cookieName.toLowerCase();
+
+    if (lowerName.includes('refresh')) {
+      addRefreshCandidate(refreshCandidates, seenRefresh, `cookie_header:${cookieName}`, cookieValue);
+      continue;
+    }
+
+    if (
+      lowerName.includes('access') ||
+      lowerName.includes('auth') ||
+      lowerName.startsWith('sb-')
+    ) {
+      addAccessCandidate(accessCandidates, seenAccess, `cookie_header:${cookieName}`, cookieValue);
+    }
+
+    if (lowerName.includes('auth') || lowerName.startsWith('sb-')) {
+      addRefreshCandidate(refreshCandidates, seenRefresh, `cookie_header:${cookieName}`, cookieValue);
+    }
+  }
+
+  const accessErrors: Array<{ source: string; message: string }> = [];
+  const refreshErrors: Array<{ source: string; message: string }> = [];
+
+  for (const candidate of accessCandidates) {
+    const result = await authSupabase.auth.getUser(candidate.token);
+    const user = result?.data?.user || null;
+    const error = result?.error || null;
+
+    if (!error && user) {
+      console.log('[opc/update-client-details] Authenticated via:', candidate.source);
+      return {
+        user,
+        session: null,
+        authenticatedVia: candidate.source,
+      };
+    }
+
+    accessErrors.push({
+      source: candidate.source,
+      message: error?.message || 'No user returned',
+    });
+  }
+
+  for (const candidate of refreshCandidates) {
+    const result = await authSupabase.auth.refreshSession({
+      refresh_token: candidate.token,
+    });
+
+    const user = result?.data?.user || result?.data?.session?.user || null;
+    const session = result?.data?.session || null;
+    const error = result?.error || null;
+
+    if (!error && user && session?.access_token) {
+      console.log('[opc/update-client-details] Authenticated via refresh:', candidate.source);
+
+      setSessionCookies(cookies, session);
+
+      return {
+        user,
+        session,
+        authenticatedVia: candidate.source,
+      };
+    }
+
+    refreshErrors.push({
+      source: candidate.source,
+      message: error?.message || 'No user/session returned',
+    });
+  }
+
+  if (accessCandidates.length === 0 && refreshCandidates.length === 0) {
+    console.error('[opc/update-client-details] No auth token candidates found.', {
+      hasAuthorizationHeader: Boolean(authHeader),
+      cookieNames: Object.keys(parsedCookies),
+    });
+
+    throw new Error('Not authenticated');
+  }
+
+  console.error('[opc/update-client-details] Authentication failed:', {
+    accessCandidatesChecked: accessCandidates.map((candidate) => candidate.source),
+    refreshCandidatesChecked: refreshCandidates.map((candidate) => candidate.source),
+    accessErrors,
+    refreshErrors,
+  });
+
+  throw new Error('Invalid authentication');
+}
+
+async function assertCanManageClients(supabase: any, userId: string) {
+  const { data: staffRole, error: staffRoleError } = await supabase
+    .from('opc_staff_roles')
+    .select(
+      'id, role, status, can_access_portal, can_manage_clients, can_manage_onboarding'
+    )
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .limit(1)
+    .maybeSingle();
+
+  if (staffRoleError) {
+    throw new Error(`Staff role lookup failed: ${staffRoleError.message}`);
+  }
+
+  const opcRole = String(staffRole?.role || '').toLowerCase();
+
+  if (
+    staffRole &&
+    staffRole.can_access_portal === true &&
+    (
+      staffRole.can_manage_clients === true ||
+      staffRole.can_manage_onboarding === true ||
+      ['owner', 'admin', 'dispatch'].includes(opcRole)
+    )
+  ) {
+    return {
+      source: 'opc_staff_roles',
+      role: opcRole || 'staff',
+    };
+  }
+
+  const { data: legacyProfile, error: legacyProfileError } = await supabase
+    .from('user_profiles')
+    .select('id, role')
+    .eq('id', userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (legacyProfileError) {
+    console.warn(
+      '[opc/update-client-details] Legacy profile lookup failed:',
+      legacyProfileError.message
+    );
+  }
+
+  const legacyRole = String(legacyProfile?.role || '').toLowerCase();
+
+  if (['owner', 'admin', 'dispatch'].includes(legacyRole)) {
+    return {
+      source: 'user_profiles',
+      role: legacyRole,
+    };
+  }
+
+  throw new Error('Insufficient permissions');
+}
+
+function pickEditedClient(body: UpdateClientBody) {
+  if (body.editedClient && typeof body.editedClient === 'object') {
+    return body.editedClient;
+  }
+
+  if (body.client && typeof body.client === 'object') {
+    return body.client;
+  }
+
+  return body;
+}
+
+function pickClientId(body: UpdateClientBody, editedClient: Record<string, any>) {
+  return clean(
+    body.clientId ||
+      body.resolvedClientId ||
+      body.id ||
+      editedClient.clientId ||
+      editedClient.resolvedClientId ||
+      editedClient.id
+  );
+}
+
+function hasAnyContactValue(editedClient: Record<string, any>) {
+  return Boolean(
+    clean(editedClient.full_name) ||
+      clean(editedClient.company_name) ||
+      normalizeEmail(editedClient.email) ||
+      clean(editedClient.phone_raw) ||
+      clean(editedClient.phone_e164)
+  );
+}
+
+function buildClientPayload(editedClient: Record<string, any>) {
+  const billingName =
+    clean(editedClient.billing_name) ||
+    clean(editedClient.company_name) ||
+    clean(editedClient.full_name);
+
+  if (!billingName) {
+    throw new Error('Billing name is required.');
+  }
+
+  return {
+    billing_name: billingName,
+    billing_email:
+      normalizeEmail(editedClient.billing_email) ||
+      normalizeEmail(editedClient.email),
+    billing_phone_e164:
+      clean(editedClient.billing_phone_e164) ||
+      clean(editedClient.phone_e164) ||
+      clean(editedClient.phone_raw),
+    billing_address: clean(editedClient.billing_address),
+    internal_notes: clean(editedClient.internal_notes),
+    client_type: clean(editedClient.client_type) || 'unknown',
+    status: clean(editedClient.status) || 'active',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function buildContactPayload(editedClient: Record<string, any>) {
+  return {
+    full_name: clean(editedClient.full_name),
+    company_name:
+      clean(editedClient.company_name) ||
+      clean(editedClient.billing_name),
+    email:
+      normalizeEmail(editedClient.email) ||
+      normalizeEmail(editedClient.billing_email),
+    phone_raw:
+      clean(editedClient.phone_raw) ||
+      clean(editedClient.billing_phone_e164),
+    phone_e164:
+      clean(editedClient.phone_e164) ||
+      clean(editedClient.billing_phone_e164) ||
+      clean(editedClient.phone_raw),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function buildSitePayload(editedClient: Record<string, any>) {
+  return {
+    site_name:
+      clean(editedClient.primary_site_name) ||
+      clean(editedClient.company_name) ||
+      clean(editedClient.billing_name) ||
+      'Hauptstandort',
+    site_type: normalizeSiteType(editedClient.primary_site_type),
+    status: 'active',
+    address_text: clean(editedClient.primary_site_address),
+    postal_code: clean(editedClient.primary_site_postal_code),
+    city: clean(editedClient.primary_site_city),
+    country: clean(editedClient.primary_site_country) || 'CH',
+    is_primary: true,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function getExistingClient(supabase: any, clientId: string) {
+  const { data: client, error } = await supabase
+    .from('opc_clients')
+    .select('id, contact_id, billing_name, metadata')
+    .eq('id', clientId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Client lookup failed: ${error.message}`);
+  }
+
+  if (!client) {
+    throw new Error('Client not found');
+  }
+
+  return client;
+}
+
+async function getPrimarySiteId({
+  supabase,
+  clientId,
+  editedClient,
+}: {
+  supabase: any;
+  clientId: string;
+  editedClient: Record<string, any>;
+}) {
+  const providedSiteId = clean(editedClient.primary_site_id);
+
+  if (providedSiteId) {
+    return providedSiteId;
+  }
+
+  const { data: primarySite, error: primarySiteError } = await supabase
+    .from('opc_client_sites')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('is_primary', true)
+    .eq('status', 'active')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (primarySiteError) {
+    throw new Error(`Primary site lookup failed: ${primarySiteError.message}`);
+  }
+
+  if (primarySite?.id) {
+    return primarySite.id;
+  }
+
+  const { data: firstSite, error: firstSiteError } = await supabase
+    .from('opc_client_sites')
+    .select('id')
+    .eq('client_id', clientId)
+    .neq('status', 'archived')
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (firstSiteError) {
+    throw new Error(`Fallback site lookup failed: ${firstSiteError.message}`);
+  }
+
+  return firstSite?.id || null;
+}
+
+async function ensureContact({
+  supabase,
+  existingClient,
+  editedClient,
+  clientId,
+}: {
+  supabase: any;
+  existingClient: any;
+  editedClient: Record<string, any>;
+  clientId: string;
+}) {
+  const existingContactId =
+    clean(existingClient.contact_id) || clean(editedClient.contact_id);
+
+  if (existingContactId) {
+    return existingContactId;
+  }
+
+  if (!hasAnyContactValue(editedClient)) {
+    return null;
+  }
+
+  const contactPayload = {
+    ...buildContactPayload(editedClient),
+    lifecycle_stage: 'client',
+    source_first: 'manual_client_detail_update',
+    source_last: 'manual_client_detail_update',
+    metadata: {
+      created_from: 'client_detail_update',
+      client_id: clientId,
+    },
+  };
+
+  const { data: createdContact, error: contactCreateError } = await supabase
+    .from('opc_contacts')
+    .insert(contactPayload)
+    .select('id')
+    .single();
+
+  if (contactCreateError) {
+    throw new Error(`Contact creation failed: ${contactCreateError.message}`);
+  }
+
+  const { error: clientContactLinkError } = await supabase
+    .from('opc_clients')
+    .update({
+      contact_id: createdContact.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', clientId);
+
+  if (clientContactLinkError) {
+    throw new Error(
+      `Client contact link update failed: ${clientContactLinkError.message}`
+    );
+  }
+
+  return createdContact.id;
+}
+
+async function updateClientDetails({
+  supabase,
+  clientId,
+  editedClient,
+  userId,
+}: {
+  supabase: any;
+  clientId: string;
+  editedClient: Record<string, any>;
+  userId: string;
+}) {
+  const existingClient = await getExistingClient(supabase, clientId);
+
+  const contactId = await ensureContact({
+    supabase,
+    existingClient,
+    editedClient,
+    clientId,
+  });
+
+  const clientPayload = buildClientPayload(editedClient);
+
+  const { data: updatedClient, error: clientUpdateError } = await supabase
+    .from('opc_clients')
+    .update(clientPayload)
+    .eq('id', clientId)
+    .select('id, contact_id, billing_name, status')
+    .single();
+
+  if (clientUpdateError) {
+    throw new Error(`Client update failed: ${clientUpdateError.message}`);
+  }
+
+  if (contactId) {
+    const contactPayload = buildContactPayload(editedClient);
+
+    const { error: contactUpdateError } = await supabase
+      .from('opc_contacts')
+      .update(contactPayload)
+      .eq('id', contactId);
+
+    if (contactUpdateError) {
+      throw new Error(`Contact update failed: ${contactUpdateError.message}`);
+    }
+  }
+
+  const primarySiteId = await getPrimarySiteId({
+    supabase,
+    clientId,
+    editedClient,
+  });
+
+  const sitePayload = buildSitePayload(editedClient);
+
+  let finalPrimarySiteId = primarySiteId;
+
+  if (primarySiteId) {
+    const { data: updatedSite, error: siteUpdateError } = await supabase
+      .from('opc_client_sites')
+      .update(sitePayload)
+      .eq('id', primarySiteId)
+      .eq('client_id', clientId)
+      .select('id')
+      .single();
+
+    if (siteUpdateError) {
+      throw new Error(`Client site update failed: ${siteUpdateError.message}`);
+    }
+
+    finalPrimarySiteId = updatedSite.id;
+  } else {
+    const insertPayload = {
+      ...sitePayload,
+      client_id: clientId,
+      contact_id: contactId,
+      service_requirements: {},
+      metadata: {
+        source: 'client_detail_manual_edit',
+        created_by: userId,
+      },
+    };
+
+    const { data: newSite, error: siteInsertError } = await supabase
+      .from('opc_client_sites')
+      .insert(insertPayload)
+      .select('id')
+      .single();
+
+    if (siteInsertError) {
+      throw new Error(`Client site creation failed: ${siteInsertError.message}`);
+    }
+
+    finalPrimarySiteId = newSite.id;
+  }
+
+  if (finalPrimarySiteId) {
+    const { error: demoteOtherSitesError } = await supabase
+      .from('opc_client_sites')
+      .update({
+        is_primary: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('client_id', clientId)
+      .neq('id', finalPrimarySiteId);
+
+    if (demoteOtherSitesError) {
+      console.warn(
+        '[opc/update-client-details] Could not demote other sites:',
+        demoteOtherSitesError.message
+      );
+    }
+  }
+
+  try {
+    await supabase.from('opc_client_activity').insert({
+      client_id: clientId,
+      contact_id: contactId,
+      activity_type: 'client_updated',
+      message: `Kundendaten wurden aktualisiert: ${updatedClient.billing_name}`,
+      created_by: userId,
+      metadata: {
+        source: 'client_detail_update',
+        primary_site_id: finalPrimarySiteId,
+      },
+    });
+  } catch (activityError: any) {
+    console.warn(
+      '[opc/update-client-details] Activity creation failed:',
+      activityError?.message || activityError
+    );
+  }
+
+  return {
+    clientId,
+    contactId,
+    primarySiteId: finalPrimarySiteId,
+    billingName: updatedClient.billing_name,
+    status: updatedClient.status,
+  };
+}
+
+export const POST: APIRoute = async ({ request, locals, cookies }) => {
+  const requestId = Date.now().toString(36);
+
+  try {
+    const supabaseAdmin = getServerSupabase(locals);
+    const authSupabase = getAuthSupabase(locals);
+    const authResult = await getAuthenticatedUser(request, cookies, authSupabase);
+
+    await assertCanManageClients(supabaseAdmin, authResult.user.id);
+
+    let body: UpdateClientBody;
+
+    try {
+      body = await request.json();
+    } catch {
+      return jsonResponse(
+        {
+          success: false,
+          error: 'Invalid JSON body.',
+          requestId,
+        },
+        400
+      );
+    }
+
+    const editedClient = pickEditedClient(body);
+    const clientId = pickClientId(body, editedClient);
+
+    if (!clientId) {
+      return jsonResponse(
+        {
+          success: false,
+          error: 'clientId is required.',
+          requestId,
+        },
+        400
+      );
+    }
+
+    const result = await updateClientDetails({
+      supabase: supabaseAdmin,
+      clientId,
+      editedClient,
+      userId: authResult.user.id,
+    });
+
+    return jsonResponse({
+      success: true,
+      message: 'Client details updated successfully.',
+      requestId,
+      authenticatedVia: authResult.authenticatedVia,
+      ...result,
+    });
+  } catch (error: any) {
+    console.error(`[opc/update-client-details] ${requestId} failed:`, error);
+
+    const message = error?.message || 'Client details could not be updated.';
+
+    const status =
+      message === 'Not authenticated' || message === 'Invalid authentication'
+        ? 401
+        : message === 'Insufficient permissions'
+          ? 403
+          : message === 'Client not found'
+            ? 404
+            : 500;
+
+    return jsonResponse(
+      {
+        success: false,
+        error: message,
+        requestId,
+      },
+      status
+    );
+  }
+};
+
+export const GET: APIRoute = async ({ locals }) => {
+  try {
+    const { supabaseUrl } = getSupabaseConfig(locals);
+
+    return jsonResponse({
+      success: true,
+      route: 'opc/update-client-details',
+      status: 'live',
+      projectHost: (() => {
+        try {
+          return new URL(supabaseUrl).host;
+        } catch {
+          return 'invalid-url';
+        }
+      })(),
+    });
+  } catch (error: any) {
+    return jsonResponse(
+      {
+        success: false,
+        route: 'opc/update-client-details',
+        error: error?.message || 'Route configuration error.',
+      },
+      500
+    );
+  }
+};
+
+--- src/pages/api/opc/create-client.ts ---
+import type { APIRoute } from 'astro';
+import { createClient } from '@supabase/supabase-js';
+
+export const prerender = false;
+
+type ProfileSource = {
+  source: 'bearer' | 'cookie';
+  token: string;
+};
+
+const MAX_CERTIFICATE_SIZE = 10 * 1024 * 1024;
+const CERTIFICATE_BUCKET = 'client-files';
+
+function jsonResponse(payload: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function clean(value: FormDataEntryValue | string | null | undefined) {
+  const text = String(value || '').trim();
+  return text || null;
+}
+
+function normalizeEmail(value: FormDataEntryValue | string | null | undefined) {
+  const text = clean(value);
+  return text ? text.toLowerCase() : null;
+}
+
+function splitName(fullName: string | null) {
+  if (!fullName) {
+    return {
+      firstName: null,
+      lastName: null,
+    };
+  }
+
+  const parts = fullName.split(/\s+/).filter(Boolean);
+
+  return {
+    firstName: parts[0] || null,
+    lastName: parts.length > 1 ? parts.slice(1).join(' ') : null,
+  };
+}
+
+function sanitizeFileName(name: string) {
+  return name
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
+}
+
+function isAllowedCertificateType(file: File) {
+  const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+  const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
+  const fileName = file.name.toLowerCase();
+
+  return (
+    allowedTypes.includes(file.type) ||
+    allowedExtensions.some((extension) => fileName.endsWith(extension))
+  );
+}
+
+function buildAddressText(street: string | null, streetNumber: string | null) {
+  return [street, streetNumber].filter(Boolean).join(' ').trim() || null;
+}
+
+function buildBillingAddress({
+  street,
+  streetNumber,
+  city,
+  state,
+  zipCode,
+  country,
+}: {
+  street: string | null;
+  streetNumber: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  country: string | null;
+}) {
+  return [
+    [street, streetNumber].filter(Boolean).join(' ').trim(),
+    [zipCode, city].filter(Boolean).join(' ').trim(),
+    state,
+    country,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function decodeJwtPayload(token: string) {
+  try {
+    const parts = token.split('.');
+
+    if (parts.length < 2) {
+      return null;
+    }
+
+    const payload = parts[1]
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const paddedPayload =
+      payload + '='.repeat((4 - (payload.length % 4)) % 4);
+
+    const decoded =
+      typeof atob === 'function'
+        ? atob(paddedPayload)
+        : Buffer.from(paddedPayload, 'base64').toString('utf8');
+
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
+
+function assertServerKeyLooksSafe(serviceRoleKey: string) {
+  if (!serviceRoleKey) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is missing.');
+  }
+
+  if (
+    serviceRoleKey.startsWith('sb_publishable_') ||
+    serviceRoleKey.includes('anon')
+  ) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is not a server service-role key. It looks like a publishable or anon key.'
+    );
+  }
+
+  if (serviceRoleKey.startsWith('eyJ')) {
+    const payload = decodeJwtPayload(serviceRoleKey);
+    const role = String(payload?.role || '').toLowerCase();
+
+    if (role && role !== 'service_role') {
+      throw new Error(
+        `SUPABASE_SERVICE_ROLE_KEY has wrong JWT role: ${role}. Expected service_role.`
+      );
+    }
+  }
+}
+
+function getEnvValue(locals: any, key: string) {
+  const runtimeEnv = locals?.runtime?.env;
+  const processEnv = (globalThis as any)?.process?.env;
+
+  return (
+    runtimeEnv?.[key] ||
+    import.meta.env?.[key] ||
+    processEnv?.[key] ||
+    ''
+  );
+}
+
+async function getServerSupabase(locals: any) {
+  const supabaseUrl =
+    getEnvValue(locals, 'SUPABASE_URL') ||
+    getEnvValue(locals, 'PUBLIC_SUPABASE_URL');
+
+  const serviceRoleKey = getEnvValue(locals, 'SUPABASE_SERVICE_ROLE_KEY');
+
+  if (!supabaseUrl) {
+    throw new Error('SUPABASE_URL or PUBLIC_SUPABASE_URL is missing.');
+  }
+
+  assertServerKeyLooksSafe(serviceRoleKey);
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        'X-OPC-Admin-Route': 'create-client',
+      },
+    },
+  });
+}
+
+async function getAuthenticatedUser(request: Request, cookies: any, supabase: any) {
+  const cookieToken = cookies.get('sb-access-token')?.value || '';
+  const authHeader = request.headers.get('authorization') || '';
+  const bearerToken = authHeader.startsWith('Bearer ')
+    ? authHeader.replace('Bearer ', '').trim()
+    : '';
+
+  const allCandidates: ProfileSource[] = [
+    { source: 'bearer', token: String(bearerToken || '') },
+    { source: 'cookie', token: String(cookieToken || '') },
+  ];
+
+  const candidates: ProfileSource[] = allCandidates.filter((item) => Boolean(item.token));
+
+  if (candidates.length === 0) {
+    throw new Error('Not authenticated');
+  }
+
+  const errors: Array<{ source: string; message: string }> = [];
+
+  for (const candidate of candidates) {
+    const result = await supabase.auth.getUser(candidate.token);
+
+    const user = result?.data?.user || null;
+    const error = result?.error || null;
+
+    if (!error && user) {
+      return user;
+    }
+
+    errors.push({
+      source: candidate.source,
+      message: error?.message || 'No user returned',
+    });
+  }
+
+  console.error('[opc/create-client] Authentication failed:', errors);
+
+  throw new Error('Invalid authentication');
+}
+async function assertCanCreateClients(supabase: any, userId: string) {
+  const { data: staffRole, error } = await supabase
+    .from('opc_staff_roles')
+    .select('id, role, status, can_access_portal, can_manage_clients')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .eq('can_access_portal', true)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Role lookup failed: ${error.message}`);
+  }
+
+  const role = String(staffRole?.role || '').toLowerCase();
+
+  if (!staffRole || !['owner', 'admin', 'dispatch'].includes(role)) {
+    return false;
+  }
+
+  return true;
+}
+
+async function findOrCreateContact({
+  supabase,
+  companyName,
+  fullName,
+  email,
+  phone,
+  preferredContact,
+  internalNotes,
+  website,
+  industry,
+  taxId,
+  createdBy,
+}: {
+  supabase: any;
+  companyName: string;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  preferredContact: string;
+  internalNotes: string | null;
+  website: string | null;
+  industry: string | null;
+  taxId: string | null;
+  createdBy: string;
+}) {
+  const { firstName, lastName } = splitName(fullName);
+
+  let existingContact: any = null;
+
+  if (email) {
+    const { data, error } = await supabase
+      .from('opc_contacts')
+      .select('*')
+      .eq('email', email)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Contact lookup failed: ${error.message}`);
+    }
+
+    existingContact = data;
+  }
+
+  if (!existingContact && phone) {
+    const { data, error } = await supabase
+      .from('opc_contacts')
+      .select('*')
+      .or(`phone_raw.eq.${phone},phone_e164.eq.${phone}`)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Contact phone lookup failed: ${error.message}`);
+    }
+
+    existingContact = data;
+  }
+
+  const contactPayload = {
+    full_name: fullName,
+    first_name: firstName,
+    last_name: lastName,
+    company_name: companyName,
+    email,
+    phone_raw: phone,
+    phone_e164: phone,
+    preferred_language: 'de',
+    lifecycle_stage: 'client',
+    source_first: existingContact?.source_first || 'manual_client_create',
+    source_last: 'manual_client_create',
+    notes: internalNotes,
+    metadata: {
+      ...(existingContact?.metadata || {}),
+      website,
+      industry,
+      tax_id: taxId,
+      preferred_contact: preferredContact,
+      last_created_from: 'kunde-anlegen',
+      last_created_by: createdBy,
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingContact) {
+    const { data: updatedContact, error } = await supabase
+      .from('opc_contacts')
+      .update(contactPayload)
+      .eq('id', existingContact.id)
+      .select('*')
+      .single();
+
+    if (error) {
+      throw new Error(`Contact update failed: ${error.message}`);
+    }
+
+    return updatedContact;
+  }
+
+  const { data: newContact, error } = await supabase
+    .from('opc_contacts')
+    .insert(contactPayload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw new Error(`Contact creation failed: ${error.message}`);
+  }
+
+  return newContact;
+}
+
+async function uploadBusinessCertificate({
+  supabase,
+  clientId,
+  certificate,
+}: {
+  supabase: any;
+  clientId: string;
+  certificate: File | null;
+}) {
+  if (!certificate || !certificate.name || certificate.size === 0) {
+    return null;
+  }
+
+  if (certificate.size > MAX_CERTIFICATE_SIZE) {
+    throw new Error('Business certificate is larger than 10MB.');
+  }
+
+  if (!isAllowedCertificateType(certificate)) {
+    throw new Error('Business certificate must be PDF, JPG or PNG.');
+  }
+
+  const safeName = sanitizeFileName(certificate.name);
+  const path = `opc-clients/${clientId}/business-certificate/${Date.now()}-${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(CERTIFICATE_BUCKET)
+    .upload(path, certificate, {
+      contentType: certificate.type || 'application/octet-stream',
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(uploadError.message);
+  }
+
+  return {
+    bucket: CERTIFICATE_BUCKET,
+    path,
+    filename: certificate.name,
+    size: certificate.size,
+    type: certificate.type || null,
+    uploaded_at: new Date().toISOString(),
+  };
+}
+
+async function createClientRecord({
+  supabase,
+  form,
+  createdBy,
+}: {
+  supabase: any;
+  form: FormData;
+  createdBy: string;
+}) {
+  const companyName = clean(form.get('companyName'));
+  const fullName = clean(form.get('fullName'));
+  const email = normalizeEmail(form.get('email'));
+  const phone = clean(form.get('phone'));
+  const website = clean(form.get('website'));
+  const industry = clean(form.get('industry'));
+  const taxId = clean(form.get('taxId'));
+  const preferredContact = clean(form.get('preferredContact')) || 'email';
+  const clientType = clean(form.get('clientType')) || 'geschaeftskunden';
+
+  const billingStreet = clean(form.get('billingStreet')) || clean(form.get('street'));
+  const billingStreetNumber =
+    clean(form.get('billingStreetNumber')) || clean(form.get('streetNumber'));
+  const billingCity = clean(form.get('billingCity')) || clean(form.get('city'));
+  const billingState = clean(form.get('billingState')) || clean(form.get('state'));
+  const billingZipCode = clean(form.get('billingZipCode')) || clean(form.get('zipCode'));
+  const billingCountry = clean(form.get('billingCountry')) || clean(form.get('country')) || 'Schweiz';
+
+  const siteStreet = clean(form.get('siteStreet')) || clean(form.get('street'));
+  const siteStreetNumber =
+    clean(form.get('siteStreetNumber')) || clean(form.get('streetNumber'));
+  const siteCity = clean(form.get('siteCity')) || clean(form.get('city'));
+  const siteState = clean(form.get('siteState')) || clean(form.get('state'));
+  const siteZipCode = clean(form.get('siteZipCode')) || clean(form.get('zipCode'));
+  const siteCountry = clean(form.get('siteCountry')) || clean(form.get('country')) || 'Schweiz';
+
+  const internalNotes = clean(form.get('internalNotes'));
+  const certificate = form.get('businessCertificate') as File | null;
+
+  if (!companyName) {
+    return jsonResponse({ success: false, error: 'Company name is required.' }, 400);
+  }
+
+  if (!fullName) {
+    return jsonResponse({ success: false, error: 'Contact person is required.' }, 400);
+  }
+
+  if (!email) {
+    return jsonResponse({ success: false, error: 'Email address is required.' }, 400);
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailRegex.test(email)) {
+    return jsonResponse({ success: false, error: 'Invalid email address.' }, 400);
+  }
+
+  const siteAddressText = buildAddressText(siteStreet, siteStreetNumber);
+
+  const billingAddress = buildBillingAddress({
+    street: billingStreet,
+    streetNumber: billingStreetNumber,
+    city: billingCity,
+    state: billingState,
+    zipCode: billingZipCode,
+    country: billingCountry,
+  });
+
+  const contact = await findOrCreateContact({
+    supabase,
+    companyName,
+    fullName,
+    email,
+    phone,
+    preferredContact,
+    internalNotes,
+    website,
+    industry,
+    taxId,
+    createdBy,
+  });
+
+  const { data: client, error: clientError } = await supabase
+    .from('opc_clients')
+    .insert({
+      contact_id: contact.id,
+      client_type: clientType,
+      status: 'active',
+      billing_name: companyName,
+      billing_email: email,
+      billing_phone_e164: phone,
+      billing_address: billingAddress || null,
+      internal_notes: internalNotes,
+      metadata: {
+        website,
+        industry,
+        tax_id: taxId,
+        preferred_contact: preferredContact,
+        created_from: 'kunde-anlegen',
+        created_by: createdBy,
+        billing_address_parts: {
+          street: billingStreet,
+          street_number: billingStreetNumber,
+          city: billingCity,
+          state: billingState,
+          zip_code: billingZipCode,
+          country: billingCountry,
+        },
+        portal_access_created: false,
+      },
+    })
+    .select('*')
+    .single();
+
+  if (clientError) {
+    throw new Error(`Client creation failed: ${clientError.message}`);
+  }
+
+  const { data: site, error: siteError } = await supabase
+    .from('opc_client_sites')
+    .insert({
+      client_id: client.id,
+      contact_id: contact.id,
+      site_name: companyName,
+      site_type: 'other',
+      status: 'active',
+      address_text: siteAddressText,
+      postal_code: siteZipCode,
+      city: siteCity,
+      country: siteCountry,
+      is_primary: true,
+      metadata: {
+        state: siteState,
+        street: siteStreet,
+        street_number: siteStreetNumber,
+        created_from: 'kunde-anlegen',
+      },
+    })
+    .select('*')
+    .single();
+
+  if (siteError) {
+    throw new Error(`Client site creation failed: ${siteError.message}`);
+  }
+
+  const { error: linkError } = await supabase
+    .from('opc_client_contact_links')
+    .insert({
+      client_id: client.id,
+      contact_id: contact.id,
+      role_label: 'Hauptkontakt',
+      is_primary: true,
+      receives_reports: true,
+      receives_invoices: true,
+      receives_operations_updates: true,
+      metadata: {
+        preferred_contact: preferredContact,
+        created_from: 'kunde-anlegen',
+      },
+    });
+
+  if (linkError) {
+    throw new Error(`Client contact link creation failed: ${linkError.message}`);
+  }
+
+  let certificateMeta: Record<string, unknown> | null = null;
+  let certificateUploadWarning: string | null = null;
+
+  try {
+    certificateMeta = await uploadBusinessCertificate({
+      supabase,
+      clientId: client.id,
+      certificate,
+    });
+  } catch (uploadError: any) {
+    certificateUploadWarning =
+      uploadError?.message || 'Business certificate could not be uploaded.';
+  }
+
+  if (certificateMeta) {
+    const { error: metadataUpdateError } = await supabase
+      .from('opc_clients')
+      .update({
+        metadata: {
+          ...(client.metadata || {}),
+          business_certificate: certificateMeta,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', client.id);
+
+    if (metadataUpdateError) {
+      certificateUploadWarning = metadataUpdateError.message;
+    }
+  }
+
+  const { error: activityError } = await supabase
+    .from('opc_client_activity')
+    .insert({
+      client_id: client.id,
+      contact_id: contact.id,
+      activity_type: 'client_created',
+      message: `Kunde wurde manuell angelegt: ${companyName}`,
+      created_by: createdBy,
+      metadata: {
+        source: 'kunde-anlegen',
+        site_id: site.id,
+        certificate_uploaded: Boolean(certificateMeta),
+        certificate_warning: certificateUploadWarning,
+      },
+    });
+
+  if (activityError) {
+    console.warn('[opc/create-client] Activity creation failed:', activityError.message);
+  }
+
+  return jsonResponse({
+    success: true,
+    clientId: client.id,
+    contactId: contact.id,
+    siteId: site.id,
+    certificate: certificateMeta,
+    certificateWarning: certificateUploadWarning,
+    message: 'Client created successfully.',
+  });
+}
+
+export const GET: APIRoute = async ({ request, locals, cookies }) => {
+  try {
+    const supabase = await getServerSupabase(locals);
+    const user = await getAuthenticatedUser(request, cookies, supabase);
+    const canCreate = await assertCanCreateClients(supabase, user.id);
+
+    if (!canCreate) {
+      return jsonResponse({ success: false, error: 'Insufficient permissions.' }, 403);
+    }
+
+    const { data: clients, error: clientsError } = await supabase
+      .from('opc_clients')
+      .select(
+        'id, contact_id, client_type, status, billing_name, billing_email, billing_phone_e164, created_at, metadata'
+      )
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    if (clientsError) {
+      throw new Error(clientsError.message);
+    }
+
+    const contactIds = [
+      ...new Set((clients || []).map((client: any) => client.contact_id).filter(Boolean)),
+    ];
+
+    let contactsById = new Map<string, any>();
+
+    if (contactIds.length > 0) {
+      const { data: contacts, error: contactsError } = await supabase
+        .from('opc_contacts')
+        .select('id, full_name, company_name, email, phone_raw, phone_e164')
+        .in('id', contactIds);
+
+      if (contactsError) {
+        throw new Error(contactsError.message);
+      }
+
+      contactsById = new Map((contacts || []).map((contact: any) => [contact.id, contact]));
+    }
+
+    const mappedClients = (clients || []).map((client: any) => {
+      const contact = contactsById.get(client.contact_id);
+
+      return {
+        id: client.id,
+        contact_id: client.contact_id,
+        company_name: client.billing_name || contact?.company_name || 'Unbekannt',
+        client_name: contact?.full_name || client.billing_name || 'Unbekannt',
+        email: client.billing_email || contact?.email || '',
+        phone: client.billing_phone_e164 || contact?.phone_e164 || contact?.phone_raw || '',
+        status: client.status || 'active',
+        client_type: client.client_type || 'unknown',
+        created_at: client.created_at,
+        has_portal_access: false,
+      };
+    });
+
+    return jsonResponse({
+      success: true,
+      clients: mappedClients,
+    });
+  } catch (error: any) {
+    console.error('[opc/create-client] GET failed:', error);
+
+    const status =
+      error?.message === 'Not authenticated' ||
+      error?.message === 'Invalid authentication'
+        ? 401
+        : 500;
+
+    return jsonResponse(
+      {
+        success: false,
+        error: error?.message || 'Clients could not be loaded.',
+      },
+      status
+    );
+  }
+};
+
+export const POST: APIRoute = async ({ request, locals, cookies }) => {
+  try {
+    const supabase = await getServerSupabase(locals);
+    const user = await getAuthenticatedUser(request, cookies, supabase);
+    const canCreate = await assertCanCreateClients(supabase, user.id);
+
+    if (!canCreate) {
+      return jsonResponse({ success: false, error: 'Insufficient permissions.' }, 403);
+    }
+
+    const form = await request.formData();
+
+    return await createClientRecord({
+      supabase,
+      form,
+      createdBy: user.id,
+    });
+  } catch (error: any) {
+    console.error('[opc/create-client] POST failed:', error);
+
+    const status =
+      error?.message === 'Not authenticated' ||
+      error?.message === 'Invalid authentication'
+        ? 401
+        : 500;
+
+    return jsonResponse(
+      {
+        success: false,
+        error: error?.message || 'Client could not be created.',
+      },
+      status
+    );
+  }
+};

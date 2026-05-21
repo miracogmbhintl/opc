@@ -1,0 +1,23 @@
+---
+import PublicTicketForm from "../../components/PublicTicketForm";
+
+export const prerender = false;
+
+const token = Astro.params.token || "";
+---
+
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Orange Pro Clean Meldung</title>
+    <meta
+      name="description"
+      content="Melden Sie Schäden, Reinigungsbedarf oder Hinweise direkt an Orange Pro Clean."
+    />
+  </head>
+
+  <body style="margin:0;">
+    <PublicTicketForm token={token} client:load />
+  </body>
+</html>

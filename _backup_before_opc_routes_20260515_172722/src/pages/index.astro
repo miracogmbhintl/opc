@@ -1,0 +1,128 @@
+
+
+
+
+---
+import Layout from '../layouts/main.astro';
+import MirakaLogin from '../components/MirakaLogin';
+import { baseUrl } from '../lib/base-url';
+---
+
+<Layout>
+<div id="loading-screen" data-loading-active="true" style="min-height: 100vh; background: #F2F2F2;">
+<!-- Webflow loading screen will be rendered here by React -->
+<noscript>
+  <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F2F2F2; font-family: 'Inter', sans-serif;">
+    <div style="text-align: center; padding: 40px; background: white; border-radius: 20px; max-width: 500px;">
+      <h2 style="color: #DC2626; margin-bottom: 16px;">JavaScript Required</h2>
+      <p style="color: #666;">This application requires JavaScript to be enabled.</p>
+    </div>
+  </div>
+</noscript>
+</div>
+
+<div id="login-root" style="min-height: 100vh; background: #F2F2F2;">
+<!-- Login will be rendered here with TranslationProvider -->
+<div id="fallback-error" style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #F2F2F2; font-family: 'Inter', sans-serif; padding: 20px;">
+  <div style="text-align: center; padding: 40px; background: white; border-radius: 20px; max-width: 500px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+    <div style="width: 64px; height: 64px; background: #FEE2E2; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px;">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+    </div>
+    <h2 style="color: #DC2626; margin-bottom: 16px; font-size: 24px; font-weight: 600;">Configuration Error</h2>
+    <p style="color: #666; margin-bottom: 24px; line-height: 1.6;">Loading Miraka portal...</p>
+    <p style="color: #999; font-size: 14px;">If this message persists, check your environment variables.</p>
+  </div>
+</div>
+</div>
+
+<script>
+  // Import and render the Webflow loading screen
+  import { createRoot } from 'react-dom/client';
+  import { createElement } from 'react';
+  import { DevLinkProvider } from '../site-components/DevLinkProvider';
+  import { LoadInScreen } from '../site-components/LoadInScreen';
+  import { TranslationProvider } from '../lib/TranslationContext';
+  import MirakaLogin from '../components/MirakaLogin';
+  import '../site-components/global.css';
+
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('🟢 DOM Content Loaded');
+    const loadingScreen = document.getElementById('loading-screen');
+    const loginRoot = document.getElementById('login-root');
+    const fallbackError = document.getElementById('fallback-error');
+
+    if (loadingScreen) {
+      // Render Webflow loading screen
+      try {
+        const root = createRoot(loadingScreen);
+        root.render(
+          createElement(DevLinkProvider, null,
+            createElement(LoadInScreen)
+          )
+        );
+        console.log('✅ Loading screen rendered');
+      } catch (error) {
+        console.error('❌ Error rendering loading screen:', error);
+      }
+
+      // Hide after animation completes (3.5 seconds total)
+      // This gives time for the auth redirect to happen smoothly
+      setTimeout(() => {
+        if (loadingScreen) {
+          loadingScreen.style.opacity = '0';
+          loadingScreen.style.transition = 'opacity 800ms ease-in-out';
+
+          setTimeout(() => {
+            loadingScreen.style.display = 'none';
+          }, 800);
+        }
+      }, 3500); // Matches the Webflow animation + auth processing time
+    }
+
+    // Render Login with TranslationProvider
+    if (loginRoot) {
+      try {
+        console.log('🔄 Attempting to render login component...');
+        const loginRootInstance = createRoot(loginRoot);
+        loginRootInstance.render(
+          createElement(TranslationProvider, null,
+            createElement(MirakaLogin, { baseUrl: import.meta.env.BASE_URL || '' })
+          )
+        );
+        
+        console.log('✅ React render call completed');
+        
+        // Hide fallback error once React renders
+        if (fallbackError) {
+          setTimeout(() => {
+            console.log('🔄 Hiding fallback error...');
+            fallbackError.style.display = 'none';
+          }, 100);
+        }
+        
+        console.log('✅ Login component render initiated');
+      } catch (error) {
+        console.error('❌ Error rendering login:', error);
+        
+        // Show error in fallback
+        if (fallbackError) {
+          const errorText = fallbackError.querySelector('p');
+          if (errorText) {
+            errorText.textContent = `Error: ${error.message || 'Failed to load login component'}`;
+          }
+        }
+      }
+    }
+  });
+</script>
+</Layout>
+
+
+
+
+
+

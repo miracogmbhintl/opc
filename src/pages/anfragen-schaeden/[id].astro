@@ -1,0 +1,43 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import TicketDetailPage from '../../components/TicketDetailPage';
+
+export const prerender = false;
+
+const ticketId = Astro.params.id || '';
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ticket Details - Orange Pro Clean</title>
+</head>
+
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    requiredRole={['owner', 'admin', 'dispatch', 'employee', 'client']}
+    currentPath="/anfragen-schaeden"
+    fullWidth={true}
+    hideTopBar={true}
+  >
+    <TicketDetailPage ticketId={ticketId} client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
+
+<style>
+  :global(html),
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    font-family: Inter, Helvetica, Arial, sans-serif;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+</style>

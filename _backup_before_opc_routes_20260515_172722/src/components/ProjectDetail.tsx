@@ -1,0 +1,4154 @@
+import React, { useState, useEffect } from 'react';
+import { useProject, useProjectMilestones, useProjectFiles } from '../hooks/use-projects';
+import { supabase } from '../lib/supabase';
+import { updateProjectProgress, createMilestone, updateMilestoneStatus } from '../lib/supabase-projects';
+import { baseUrl } from '../lib/base-url';
+import { formatFileSize } from '../lib/file-utils';
+import { Plus, Edit2, Send, AlertCircle, RefreshCw, CheckCircle2, Clock, User, Upload, FolderPlus, X, Trash2, MessageSquare, Calendar, MapPin, DollarSign, ChevronDown, ChevronUp, FileText, MoreVertical, Search, Download, FolderUp } from 'lucide-react';
+import ExpandableMilestone from './ExpandableMilestone';
+import {
+  EditProjectModal,
+  CreateMilestoneModal,
+  CreateTicketModal
+} from './ProjectDetailModals';
+import { Badge } from './ui/badge';
+import WebflowLoadingScreen from './shared/WebflowLoadingScreen';
+import FilePreviewModal from './FilePreviewModal';
+import FileCardPreview from './FileCardPreview';
+
+interface ProjectDetailProps {
+  projectId: string;
+}
+
+interface ChatMessage {
+  id: string;
+  message: string;
+  created_at: string;
+  user_id: string;
+  sender_name?: string;
+}
+
+export default function ProjectDetail({ projectId }: ProjectDetailProps) {
+  const { project, loading, error, refresh: refetch } = useProject(projectId);
+  const { milestones, loading: milestonesLoading, refresh: refetchMilestones } = useProjectMilestones(projectId);
+  const { files, loading: filesLoading, refresh: refetchFiles } = useProjectFiles(projectId);
+
+  // User role state
+  const [userRole, setUserRole] = useState<'admin' | 'owner' | 'client' | 'freelancer'>('client');
+  
+  // Clients list state (for reassignment)
+  const [clients, setClients] = useState<Array<{ id: string; company_name: string; client_name: string }>>([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  
+  // Mobile detection state
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Folder navigation state
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
+  const [folderPath, setFolderPath] = useState<Array<{ id: string | null; name: string }>>([
+    { id: null, name: 'Files' }
+  ]);
+
+  // Drag and drop state
+  const [draggedItem, setDraggedItem] = useState<any | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isDraggingOverRoot, setIsDraggingOverRoot] = useState(false);
+
+  // Multi-select state
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+  // Clipboard state (for cut/copy/paste)
+  const [clipboard, setClipboard] = useState<{
+    items: any[];
+    operation: 'copy' | 'cut' | null;
+  }>({ items: [], operation: null });
+
+  // Undo history state
+  const [undoHistory, setUndoHistory] = useState<Array<{
+    action: 'move' | 'delete' | 'rename';
+    items: any[];
+    fromFolderId: string | null;
+    toFolderId?: string | null;
+    timestamp: number;
+  }>>([]);
+
+  // Modal states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showProjectActions, setShowProjectActions] = useState(false);
+  
+  // File upload states - REDESIGNED for multiple uploads with progress
+  const [uploadingFiles, setUploadingFiles] = useState<Array<{
+    id: string;
+    file: File;
+    progress: number;
+    error?: string;
+  }>>([]);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+
+  // File preview state
+  const [previewFile, setPreviewFile] = useState<any | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  
+  // File menu state
+  const [fileMenuOpen, setFileMenuOpen] = useState<string | null>(null);
+  
+  // Search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Chat states
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+
+  // Form states - REMOVED progress_percent from here
+  const [editForm, setEditForm] = useState({
+    project_title: '',
+    description: '',
+    status: '',
+    start_date: '',
+    deadline: '',
+    client_id: ''
+  });
+
+  const [milestoneForm, setMilestoneForm] = useState({
+    title: '',
+    description: '',
+    status: 'planned',
+    due_date: ''
+  });
+
+  const [ticketForm, setTicketForm] = useState({
+    title: '',
+    description: '',
+    priority: 'medium',
+    category: 'general'
+  });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [updatingMilestone, setUpdatingMilestone] = useState<string | null>(null);
+
+  // Get user role on mount
+  useEffect(() => {
+    const getUserRole = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          console.log('❌ No user found');
+          return;
+        }
+
+        console.log('👤 User ID:', user.id);
+
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+        console.log('📋 Profile data:', profile);
+
+        if (profile && profile.role) {
+          console.log('✅ User role detected:', profile.role);
+          setUserRole(profile.role as 'admin' | 'owner' | 'client' | 'freelancer');
+          
+          // Fetch clients list if owner/admin
+          if (profile.role === 'owner' || profile.role === 'admin') {
+            fetchClients();
+          }
+        } else {
+          console.log('⚠️ No role found in profile');
+        }
+      } catch (err) {
+        console.error('❌ Error fetching user role:', err);
+      }
+    };
+
+    getUserRole();
+    
+    // Check if mobile on mount and set up resize listener
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Fetch clients for reassignment dropdown
+  const fetchClients = async () => {
+    setLoadingClients(true);
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, company_name, client_name')
+        .order('company_name', { ascending: true });
+
+      if (error) throw error;
+
+      setClients(data || []);
+    } catch (err) {
+      console.error('Error fetching clients:', err);
+    } finally {
+      setLoadingClients(false);
+    }
+  };
+
+  // Load chat messages
+  useEffect(() => {
+    if (projectId) {
+      loadMessages();
+    }
+  }, [projectId]);
+
+  const loadMessages = async () => {
+    setLoadingMessages(true);
+    setMessagesError(null);
+    
+    try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        console.log('Not authenticated, skipping message load');
+        setMessagesError('Please log in to view messages');
+        setMessages([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('*, profiles(full_name)')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error loading messages:', error);
+        setMessagesError('Unable to load messages');
+        return;
+      }
+
+      const formattedMessages = data?.map(msg => ({
+        id: msg.id,
+        message: msg.message,
+        created_at: msg.created_at,
+        user_id: msg.user_id,
+        sender_name: msg.profiles?.full_name || 'Unknown User'
+      })) || [];
+
+      setMessages(formattedMessages);
+    } catch (err) {
+      console.error('Error loading messages:', err);
+      setMessagesError('Failed to load messages');
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  // Initialize edit form when modal opens - NO progress_percent
+  const handleOpenEditModal = () => {
+    if (project) {
+      setEditForm({
+        project_title: project.project_title || '',
+        description: project.description || '',
+        status: project.status || '',
+        start_date: project.start_date || '',
+        deadline: project.deadline || '',
+        client_id: project.client_id || ''
+      });
+    }
+    setShowEditModal(true);
+  };
+
+  // Handle edit project - NO progress_percent update
+  const handleEditProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    try {
+      const updateData: any = {
+        project_title: editForm.project_title,
+        description: editForm.description,
+        status: editForm.status,
+        start_date: editForm.start_date,
+        deadline: editForm.deadline,
+        last_update_at: new Date().toISOString()
+      };
+
+      // Only update client_id if user is owner/admin
+      if ((userRole === 'owner' || userRole === 'admin') && editForm.client_id) {
+        updateData.client_id = editForm.client_id;
+      }
+
+      const { error } = await supabase
+        .from('projects')
+        .update(updateData)
+        .eq('id', projectId);
+
+      if (error) throw error;
+
+      alert('Project updated successfully!');
+      setShowEditModal(false);
+      refetch();
+    } catch (err) {
+      console.error('Error updating project:', err);
+      alert('Failed to update project');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle delete project (owner only)
+  const handleDeleteProject = async () => {
+    if (userRole !== 'owner' && userRole !== 'admin') {
+      alert('Only owners can delete projects');
+      return;
+    }
+
+    const confirmed = confirm(
+      `Are you sure you want to delete "${project?.project_title}"?\n\nThis will permanently delete:\n- The project\n- All milestones\n- All files\n- All messages\n- All tickets\n\nThis action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSubmitting(true);
+
+      // Delete project (cascade will handle related records)
+      const { error } = await supabase
+        .from('projects')
+        .delete()
+        .eq('id', projectId);
+
+      if (error) throw error;
+
+      alert('Project deleted successfully');
+      
+      // Redirect to projects list
+      window.location.href = `${baseUrl}/miraka-co-portal/projects`;
+    } catch (err: any) {
+      console.error('Error deleting project:', err);
+      alert(`Failed to delete project: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle create milestone with automatic progress update
+  const handleCreateMilestone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    try {
+      await createMilestone(projectId, {
+        title: milestoneForm.title,
+        description: milestoneForm.description,
+        status: milestoneForm.status as 'planned' | 'in_progress' | 'done',
+        due_date: milestoneForm.due_date,
+        project_id: projectId
+      });
+
+      alert('Milestone created! Project progress updated automatically.');
+      setShowMilestoneModal(false);
+      setMilestoneForm({ title: '', description: '', status: 'planned', due_date: '' });
+      
+      // Refresh both milestones and project to show updated progress
+      await refetchMilestones();
+      await refetch();
+    } catch (err) {
+      console.error('Error creating milestone:', err);
+      alert('Failed to create milestone');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Handle milestone status change with automatic progress update
+  const handleToggleMilestoneStatus = async (milestoneId: string, currentStatus: string) => {
+    setUpdatingMilestone(milestoneId);
+    
+    try {
+      // Cycle through statuses: planned -> in_progress -> done -> planned
+      let newStatus: 'planned' | 'in_progress' | 'done';
+      if (currentStatus === 'planned') {
+        newStatus = 'in_progress';
+      } else if (currentStatus === 'in_progress') {
+        newStatus = 'done';
+      } else {
+        newStatus = 'planned';
+      }
+      
+      await updateMilestoneStatus(milestoneId, newStatus);
+      
+      // Refresh both milestones and project to show updated progress
+      await refetchMilestones();
+      await refetch();
+    } catch (err) {
+      console.error('Error updating milestone:', err);
+      alert('Failed to update milestone status');
+    } finally {
+      setUpdatingMilestone(null);
+    }
+  };
+
+  // Handle milestone notes update
+  const handleNotesUpdate = async () => {
+    // Refresh milestones to show updated notes
+    await refetchMilestones();
+  };
+
+  // Handle send message
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim()) return;
+
+    setSendingMessage(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        alert('Please log in to send messages');
+        setSendingMessage(false);
+        return;
+      }
+
+      const { error } = await supabase
+        .from('chat_messages')
+        .insert({
+          project_id: projectId,
+          user_id: user.id,
+          message: newMessage.trim()
+        });
+
+      if (error) throw error;
+
+      setNewMessage('');
+      await loadMessages();
+    } catch (err) {
+      console.error('Error sending message:', err);
+      alert('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // Handle create ticket
+  const handleCreateTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase
+        .from('tickets')
+        .insert({
+          project_id: projectId,
+          user_id: user.id,
+          title: ticketForm.title,
+          description: ticketForm.description,
+          priority: ticketForm.priority,
+          category: ticketForm.category,
+          status: 'open'
+        });
+
+      if (error) throw error;
+
+      alert('Ticket created successfully!');
+      setShowTicketModal(false);
+      setTicketForm({ title: '', description: '', priority: 'medium', category: 'general' });
+    } catch (err) {
+      console.error('Error creating ticket:', err);
+      alert('Failed to create ticket');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ✅ Handle file/folder click
+  const handleFileClick = (file: any) => {
+    if (file.type === 'folder') {
+      // Navigate into folder
+      console.log('📁 Opening folder:', file.filename);
+      setCurrentFolderId(file.id);
+      setFolderPath(prev => [...prev, { id: file.id, name: file.filename }]);
+      return;
+    }
+    
+    // Open file preview
+    console.log('👁️ Opening file preview:', file.filename);
+    setPreviewFile(file);
+    setShowPreviewModal(true);
+  };
+
+  // ✅ Navigate to folder (for breadcrumb clicks)
+  const navigateToFolder = (folderId: string | null) => {
+    setCurrentFolderId(folderId);
+    
+    // Update folder path to remove everything after the clicked folder
+    const folderIndex = folderPath.findIndex(f => f.id === folderId);
+    if (folderIndex !== -1) {
+      setFolderPath(folderPath.slice(0, folderIndex + 1));
+    }
+  };
+
+  // ✅ Back button handler
+  const handleBackToParent = () => {
+    if (folderPath.length > 1) {
+      const parentFolder = folderPath[folderPath.length - 2];
+      navigateToFolder(parentFolder.id);
+    }
+  };
+
+  // ✅ Close preview modal
+  const handleClosePreview = () => {
+    setShowPreviewModal(false);
+    setPreviewFile(null);
+  };
+
+  // ✅ Multi-select handlers
+
+  // ✅ Navigate to next/prev file in preview
+  const handleNavigateFile = (direction: 'next' | 'prev') => {
+    if (!previewFile || !currentFiles) return;
+    
+    // Get only actual files (not folders)
+    const filesOnly = currentFiles.filter(f => f.type === 'file');
+    const currentIndex = filesOnly.findIndex(f => f.id === previewFile.id);
+    
+    if (currentIndex === -1) return;
+    
+    let newIndex: number;
+    if (direction === 'next') {
+      newIndex = currentIndex + 1 >= filesOnly.length ? 0 : currentIndex + 1;
+    } else {
+      newIndex = currentIndex - 1 < 0 ? filesOnly.length - 1 : currentIndex - 1;
+    }
+    
+    setPreviewFile(filesOnly[newIndex]);
+  };
+  const toggleItemSelection = (itemId: string) => {
+    setSelectedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      // Exit selection mode if no items selected
+      if (newSet.size === 0) {
+        setIsSelectionMode(false);
+      } else if (newSet.size === 1) {
+        setIsSelectionMode(true);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAll = () => {
+    if (currentFiles) {
+      setSelectedItems(new Set(currentFiles.map(f => f.id)));
+      setIsSelectionMode(true);
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedItems(new Set());
+    setIsSelectionMode(false);
+  };
+
+  // ✅ Keyboard shortcuts handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const currentFiles = files?.filter(f => f.parent_id === currentFolderId) || [];
+      
+      // Ctrl+A or Cmd+A - Select all
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      }
+      
+      // Ctrl+C or Cmd+C - Copy
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && selectedItems.size > 0) {
+        e.preventDefault();
+        const items = currentFiles?.filter(f => selectedItems.has(f.id)) || [];
+        setClipboard({ items, operation: 'copy' });
+        console.log('📋 Copied', items.length, 'items');
+        alert(`Copied ${items.length} item(s)`);
+      }
+      
+      // Ctrl+X or Cmd+X - Cut
+      if ((e.ctrlKey || e.metaKey) && e.key === 'x' && selectedItems.size > 0) {
+        e.preventDefault();
+        const items = currentFiles?.filter(f => selectedItems.has(f.id)) || [];
+        setClipboard({ items, operation: 'cut' });
+        console.log('✂️ Cut', items.length, 'items');
+        alert(`Cut ${items.length} item(s)`);
+      }
+      
+      // Ctrl+V or Cmd+V - Paste
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v' && clipboard.items.length > 0) {
+        e.preventDefault();
+        handlePaste();
+      }
+      
+      // Ctrl+Z or Cmd+Z - Undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && undoHistory.length > 0) {
+        e.preventDefault();
+        handleUndo();
+      }
+      
+      // Escape - Clear selection
+      if (e.key === 'Escape') {
+        clearSelection();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedItems, clipboard, undoHistory, files, currentFolderId]);
+
+  // ✅ Paste handler
+  const handlePaste = async () => {
+    if (clipboard.items.length === 0) return;
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      console.log(`📌 Pasting ${clipboard.items.length} items to folder:`, currentFolderId);
+
+      for (const item of clipboard.items) {
+        if (clipboard.operation === 'cut') {
+          // Move: update parent_id
+          await supabase
+            .from('project_files')
+            .update({ 
+              parent_id: currentFolderId,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', item.id);
+        } else {
+          // Copy: create duplicate
+          await supabase
+            .from('project_files')
+            .insert({
+              filename: `${item.filename} (copy)`,
+              type: item.type,
+              bucket: item.bucket,
+              storage_path: item.storage_path,
+              size: item.size,
+              file_type: item.file_type,
+              project_id: item.project_id,
+              parent_id: currentFolderId,
+              uploaded_by: user.id,
+              visibility: item.visibility
+            });
+        }
+      }
+
+      // Add to undo history
+      if (clipboard.operation === 'cut') {
+        setUndoHistory(prev => [...prev, {
+          action: 'move',
+          items: clipboard.items,
+          fromFolderId: clipboard.items[0].parent_id,
+          toFolderId: currentFolderId,
+          timestamp: Date.now()
+        }]);
+      }
+
+      alert(`${clipboard.operation === 'cut' ? 'Moved' : 'Copied'} ${clipboard.items.length} item(s)`);
+      
+      // Clear clipboard if cut
+      if (clipboard.operation === 'cut') {
+        setClipboard({ items: [], operation: null });
+      }
+      
+      clearSelection();
+      await refetchFiles();
+    } catch (err: any) {
+      console.error('❌ Paste error:', err);
+      alert(`Failed to paste: ${err.message}`);
+    }
+  };
+
+  // ✅ Undo handler
+  const handleUndo = async () => {
+    if (undoHistory.length === 0) return;
+
+    const lastAction = undoHistory[undoHistory.length - 1];
+    
+    try {
+      if (lastAction.action === 'move') {
+        // Reverse the move
+        for (const item of lastAction.items) {
+          await supabase
+            .from('project_files')
+            .update({ 
+              parent_id: lastAction.fromFolderId,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', item.id);
+        }
+        
+        alert(`Undone: Moved ${lastAction.items.length} item(s) back`);
+      }
+
+      // Remove from history
+      setUndoHistory(prev => prev.slice(0, -1));
+      await refetchFiles();
+    } catch (err: any) {
+      console.error('❌ Undo error:', err);
+      alert(`Failed to undo: ${err.message}`);
+    }
+  };
+
+  // ✅ Enhanced drag handlers with multi-select support
+  const handleDragStart = (e: React.DragEvent, item: any) => {
+    console.log('🎯 Drag start:', item.filename);
+    
+    // If item is selected, drag all selected items
+    if (selectedItems.has(item.id)) {
+      const itemsToDrag = currentFiles?.filter(f => selectedItems.has(f.id)) || [];
+      setDraggedItem({ ...item, multiDrag: true, items: itemsToDrag });
+      
+      // Create custom drag preview for multiple items
+      const dragPreview = document.createElement('div');
+      dragPreview.style.cssText = `
+        position: absolute;
+        top: -1000px;
+        padding: 12px 16px;
+        background: #1A1A1A;
+        color: #FFFFFF;
+        border-radius: 10px;
+        font-family: 'Poppins', sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      `;
+      dragPreview.textContent = `Moving ${itemsToDrag.length} items`;
+      document.body.appendChild(dragPreview);
+      e.dataTransfer.setDragImage(dragPreview, 0, 0);
+      setTimeout(() => document.body.removeChild(dragPreview), 0);
+    } else {
+      setDraggedItem(item);
+    }
+    
+    setIsDragging(true);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragEnd = () => {
+    console.log('🎯 Drag end');
+    setDraggedItem(null);
+    setDragOverFolderId(null);
+    setIsDragging(false);
+    setIsDraggingOverRoot(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent, targetFolder: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Only allow dropping on folders
+    if (targetFolder.type === 'folder' && draggedItem && draggedItem.id !== targetFolder.id) {
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverFolderId(targetFolder.id);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverFolderId(null);
+  };
+
+  // ✅ Enhanced drop handler with multi-select and breadcrumb support
+  const handleDrop = async (e: React.DragEvent, targetFolder: any) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!draggedItem) {
+      setDragOverFolderId(null);
+      return;
+    }
+
+    const itemsToMove = draggedItem.multiDrag ? draggedItem.items : [draggedItem];
+    
+    console.log('📦 Drop:', itemsToMove.length, 'items →', targetFolder.name || targetFolder.filename);
+    
+    // Prevent dropping folder into itself
+    if (itemsToMove.some((item: any) => item.id === targetFolder.id)) {
+      alert('Cannot move a folder into itself');
+      setDragOverFolderId(null);
+      return;
+    }
+
+    try {
+      // Store for undo
+      const fromFolderId = currentFolderId;
+
+      // Update all items
+      for (const item of itemsToMove) {
+        const { error } = await supabase
+          .from('project_files')
+          .update({ 
+            parent_id: targetFolder.id || targetFolder.folderId,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', item.id);
+
+        if (error) throw error;
+      }
+
+      // Add to undo history
+      setUndoHistory(prev => [...prev, {
+        action: 'move',
+        items: itemsToMove,
+        fromFolderId,
+        toFolderId: targetFolder.id || targetFolder.folderId,
+        timestamp: Date.now()
+      }]);
+
+      console.log('✅ Items moved successfully');
+      alert(`Moved ${itemsToMove.length} item(s) to "${targetFolder.name || targetFolder.filename}"`);
+      
+      clearSelection();
+      await refetchFiles();
+    } catch (err: any) {
+      console.error('❌ Error moving items:', err);
+      alert(`Failed to move: ${err.message}`);
+    } finally {
+      setDragOverFolderId(null);
+      setDraggedItem(null);
+      setIsDragging(false);
+    }
+  };
+
+  // ✅ Breadcrumb drop handler
+  const handleBreadcrumbDragOver = (e: React.DragEvent, folderId: string | null) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (draggedItem) {
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverFolderId(folderId || 'breadcrumb-root');
+    }
+  };
+
+  const handleBreadcrumbDrop = async (e: React.DragEvent, folderId: string | null, folderName: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    await handleDrop(e, { id: folderId, folderId, name: folderName, filename: folderName, type: 'folder' });
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusColors: Record<string, { bg: string; text: string }> = {
+      'pending': { bg: '#DBEAFE', text: '#1E40AF' },
+      'at_risk': { bg: '#FEF3C7', text: '#92400E' },
+      'active': { bg: '#DCFCE7', text: '#166534' },
+      'completed': { bg: '#E5E7EB', text: '#374151' }
+    };
+
+    const colors = statusColors[status] || { bg: '#F3F4F6', text: '#6B7280' };
+    const displayStatus = status.replace(/_/g, ' ');
+
+    return (
+      <span style={{
+        display: 'inline-block',
+        padding: '4px 12px',
+        borderRadius: '12px',
+        fontSize: '13px',
+        fontWeight: 500,
+        background: colors.bg,
+        color: colors.text,
+        textTransform: 'capitalize'
+      }}>
+        {displayStatus}
+      </span>
+    );
+  };
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return '-';
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  const formatTime = (dateString: string) => {
+    return new Date(dateString).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  };
+
+  // formatFileSize is now imported from lib/file-utils
+
+  // ✅ Utility function to convert URLs in text to clickable links
+  const linkifyText = (text: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRegex);
+    
+    return parts.map((part, index) => {
+      if (part.match(urlRegex)) {
+        return (
+          <a
+            key={index}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: '#1A73E8',
+              textDecoration: 'underline',
+              wordBreak: 'break-all'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#0D47A1';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = '#1A73E8';
+            }}
+          >
+            {part}
+          </a>
+        );
+      }
+      return part;
+    });
+  };
+
+  // ✅ Filter files by current folder OR search query (project-wide)
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const currentFiles = normalizedSearchQuery
+    ? (files || []).filter(file =>
+        file.filename?.toLowerCase().includes(normalizedSearchQuery)
+      )
+    : (files || []).filter(file => file.parent_id === currentFolderId);
+
+  // ✅ Handle multiple file uploads with progress tracking
+  const uploadFiles = async (fileList: FileList) => {
+    const filesArray = Array.from(fileList);
+    
+    // Create upload tracking entries
+    const uploadEntries = filesArray.map(file => ({
+      id: `${Date.now()}-${Math.random()}`,
+      file,
+      progress: 0
+    }));
+    
+    setUploadingFiles(prev => [...prev, ...uploadEntries]);
+
+    // Upload all files simultaneously
+    await Promise.all(
+      uploadEntries.map(async (entry) => {
+        try {
+          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          
+          if (userError || !user) {
+            throw new Error('Authentication failed');
+          }
+
+          // Generate unique file path
+          const timestamp = Date.now();
+          const fileName = entry.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const storagePath = `${projectId}/${timestamp}-${fileName}`;
+
+          // Update progress to 10%
+          setUploadingFiles(prev =>
+            prev.map(f => f.id === entry.id ? { ...f, progress: 10 } : f)
+          );
+
+          // Upload to storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('client-files')
+            .upload(storagePath, entry.file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            throw new Error(`Storage upload failed: ${uploadError.message}`);
+          }
+
+          // Update progress to 60%
+          setUploadingFiles(prev =>
+            prev.map(f => f.id === entry.id ? { ...f, progress: 60 } : f)
+          );
+
+          // Create database record
+          const fileRecord = {
+            filename: entry.file.name,
+            type: 'file',
+            bucket: 'client-files',
+            storage_path: storagePath,
+            size: entry.file.size,
+            file_type: entry.file.type,
+            uploaded_by: user.id,
+            project_id: projectId,
+            visibility: 'private',
+            parent_id: currentFolderId
+          };
+
+          console.log('💾 Creating database record:', fileRecord);
+
+          const { data: dbData, error: dbError } = await supabase
+            .from('project_files')
+            .insert([fileRecord])
+            .select('id, filename, uploaded_at')
+            .single();
+
+          if (dbError) {
+            console.error('❌ Database insert error:', dbError);
+            
+            // Clean up storage
+            await supabase.storage
+              .from('client-files')
+              .remove([storagePath]);
+
+            throw new Error(`Database insert failed: ${dbError.message}`);
+          }
+
+          console.log('✅ Database record created:', dbData);
+          
+          // Refresh files
+          await refetchFiles();
+          
+          console.log('✅ Files list refreshed');
+        } catch (err: any) {
+          console.error('❌ Error uploading file:', err);
+          setUploadingFiles(prev =>
+            prev.map(f => f.id === entry.id ? { ...f, error: err.message, progress: 0 } : f)
+          );
+          
+          // Remove errored file after 5 seconds
+          setTimeout(() => {
+            setUploadingFiles(prev => prev.filter(f => f.id !== entry.id));
+          }, 5000);
+        }
+      })
+    );
+
+    // Refresh files list
+    await refetchFiles();
+  };
+
+  // Handle file input change (direct selection)
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      uploadFiles(files);
+    }
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  };
+
+  // ✅ NEW: Handle folder input change
+  const handleFolderInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !user) {
+        alert('Authentication failed');
+        return;
+      }
+
+      // Build folder structure from file paths
+      const folderMap = new Map<string, string>(); // path -> folder_id
+      folderMap.set('', currentFolderId || ''); // Root
+
+      // Sort files by path depth to ensure parent folders are created first
+      const filesArray = Array.from(files).sort((a, b) => {
+        const aDepth = a.webkitRelativePath.split('/').length;
+        const bDepth = b.webkitRelativePath.split('/').length;
+        return aDepth - bDepth;
+      });
+
+      for (const file of filesArray) {
+        const pathParts = file.webkitRelativePath.split('/');
+        const fileName = pathParts[pathParts.length - 1];
+        const folderPath = pathParts.slice(0, -1);
+
+        // Create folders along the path
+        let currentPath = '';
+        let parentId = currentFolderId;
+
+        for (let i = 0; i < folderPath.length; i++) {
+          const folderName = folderPath[i];
+          const newPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+
+          if (!folderMap.has(newPath)) {
+            // Create this folder
+            const folderRecord = {
+              filename: folderName,
+              type: 'folder',
+              project_id: projectId,
+              parent_id: parentId,
+              uploaded_by: user.id,
+              soft_deleted: false
+            };
+
+            const { data: newFolder, error: folderError } = await supabase
+              .from('project_files')
+              .insert([folderRecord])
+              .select()
+              .single();
+
+            if (folderError || !newFolder) {
+              console.error('Failed to create folder:', folderError);
+              continue;
+            }
+
+            folderMap.set(newPath, newFolder.id);
+            parentId = newFolder.id;
+          } else {
+            parentId = folderMap.get(newPath) || null;
+          }
+
+          currentPath = newPath;
+        }
+
+        // Now upload the file
+        const uploadEntry = {
+          id: `${Date.now()}-${Math.random()}`,
+          file,
+          progress: 0
+        };
+        
+        setUploadingFiles(prev => [...prev, uploadEntry]);
+
+        try {
+          // Generate unique file path
+          const timestamp = Date.now();
+          const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const storagePath = `${projectId}/${timestamp}-${sanitizedFileName}`;
+
+          setUploadingFiles(prev =>
+            prev.map(f => f.id === uploadEntry.id ? { ...f, progress: 10 } : f)
+          );
+
+          // Upload to storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('client-files')
+            .upload(storagePath, file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            throw new Error(`Storage upload failed: ${uploadError.message}`);
+          }
+
+          setUploadingFiles(prev =>
+            prev.map(f => f.id === uploadEntry.id ? { ...f, progress: 60 } : f)
+          );
+
+          // Create database record
+          const fileRecord = {
+            filename: fileName,
+            size: file.size,
+            file_type: file.type || 'application/octet-stream',
+            project_id: projectId,
+            uploaded_by: user.id,
+            storage_path: storagePath,
+            type: 'file',
+            parent_id: parentId,
+            soft_deleted: false
+          };
+
+          const { error: dbError } = await supabase
+            .from('project_files')
+            .insert([fileRecord]);
+
+          if (dbError) {
+            throw new Error(`Database insert failed: ${dbError.message}`);
+          }
+
+          setUploadingFiles(prev =>
+            prev.map(f => f.id === uploadEntry.id ? { ...f, progress: 100 } : f)
+          );
+
+          // Remove from uploading list after 1 second
+          setTimeout(() => {
+            setUploadingFiles(prev => prev.filter(f => f.id !== uploadEntry.id));
+          }, 1000);
+        } catch (error) {
+          console.error('File upload error:', error);
+          setUploadingFiles(prev => prev.filter(f => f.id !== uploadEntry.id));
+        }
+      }
+
+      // Refresh files list
+      await refetchFiles();
+    } catch (error) {
+      console.error('Folder upload error:', error);
+      alert('Failed to upload folder. Please try again.');
+    }
+
+    // Reset input
+    e.target.value = '';
+  };
+
+  // Handle drag and drop events for file uploads
+  const handleFileDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(true);
+  };
+
+  const handleFileDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only clear if leaving the main container
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+      setIsDraggingFile(false);
+    }
+  };
+
+  const handleFileDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  // ✅ NEW: Process folder structure recursively
+  const processFolderStructure = async (
+    items: DataTransferItemList,
+    parentFolderId: string | null = null
+  ): Promise<void> => {
+    const processEntry = async (entry: any, currentParentId: string | null): Promise<void> => {
+      if (entry.isFile) {
+        // Process file
+        return new Promise((resolve) => {
+          entry.file(async (file: File) => {
+            const uploadEntry = {
+              id: `${Date.now()}-${Math.random()}`,
+              file,
+              progress: 0
+            };
+            
+            try {
+              setUploadingFiles(prev => [...prev, uploadEntry]);
+
+              const { data: { user }, error: userError } = await supabase.auth.getUser();
+              
+              if (userError || !user) {
+                throw new Error('Authentication failed');
+              }
+
+              // Generate unique file path
+              const timestamp = Date.now();
+              const fileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+              const storagePath = `${projectId}/${timestamp}-${fileName}`;
+
+              setUploadingFiles(prev =>
+                prev.map(f => f.id === uploadEntry.id ? { ...f, progress: 10 } : f)
+              );
+
+              // Upload to storage
+              const { data: uploadData, error: uploadError } = await supabase.storage
+                .from('client-files')
+                .upload(storagePath, file, {
+                  cacheControl: '3600',
+                  upsert: false
+                });
+
+              if (uploadError) {
+                throw new Error(`Storage upload failed: ${uploadError.message}`);
+              }
+
+              setUploadingFiles(prev =>
+                prev.map(f => f.id === uploadEntry.id ? { ...f, progress: 60 } : f)
+              );
+
+              // Create database record with parent folder
+              const fileRecord = {
+                filename: file.name,
+                size: file.size,
+                file_type: file.type || 'application/octet-stream',
+                project_id: projectId,
+                uploaded_by: user.id,
+                storage_path: storagePath,
+                type: 'file',
+                parent_id: currentParentId,
+                soft_deleted: false
+              };
+
+              const { error: dbError } = await supabase
+                .from('project_files')
+                .insert([fileRecord]);
+
+              if (dbError) {
+                throw new Error(`Database insert failed: ${dbError.message}`);
+              }
+
+              setUploadingFiles(prev =>
+                prev.map(f => f.id === uploadEntry.id ? { ...f, progress: 100 } : f)
+              );
+
+              // Remove from uploading list after 1 second
+              setTimeout(() => {
+                setUploadingFiles(prev => prev.filter(f => f.id !== uploadEntry.id));
+              }, 1000);
+
+              resolve();
+            } catch (error) {
+              console.error('File upload error:', error);
+              setUploadingFiles(prev => prev.filter(f => f.id !== uploadEntry.id));
+              resolve();
+            }
+          });
+        });
+      } else if (entry.isDirectory) {
+        // Create folder in database
+        try {
+          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          
+          if (userError || !user) {
+            throw new Error('Authentication failed');
+          }
+
+          const folderRecord = {
+            filename: entry.name,
+            type: 'folder',
+            project_id: projectId,
+            parent_id: currentParentId,
+            uploaded_by: user.id,
+            soft_deleted: false
+          };
+
+          const { data: newFolder, error: folderError } = await supabase
+            .from('project_files')
+            .insert([folderRecord])
+            .select()
+            .single();
+
+          if (folderError || !newFolder) {
+            throw new Error(`Failed to create folder: ${folderError?.message}`);
+          }
+
+          // Process folder contents
+          const dirReader = entry.createReader();
+          const readEntries = (): Promise<any[]> => {
+            return new Promise((resolve) => {
+              dirReader.readEntries((entries: any[]) => {
+                resolve(entries);
+              });
+            });
+          };
+
+          let entries = await readEntries();
+          const allEntries: any[] = [];
+
+          // Keep reading until no more entries (directories can return entries in batches)
+          while (entries.length > 0) {
+            allEntries.push(...entries);
+            entries = await readEntries();
+          }
+
+          // Process all entries in this folder
+          for (const subEntry of allEntries) {
+            await processEntry(subEntry, newFolder.id);
+          }
+        } catch (error) {
+          console.error('Folder creation error:', error);
+        }
+      }
+    };
+
+    // Process all dropped items
+    const itemsArray = Array.from(items);
+    for (const item of itemsArray) {
+      const entry = item.webkitGetAsEntry();
+      if (entry) {
+        await processEntry(entry, parentFolderId || currentFolderId);
+      }
+    }
+
+    // Refresh files list
+    await refetchFiles();
+  };
+
+  const handleFileDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFile(false);
+
+    const items = e.dataTransfer.items;
+    
+    if (items && items.length > 0) {
+      // Check if any items are folders
+      const hasFolder = Array.from(items).some(item => {
+        const entry = item.webkitGetAsEntry();
+        return entry?.isDirectory;
+      });
+
+      if (hasFolder) {
+        // Process with folder structure preservation
+        await processFolderStructure(items, currentFolderId);
+      } else {
+        // Regular file upload
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+          uploadFiles(files);
+        }
+      }
+    }
+  };
+
+  // ✅ Handle create folder - now respects current folder
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) return;
+    if (!project) {
+      alert('Project not loaded');
+      return;
+    }
+
+    try {
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !user) {
+        throw new Error('Authentication failed');
+      }
+
+      console.log('📁 Creating folder:', newFolderName);
+      console.log('📁 Parent folder:', currentFolderId);
+
+      // ✅ Create folder with parent_id
+      const { data, error } = await supabase
+        .from('project_files')
+        .insert({
+          project_id: project.id,
+          filename: newFolderName.trim(),
+          type: 'folder',
+          parent_id: currentFolderId,  // ✅ Create in current folder
+          bucket: 'client-files',
+          visibility: 'private',
+          uploaded_by: user.id
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Folder creation error:', error);
+        throw error;
+      }
+
+      console.log('✅ Folder created:', data);
+
+      setShowNewFolderModal(false);
+      setNewFolderName('');
+      
+      // Refresh files
+      await refetchFiles();
+      
+      console.log('✅ Files list refreshed');
+    } catch (err: any) {
+      console.error('Error creating folder:', err);
+      alert(`Failed to create folder: ${err.message}`);
+    }
+  };
+
+  // ✅ Handle delete file/folder (admin/owner only)
+  // TEMPORARILY ALWAYS VISIBLE FOR DEBUGGING
+  const handleDeleteFile = async (file: any) => {
+    // Confirm deletion
+    const confirmMessage = file.type === 'folder' 
+      ? `Are you sure you want to delete the folder "${file.filename}" and all its contents? This action cannot be undone.`
+      : `Are you sure you want to delete "${file.filename}"? This action cannot be undone.`;
+    
+    if (!confirm(confirmMessage)) return;
+
+    try {
+      console.log('🗑️ Deleting:', file.filename);
+
+      // If it's a folder, delete all contents recursively
+      if (file.type === 'folder') {
+        // Get all files in this folder
+        const { data: folderContents, error: fetchError } = await supabase
+          .from('project_files')
+          .select('*')
+          .eq('parent_id', file.id);
+
+        if (fetchError) throw fetchError;
+
+        // Recursively delete contents
+        if (folderContents && folderContents.length > 0) {
+          for (const item of folderContents) {
+            await handleDeleteFile(item);
+          }
+        }
+      } else {
+        // Delete from storage if it's a file
+        if (file.storage_path) {
+          const { error: storageError } = await supabase.storage
+            .from(file.bucket || 'client-files')
+            .remove([file.storage_path]);
+
+          if (storageError) {
+            console.warn('⚠️ Storage deletion warning:', storageError);
+            // Continue with database deletion even if storage fails
+          }
+        }
+      }
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('project_files')
+        .delete()
+        .eq('id', file.id);
+
+      if (dbError) throw dbError;
+
+      console.log('✅ Deleted successfully:', file.filename);
+      
+      // Show success message only for top-level delete (not recursive calls)
+      if (file.id === arguments[0]?.id) {
+        alert(`${file.type === 'folder' ? 'Folder' : 'File'} "${file.filename}" deleted successfully!`);
+      }
+      
+      // Refresh files
+      await refetchFiles();
+    } catch (err: any) {
+      console.error('❌ Error deleting:', err);
+      alert(`Failed to delete: ${err.message}`);
+    }
+  };
+
+  // ✅ Handle download single file
+  const handleDownloadFile = async (file: any) => {
+    if (file.type === 'folder') {
+      alert('Cannot download folders. Please select files only.');
+      return;
+    }
+
+    try {
+      console.log('📥 Downloading file:', file.filename);
+
+      // Get signed URL for download
+      const { data, error } = await supabase.storage
+        .from(file.bucket || 'client-files')
+        .createSignedUrl(file.storage_path, 60); // 60 seconds expiry
+
+      if (error) throw error;
+
+      if (!data?.signedUrl) {
+        throw new Error('Failed to generate download URL');
+      }
+
+      // Check if on mobile and if it's an image or video - save to gallery
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      const isMedia = file.file_type?.startsWith('image/') || file.file_type?.startsWith('video/');
+
+      if (isMobileDevice && isMedia) {
+        // For mobile media files, open in new tab (user can long-press to save to gallery)
+        window.open(data.signedUrl, '_blank');
+      } else {
+        // For all other files, trigger download
+        const link = document.createElement('a');
+        link.href = data.signedUrl;
+        link.download = file.filename;
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      console.log('✅ Download started');
+    } catch (err: any) {
+      console.error('❌ Error downloading file:', err);
+      alert(`Failed to download file: ${err.message}`);
+    }
+  };
+
+  // ✅ Handle download selected files (excludes folders)
+  const handleDownloadSelected = async () => {
+    const itemsToDownload = currentFiles?.filter(f => selectedItems.has(f.id) && f.type === 'file') || [];
+    
+    if (itemsToDownload.length === 0) {
+      alert('No files selected. Folders cannot be downloaded.');
+      return;
+    }
+
+    // Check if on mobile
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    
+    if (isMobileDevice && itemsToDownload.length > 1) {
+      // Mobile: Download one by one with small delay
+      for (let i = 0; i < itemsToDownload.length; i++) {
+        const file = itemsToDownload[i];
+        await handleDownloadFile(file);
+        
+        // Small delay between downloads to prevent browser blocking
+        if (i < itemsToDownload.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      alert(`Started downloading ${itemsToDownload.length} files`);
+    } else if (itemsToDownload.length === 1) {
+      // Single file download
+      await handleDownloadFile(itemsToDownload[0]);
+    } else {
+      // Desktop: Download all at once
+      for (const file of itemsToDownload) {
+        await handleDownloadFile(file);
+      }
+      
+      alert(`Started downloading ${itemsToDownload.length} files`);
+    }
+  };
+
+  // Calculate milestone completion stats
+  const milestoneStats = milestones ? {
+    total: milestones.length,
+    completed: milestones.filter(m => m.status === 'done').length,
+    inProgress: milestones.filter(m => m.status === 'in_progress').length,
+    planned: milestones.filter(m => m.status === 'planned').length
+  } : { total: 0, completed: 0, inProgress: 0, planned: 0 };
+
+  if (loading) {
+    return null;
+  }
+
+  if (error || !project) {
+    return (
+      <div style={{
+        minHeight: '400px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '16px'
+      }}>
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="1.5">
+          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+        </svg>
+        <p style={{
+          fontSize: '16px',
+          fontWeight: 600,
+          color: '#1A1A1A',
+          margin: 0
+        }}>
+          Project not found
+        </p>
+        <p style={{
+          fontSize: '14px',
+          color: '#6B7280',
+          margin: 0
+        }}>
+          {error || 'The requested project does not exist'}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ padding: '0' }} className="project-detail-container">
+        {/* Consolidated Header Card */}
+        <div style={{
+          background: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '14px',
+          padding: '24px',
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+          marginBottom: '32px'
+        }}>
+          {/* Top Row: Back Arrow | Company Name | 3-Dot Menu */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '20px'
+          }}>
+            {/* Back Arrow */}
+            <a
+              href={`${baseUrl}/miraka-co-portal/projects`}
+              className="file-action-button"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: isMobile ? '40px' : '45px',
+                height: isMobile ? '40px' : '45px',
+                minWidth: isMobile ? '40px' : '45px',
+                minHeight: isMobile ? '40px' : '45px',
+                padding: 0,
+                margin: 0,
+                background: '#1A1A1A',
+                border: '1px solid #1A1A1A',
+                borderRadius: isMobile ? '12px' : '14px',
+                color: '#FFFFFF',
+                textDecoration: 'none',
+                transition: 'all 0.2s ease',
+                cursor: 'pointer',
+                flexShrink: 0,
+                boxSizing: 'border-box',
+                lineHeight: 0,
+                fontSize: 0,
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                outline: 'none'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = '#2A2A2A';
+                e.currentTarget.style.borderColor = '#2A2A2A';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = '#1A1A1A';
+                e.currentTarget.style.borderColor = '#1A1A1A';
+              }}
+            >
+              <svg
+                width={isMobile ? '20' : '22'}
+                height={isMobile ? '20' : '22'}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </a>
+
+            {/* Company Name (Center) */}
+            <div style={{
+              flex: 1,
+              textAlign: 'center',
+              padding: '0 16px'
+            }}>
+              <p style={{
+                fontSize: '15px',
+                fontWeight: 600,
+                color: '#6B7280',
+                margin: 0
+              }}>
+                {project.client?.company_name || project.client?.client_name || 'Client'}
+              </p>
+            </div>
+
+            {/* 3-Dot Menu */}
+            <div
+              style={{
+                position: 'relative',
+                flexShrink: 0,
+                width: isMobile ? '40px' : '45px',
+                height: isMobile ? '40px' : '45px',
+                zIndex: 999
+              }}
+            >
+              {showProjectActions && (
+                <div
+                  onClick={() => setShowProjectActions(false)}
+                  style={{
+                    position: 'fixed',
+                    inset: 0,
+                    zIndex: 998,
+                    background: 'rgba(0, 0, 0, 0.3)',
+                    animation: 'fadeIn 0.2s ease-out'
+                  }}
+                />
+              )}
+
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  width: showProjectActions ? (isMobile ? '220px' : '240px') : (isMobile ? '40px' : '45px'),
+                  background: '#1A1A1A',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: showProjectActions ? (isMobile ? '20px' : '22px') : (isMobile ? '12px' : '14px'),
+                  boxShadow: showProjectActions ? '0 16px 36px rgba(0, 0, 0, 0.22)' : 'none',
+                  overflow: 'hidden',
+                  transition: 'width 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55), border-radius 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55), box-shadow 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+                  zIndex: 999
+                }}
+              >
+                <button
+                  type="button"
+                  className="file-action-button"
+                  onClick={() => setShowProjectActions(!showProjectActions)}
+                  style={{
+                    width: '100%',
+                    height: isMobile ? '40px' : '45px',
+                    minHeight: isMobile ? '40px' : '45px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'transparent',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    padding: 0,
+                    margin: 0,
+                    cursor: 'pointer',
+                    boxSizing: 'border-box',
+                    lineHeight: 0,
+                    fontSize: 0,
+                    appearance: 'none',
+                    WebkitAppearance: 'none',
+                    outline: 'none',
+                    transition: 'all 0.15s cubic-bezier(0.4, 0, 0.2, 1)',
+                    transform: showProjectActions ? 'scale(0.95)' : 'scale(1)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = '#2A2A2A';
+                    e.currentTarget.style.borderColor = '#2A2A2A';
+                    e.currentTarget.style.transform = showProjectActions ? 'scale(0.95)' : 'scale(1.05)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = '#1A1A1A';
+                    e.currentTarget.style.transform = showProjectActions ? 'scale(0.95)' : 'scale(1)';
+                  }}
+                  onMouseDown={(e) => {
+                    e.currentTarget.style.transform = 'scale(0.92)';
+                  }}
+                  onMouseUp={(e) => {
+                    e.currentTarget.style.transform = showProjectActions ? 'scale(0.95)' : 'scale(1)';
+                  }}
+                >
+                  <MoreVertical 
+                    size={isMobile ? 20 : 22} 
+                    strokeWidth={2}
+                    style={{
+                      transition: 'transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+                      transform: showProjectActions ? 'rotate(90deg)' : 'rotate(0deg)'
+                    }}
+                  />
+                </button>
+
+                {showProjectActions && (
+                  <div
+                    style={{
+                      borderTop: '1px solid rgba(255,255,255,0.08)',
+                      padding: '8px',
+                      animation: 'slideDownFadeIn 0.2s ease-out'
+                    }}
+                  >
+                    <button
+                      onClick={() => {
+                        setShowProjectActions(false);
+                        handleOpenEditModal();
+                      }}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '14px 14px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: '16px',
+                        color: '#FFFFFF',
+                        fontSize: '14px',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                        animation: 'bounceIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55) 0.1s both'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+                        e.currentTarget.style.transform = 'translateX(2px)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.transform = 'translateX(0)';
+                      }}
+                    >
+                      <Edit2 size={18} />
+                      Edit Project
+                    </button>
+
+                    {(userRole === 'owner' || userRole === 'admin') && (
+                      <button
+                        onClick={() => {
+                          setShowProjectActions(false);
+                          handleDeleteProject();
+                        }}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '12px',
+                          padding: '14px 14px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: '16px',
+                          color: '#FF6B6B',
+                          fontSize: '14px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                          animation: 'bounceIn 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55) 0.2s both'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'rgba(255,107,107,0.10)';
+                          e.currentTarget.style.transform = 'translateX(2px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.transform = 'translateX(0)';
+                        }}
+                      >
+                        <Trash2 size={18} />
+                        Delete Project
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Project Title and Status Badge */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '24px',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}>
+            <h1 style={{
+              fontSize: '28px',
+              fontWeight: 700,
+              color: '#1A1A1A',
+              margin: 0,
+              letterSpacing: '-0.02em',
+              flex: 1,
+              minWidth: '200px'
+            }}>
+              {project.project_title}
+            </h1>
+            {getStatusBadge(project.status)}
+          </div>
+
+          {/* Progress Section */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '8px'
+            }}>
+              <span style={{
+                fontSize: '14px',
+                fontWeight: 600,
+                color: '#6B7280',
+                textTransform: 'uppercase',
+                letterSpacing: '0.3px'
+              }}>
+                Progress
+              </span>
+              <span style={{
+                fontSize: '18px',
+                fontWeight: 700,
+                color: '#1A1A1A'
+              }}>
+                {project.progress_percent}%
+              </span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div style={{
+              width: '100%',
+              height: '12px',
+              background: '#F3F4F6',
+              borderRadius: '8px',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                width: `${project.progress_percent}%`,
+                height: '100%',
+                background: project.progress_percent === 100 
+                  ? '#10B981' 
+                  : project.progress_percent >= 75 
+                    ? '#3B82F6' 
+                    : project.progress_percent >= 50 
+                      ? '#F59E0B' 
+                      : '#6B7280',
+                transition: 'width 0.3s ease, background 0.3s ease',
+                borderRadius: '8px'
+              }} />
+            </div>
+          </div>
+
+          {/* Start Date and Deadline */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '24px'
+          }}>
+            {/* Start Date */}
+            <div style={{ flex: 1 }}>
+              <div style={{
+                fontSize: '13px',
+                fontWeight: 500,
+                color: '#6B7280',
+                marginBottom: '6px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.3px'
+              }}>
+                Start Date
+              </div>
+              <div style={{
+                fontSize: '16px',
+                fontWeight: 600,
+                color: '#1A1A1A'
+              }}>
+                {formatDate(project.start_date)}
+              </div>
+            </div>
+
+            {/* Deadline */}
+            <div style={{ flex: 1, textAlign: 'right' }}>
+              <div style={{
+                fontSize: '13px',
+                fontWeight: 500,
+                color: '#6B7280',
+                marginBottom: '6px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.3px'
+              }}>
+                Deadline
+              </div>
+              <div style={{
+                fontSize: '16px',
+                fontWeight: 600,
+                color: '#1A1A1A'
+              }}>
+                {formatDate(project.deadline)}
+              </div>
+            </div>
+          </div>
+
+          {/* Project Description */}
+          {project.description && (
+            <>
+              <div style={{ marginTop: '24px' }}>
+                <div style={{
+                  fontSize: '13px',
+                  fontWeight: 500,
+                  color: '#6B7280',
+                  marginBottom: '12px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.3px'
+                }}>
+                  Project Description
+                </div>
+                <p style={{
+                  fontSize: '14px',
+                  lineHeight: 1.6,
+                  color: '#1A1A1A',
+                  margin: 0,
+                  whiteSpace: 'pre-wrap'
+                }}>
+                  {linkifyText(project.description)}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Milestones Section */}
+        <div 
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid #E5E7EB',
+            borderRadius: '14px',
+            padding: '32px',
+            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+            marginBottom: '32px'
+          }}
+        >
+          {/* Header with Title and Action Buttons */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '16px',
+              marginBottom: '24px'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                minWidth: 0,
+                flex: '1 1 auto'
+              }}
+            >
+              <h2
+                style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '18px',
+                  fontWeight: 600,
+                  color: '#1A1A1A',
+                  margin: 0,
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1
+                }}
+              >
+                Milestones
+              </h2>
+              {milestones && milestones.length > 0 && (
+                <span
+                  style={{
+                    marginLeft: '12px',
+                    padding: '4px 10px',
+                    background: '#F3F4F6',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#6B7280',
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  {milestoneStats.completed}/{milestoneStats.total} completed
+                </span>
+              )}
+            </div>
+
+            {(userRole === 'admin' || userRole === 'owner') && (
+              <button
+                onClick={() => setShowMilestoneModal(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  padding: '12px 20px',
+                  background: '#1A1A1A',
+                  color: '#FFFFFF',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: '12px',
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  whiteSpace: 'nowrap'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#2A2A2A';
+                  e.currentTarget.style.borderColor = '#2A2A2A';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = '#1A1A1A';
+                  e.currentTarget.style.borderColor = '#1A1A1A';
+                }}
+              >
+                <Plus size={16} />
+                Add Milestone
+              </button>
+            )}
+          </div>
+
+          {/* Milestones Content */}
+          {milestonesLoading ? (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              padding: '40px 0'
+            }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                border: '3px solid #F3F4F6',
+                borderTopColor: '#1A1A1A',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite'
+              }} />
+            </div>
+          ) : milestones && milestones.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {milestones.map((milestone) => (
+                <ExpandableMilestone
+                  key={milestone.id}
+                  milestone={milestone}
+                  onStatusChange={handleToggleMilestoneStatus}
+                  onNotesUpdate={handleNotesUpdate}
+                  isUpdating={updatingMilestone === milestone.id}
+                  userRole={userRole}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '60px 20px',
+                textAlign: 'center'
+              }}
+            >
+              <div
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  background: '#F9FAFB',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '16px'
+                }}
+              >
+                <CheckCircle2 size={32} strokeWidth={1.5} color="#D1D5DB" />
+              </div>
+              <h3
+                style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  color: '#1A1A1A',
+                  margin: '0 0 8px 0'
+                }}
+              >
+                No milestones yet
+              </h3>
+              <p
+                style={{
+                  fontSize: '14px',
+                  color: '#6B7280',
+                  margin: 0,
+                  maxWidth: '400px',
+                  lineHeight: 1.5
+                }}
+              >
+                Break down your project into manageable tasks and track progress automatically.
+              </p>
+              {(userRole === 'admin' || userRole === 'owner') && (
+                <button
+                  onClick={() => setShowMilestoneModal(true)}
+                  style={{
+                    marginTop: '20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    padding: '12px 24px',
+                    background: '#1A1A1A',
+                    color: '#FFFFFF',
+                    border: '1px solid #1A1A1A',
+                    borderRadius: '12px',
+                    fontFamily: 'Poppins, sans-serif',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = '#2A2A2A';
+                    e.currentTarget.style.borderColor = '#2A2A2A';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = '#1A1A1A';
+                    e.currentTarget.style.borderColor = '#1A1A1A';
+                  }}
+                >
+                  <Plus size={16} />
+                  Create First Milestone
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Files Section */}
+        <div 
+          style={{
+            background: '#FFFFFF',
+            border: '1px solid #E5E7EB',
+            borderRadius: '14px',
+            padding: '32px',
+            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+            marginBottom: '32px',
+            position: 'relative'
+          }}
+          onDragEnter={handleFileDragEnter}
+          onDragLeave={handleFileDragLeave}
+          onDragOver={handleFileDragOver}
+          onDrop={handleFileDrop}
+        >
+          {/* Header with Title and Action Buttons */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '16px',
+              marginBottom: '24px'
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                minWidth: 0,
+                flex: '1 1 auto'
+              }}
+            >
+              <h2
+                style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '18px',
+                  fontWeight: 600,
+                  color: '#1A1A1A',
+                  margin: 0,
+                  letterSpacing: '-0.02em',
+                  lineHeight: 1
+                }}
+              >
+                Files
+              </h2>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: '12px',
+                flex: '0 0 auto'
+              }}
+            >
+              <input
+                type="file"
+                id="file-upload-input"
+                multiple
+                onChange={handleFileInputChange}
+                style={{ display: 'none' }}
+              />
+
+              <input
+                type="file"
+                id="folder-upload-input"
+                /* @ts-ignore - webkitdirectory is not in TypeScript types but works in all modern browsers */
+                webkitdirectory=""
+                directory=""
+                multiple
+                onChange={handleFolderInputChange}
+                style={{ display: 'none' }}
+              />
+
+              <button
+                type="button"
+                className="file-action-button"
+                onClick={() => {
+                  const input = document.getElementById('file-upload-input') as HTMLInputElement | null;
+                  input?.click();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: isMobile ? '40px' : '45px',
+                  height: isMobile ? '40px' : '45px',
+                  minWidth: isMobile ? '40px' : '45px',
+                  minHeight: isMobile ? '40px' : '45px',
+                  padding: 0,
+                  margin: 0,
+                  background: '#1A1A1A',
+                  color: '#FFFFFF',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: isMobile ? '12px' : '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box',
+                  lineHeight: 0,
+                  fontSize: 0,
+                  flexShrink: 0,
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  outline: 'none'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#2A2A2A';
+                  e.currentTarget.style.borderColor = '#2A2A2A';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = '#1A1A1A';
+                  e.currentTarget.style.borderColor = '#1A1A1A';
+                }}
+              >
+                <Upload size={isMobile ? 20 : 22} strokeWidth={2} />
+              </button>
+
+              <button
+                type="button"
+                className="file-action-button"
+                onClick={() => {
+                  const input = document.getElementById('folder-upload-input') as HTMLInputElement | null;
+                  input?.click();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: isMobile ? '40px' : '45px',
+                  height: isMobile ? '40px' : '45px',
+                  minWidth: isMobile ? '40px' : '45px',
+                  minHeight: isMobile ? '40px' : '45px',
+                  padding: 0,
+                  margin: 0,
+                  background: '#1A1A1A',
+                  color: '#FFFFFF',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: isMobile ? '12px' : '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box',
+                  lineHeight: 0,
+                  fontSize: 0,
+                  flexShrink: 0,
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  outline: 'none'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#2A2A2A';
+                  e.currentTarget.style.borderColor = '#2A2A2A';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = '#1A1A1A';
+                  e.currentTarget.style.borderColor = '#1A1A1A';
+                }}
+                title="Upload Folder"
+              >
+                <FolderUp size={isMobile ? 20 : 22} strokeWidth={2} />
+              </button>
+
+              <button
+                type="button"
+                className="file-action-button"
+                onClick={() => setShowNewFolderModal(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: isMobile ? '40px' : '45px',
+                  height: isMobile ? '40px' : '45px',
+                  minWidth: isMobile ? '40px' : '45px',
+                  minHeight: isMobile ? '40px' : '45px',
+                  padding: 0,
+                  margin: 0,
+                  background: '#1A1A1A',
+                  color: '#FFFFFF',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: isMobile ? '12px' : '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box',
+                  lineHeight: 0,
+                  fontSize: 0,
+                  flexShrink: 0,
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  outline: 'none'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#2A2A2A';
+                  e.currentTarget.style.borderColor = '#2A2A2A';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = '#1A1A1A';
+                  e.currentTarget.style.borderColor = '#1A1A1A';
+                }}
+              >
+                <FolderPlus size={isMobile ? 20 : 22} strokeWidth={2} />
+              </button>
+
+              <button
+                type="button"
+                className="file-action-button"
+                onClick={() => setSearchOpen(!searchOpen)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: isMobile ? '40px' : '45px',
+                  height: isMobile ? '40px' : '45px',
+                  minWidth: isMobile ? '40px' : '45px',
+                  minHeight: isMobile ? '40px' : '45px',
+                  padding: 0,
+                  margin: 0,
+                  background: '#1A1A1A',
+                  color: '#FFFFFF',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: isMobile ? '12px' : '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box',
+                  lineHeight: 0,
+                  fontSize: 0,
+                  flexShrink: 0,
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  outline: 'none'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = '#2A2A2A';
+                  e.currentTarget.style.borderColor = '#2A2A2A';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = '#1A1A1A';
+                  e.currentTarget.style.borderColor = '#1A1A1A';
+                }}
+              >
+                <svg
+                  width={isMobile ? '20' : '22'}
+                  height={isMobile ? '20' : '22'}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Drag overlay for file uploads */}
+          {isDraggingFile && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(14, 165, 233, 0.1)',
+              border: '3px dashed #0EA5E9',
+              borderRadius: '14px',
+              zIndex: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontFamily: 'Poppins, sans-serif',
+              fontSize: '20px',
+              fontWeight: 700,
+              color: '#0EA5E9',
+              backdropFilter: 'blur(2px)'
+            }}>
+              <div style={{
+                textAlign: 'center',
+                padding: '40px'
+              }}>
+                <Upload size={64} color="#0EA5E9" strokeWidth={1.5} />
+                <p style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '20px',
+                  fontWeight: 700,
+                  color: '#0EA5E9',
+                  margin: '16px 0 8px 0'
+                }}>
+                  Drop files here to upload
+                </p>
+                <p style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '14px',
+                  color: '#0369A1',
+                  margin: 0
+                }}>
+                  Upload multiple files at once
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Drag Mode Helper Banner */}
+          {isDragging && draggedItem && (
+            <div style={{
+              padding: '12px 16px',
+              background: '#E0F2FE',
+              border: '1px solid #0EA5E9',
+              borderRadius: '12px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0369A1" strokeWidth="2">
+                <path d="M13 2H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              <div style={{ flex: 1 }}>
+                <p style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#0369A1',
+                  margin: 0
+                }}>
+                  {draggedItem.multiDrag ? `${draggedItem.items.length} items` : `"${draggedItem.filename}"`}
+                </p>
+                <p style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '13px',
+                  color: '#075985',
+                  margin: '2px 0 0 0'
+                }}>
+                  Drop onto a folder or breadcrumb to move
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Selection Mode Toolbar */}
+          {isSelectionMode && (
+            <div style={{
+              padding: '14px 18px',
+              background: '#FEF3C7',
+              border: '1px solid #F59E0B',
+              borderRadius: '12px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <p style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#92400E',
+                  margin: 0
+                }}>
+                  {selectedItems.size} item(s) selected
+                </p>
+                <p style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '12px',
+                  color: '#B45309',
+                  margin: '2px 0 0 0'
+                }}>
+                  Ctrl+C: Copy • Ctrl+X: Cut • Ctrl+V: Paste • Ctrl+Z: Undo
+                </p>
+              </div>
+              <button
+                onClick={selectAll}
+                style={{
+                  padding: '8px 14px',
+                  background: '#FFFFFF',
+                  border: '1px solid #F59E0B',
+                  borderRadius: '8px',
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#92400E',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#FFFBEB'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#FFFFFF'}
+              >
+                Select All
+              </button>
+              {/* ✅ Download Selected Button */}
+              <button
+                onClick={handleDownloadSelected}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  background: '#FFFFFF',
+                  border: '1px solid #10B981',
+                  borderRadius: '8px',
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#10B981',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#D1FAE5';
+                  e.currentTarget.style.borderColor = '#10B981';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#FFFFFF';
+                  e.currentTarget.style.borderColor = '#10B981';
+                }}
+              >
+                <Download size={14} />
+                Download Selected
+              </button>
+              {/* ✅ Delete Selected Button (admin/owner only) */}
+              {(userRole === 'admin' || userRole === 'owner') && (
+                <button
+                  onClick={async () => {
+                    const itemsToDelete = currentFiles?.filter(f => selectedItems.has(f.id)) || [];
+                    if (itemsToDelete.length === 0) return;
+                    
+                    const confirmMessage = `Are you sure you want to delete ${itemsToDelete.length} item(s)? This action cannot be undone.`;
+                    if (!confirm(confirmMessage)) return;
+
+                    try {
+                      // Delete all selected items
+                      for (const item of itemsToDelete) {
+                        await handleDeleteFile(item);
+                      }
+                      
+                      // Clear selection
+                      clearSelection();
+                      
+                      alert(`Successfully deleted ${itemsToDelete.length} item(s)`);
+                    } catch (err: any) {
+                      console.error('❌ Error deleting items:', err);
+                      alert(`Failed to delete some items: ${err.message}`);
+                    }
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    background: '#FFFFFF',
+                    border: '1px solid #DC2626',
+                    borderRadius: '8px',
+                    fontFamily: 'Poppins, sans-serif',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#DC2626',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#FEE2E2';
+                    e.currentTarget.style.borderColor = '#DC2626';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#FFFFFF';
+                    e.currentTarget.style.borderColor = '#DC2626';
+                  }}
+                >
+                  <Trash2 size={14} />
+                  Delete Selected
+                </button>
+              )}
+              <button
+                onClick={clearSelection}
+                style={{
+                  padding: '8px 14px',
+                  background: '#FFFFFF',
+                  border: '1px solid #F59E0B',
+                  borderRadius: '8px',
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#92400E',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#FFFBEB'}
+                onMouseLeave={(e) => e.currentTarget.style.background = '#FFFFFF'}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
+          {/* ✅ Clipboard Status */}
+          {clipboard.items.length > 0 && (
+            <div style={{
+              padding: '12px 16px',
+              background: '#F3E8FF',
+              border: '1px solid #A855F7',
+              borderRadius: '12px',
+              marginBottom: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7C3AED" strokeWidth="2">
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                <path d="M16 4h2a2 2 0 012 2v12a2 2 0 01-2 2h-5l2 3h-9a2 2 0 02-2-2z" />
+              </svg>
+              <div style={{ flex: 1 }}>
+                <p style={{
+                  fontFamily: 'Poppins, sans-serif',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: '#6B21A8',
+                  margin: 0
+                }}>
+                  {clipboard.items.length} item(s) {clipboard.operation === 'cut' ? 'cut' : 'copied'}
+                </p>
+                <p style={{
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '13px',
+                  color: '#7C3AED',
+                  margin: '2px 0 0 0'
+                }}>
+                  Press Ctrl+V to paste here
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Undo Available */}
+          {undoHistory.length > 0 && !isSelectionMode && (
+            <div style={{
+              padding: '10px 14px',
+              background: '#DBEAFE',
+              border: '1px solid #3B82F6',
+              borderRadius: '10px',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              fontSize: '13px'
+            }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D4ED8" strokeWidth="2">
+                <path d="M3 7v6h6" />
+                <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+              </svg>
+              <span style={{ fontFamily: 'Inter, sans-serif', color: '#1E40AF', fontWeight: 500 }}>
+                Press Ctrl+Z to undo last action
+              </span>
+            </div>
+          )}
+
+          {/* ✅ Breadcrumb Navigation with Drop Zones - Below header */}
+          {folderPath.length > 1 && !normalizedSearchQuery && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              marginBottom: '24px',
+              flexWrap: 'wrap'
+            }}>
+              {/* Back Button */}
+              <button
+                onClick={handleBackToParent}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  background: '#1A1A1A',
+                  color: '#FFFFFF',
+                  border: '1px solid #1A1A1A',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  fontFamily: 'Poppins, sans-serif',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#2A2A2A';
+                  e.currentTarget.style.borderColor = '#2A2A2A';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#1A1A1A';
+                  e.currentTarget.style.borderColor = '#1A1A1A';
+                }}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                Back
+              </button>
+
+              {/* Folder Path */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                flexWrap: 'wrap'
+              }}>
+                {folderPath.map((folder, index) => (
+                  <React.Fragment key={folder.id || 'root'}>
+                    <div
+                      onDragOver={(e) => handleBreadcrumbDragOver(e, folder.id)}
+                      onDragLeave={(e) => {
+                        if (dragOverFolderId === (folder.id || 'breadcrumb-root')) {
+                          setDragOverFolderId(null);
+                        }
+                      }}
+                      onDrop={(e) => handleBreadcrumbDrop(e, folder.id, folder.name)}
+                      style={{
+                        fontFamily: 'Poppins, sans-serif',
+                        fontSize: '15px',
+                        fontWeight: index === folderPath.length - 1 ? 700 : 500,
+                        color: index === folderPath.length - 1 ? '#1A1A1A' : '#6B6B6B',
+                        cursor: index !== folderPath.length - 1 ? 'pointer' : 'default',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        background: dragOverFolderId === (folder.id || 'breadcrumb-root') ? '#E0F2FE' : 
+                                   index === folderPath.length - 1 ? 'transparent' : '#FAFAFA',
+                        border: dragOverFolderId === (folder.id || 'breadcrumb-root') ? '2px solid #0EA5E9' : 
+                               '1px solid transparent',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onClick={() => {
+                        if (index !== folderPath.length - 1) {
+                          navigateToFolder(folder.id);
+                        }
+                      }}
+                    >
+                      {folder.name}
+                    </div>
+                    {index < folderPath.length - 1 && (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9A9A9A" strokeWidth="2">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    )}
+                  </React.Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Upload Progress Display */}
+          {uploadingFiles.length > 0 && (
+            <div style={{
+              marginBottom: '24px',
+              padding: '16px',
+              background: '#F0F9FF',
+              border: '1px solid #BAE6FD',
+              borderRadius: '12px'
+            }}>
+              <p style={{
+                fontFamily: 'Poppins, sans-serif',
+                fontSize: '14px',
+                fontWeight: 600,
+                color: '#0369A1',
+                margin: '0 0 12px 0'
+              }}>
+                Uploading {uploadingFiles.length} file{uploadingFiles.length > 2 ? 's' : ''}...
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {uploadingFiles.map(upload => (
+                  <div
+                    key={upload.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      padding: '12px',
+                      background: '#FFFFFF',
+                      borderRadius: '8px',
+                      border: '1px solid #E0F2FE'
+                    }}
+                  >
+                    <div style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      background: '#E0F2FE',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      {upload.error ? (
+                        <X size={20} color="#DC2626" />
+                      ) : upload.progress === 100 ? (
+                        <CheckCircle2 size={20} color="#10B981" />
+                      ) : (
+                        <FileText size={20} color="#0EA5E9" />
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        color: upload.error ? '#DC2626' : '#1A1A1A',
+                        margin: '0 0 4px 0',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {upload.file.name}
+                      </p>
+                      {upload.error ? (
+                        <p style={{
+                          fontFamily: 'Inter, sans-serif',
+                          fontSize: '12px',
+                          color: '#DC2626',
+                          margin: 0
+                        }}>
+                          {upload.error}
+                        </p>
+                      ) : (
+                        <div style={{
+                          width: '100%',
+                          height: '6px',
+                          background: '#E0F2FE',
+                          borderRadius: '3px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${upload.progress}%`,
+                            height: '100%',
+                            background: upload.progress === 100 ? '#10B981' : '#0EA5E9',
+                            transition: 'width 0.3s ease',
+                            borderRadius: '3px'
+                          }} />
+                        </div>
+                      )}
+                    </div>
+                    <span style={{
+                      fontFamily: 'Poppins, sans-serif',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      color: upload.error ? '#DC2626' : upload.progress === 100 ? '#10B981' : '#0EA5E9',
+                      flexShrink: 0,
+                      minWidth: '45px',
+                      textAlign: 'right'
+                    }}>
+                      {upload.error ? 'Failed' : `${upload.progress}%`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ✅ Search Results Count */}
+          {normalizedSearchQuery && (
+            <div style={{
+              marginBottom: '16px',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#6B7280'
+            }}>
+              {currentFiles.length} result{currentFiles.length === 1 ? '' : 's'} for "{searchQuery}"
+            </div>
+          )}
+
+          {filesLoading ? (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              padding: '40px 0'
+            }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                border: '3px solid #F3F4F6',
+                borderTopColor: '#1A1A1A',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite'
+              }} />
+            </div>
+          ) : currentFiles && currentFiles.length > 0 ? (
+            <div
+              className="project-files-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile
+                  ? 'repeat(2, minmax(0, 1fr))'
+                  : 'repeat(auto-fill, minmax(190px, 1fr))',
+                gap: isMobile ? '12px' : '16px',
+                width: '100%',
+                maxWidth: '100%',
+                alignItems: 'start'
+              }}
+            >
+              {currentFiles.map((file) => {
+                const isSelected = selectedItems.has(file.id);
+                const isCut = clipboard.operation === 'cut' && clipboard.items.some(i => i.id === file.id);
+
+                return (
+                  <div
+                    key={file.id}
+                    style={{
+                      background: '#FFFFFF',
+                      border: `1px solid ${isSelected ? '#1A73E8' : '#E5E7EB'}`,
+                      borderRadius: '16px',
+                      padding: isMobile ? '10px' : '12px',
+                      cursor: 'pointer',
+                      transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
+                      opacity: isCut ? 0.5 : 1,
+                      position: 'relative',
+                      minWidth: 0,
+                      width: '100%',
+                      gridColumn: 'auto',
+                      overflow: 'visible',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: isMobile ? '10px' : '12px',
+                      boxShadow: isSelected ? '0 0 0 1px rgba(26,115,232,0.12)' : 'none'
+                    }}
+                    onClick={(e) => {
+                      if (!(e.target as HTMLElement).closest('[data-action-menu]')) {
+                        handleFileClick(file);
+                      }
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isMobile) {
+                        e.currentTarget.style.borderColor = '#1A73E8';
+                        e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.06)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isMobile) {
+                        e.currentTarget.style.borderColor = isSelected ? '#1A73E8' : '#E5E7EB';
+                        e.currentTarget.style.boxShadow = isSelected
+                          ? '0 0 0 1px rgba(26,115,232,0.12)'
+                          : 'none';
+                      }
+                    }}
+                  >
+                    <FileCardPreview 
+                      file={file} 
+                      supabaseUrl={import.meta.env.PUBLIC_SUPABASE_URL}
+                      isMobile={isMobile}
+                    />
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr auto',
+                        alignItems: 'center',
+                        gap: '8px',
+                        minWidth: 0
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '14px',
+                            fontWeight: 600,
+                            lineHeight: 1.3,
+                            color: '#1A1A1A',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            wordBreak: 'break-word'
+                          }}
+                        >
+                          {file.filename}
+                        </div>
+
+                        {!isMobile && file.type !== 'folder' && (
+                          <div
+                            style={{
+                              marginTop: '4px',
+                              fontSize: '12px',
+                              color: '#6B7280',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}
+                          >
+                            {formatFileSize(file.size)}
+                          </div>
+                        )}
+                      </div>
+
+                      <div
+                        data-action-menu
+                        style={{
+                          position: 'relative',
+                          flexShrink: 0
+                        }}
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFileMenuOpen(fileMenuOpen === file.id ? null : file.id);
+                          }}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            borderRadius: '999px',
+                            width: '32px',
+                            height: '32px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            padding: 0,
+                            transition: 'background 0.2s ease'
+                          }}
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.background = '#F3F4F6';
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="5" r="2" fill="#5F6368" />
+                            <circle cx="12" cy="12" r="2" fill="#5F6368" />
+                            <circle cx="12" cy="19" r="2" fill="#5F6368" />
+                          </svg>
+                        </button>
+
+                        {fileMenuOpen === file.id && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: '100%',
+                              right: 0,
+                              marginTop: '6px',
+                              background: '#FFFFFF',
+                              border: '1px solid #E5E7EB',
+                              borderRadius: '12px',
+                              boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                              minWidth: '180px',
+                              zIndex: 1000,
+                              overflow: 'hidden'
+                            }}
+                          >
+                            {file.type === 'file' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleFileClick(file);
+                                  setFileMenuOpen(null);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  padding: '12px 16px',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  borderBottom: '1px solid #F3F4F6',
+                                  textAlign: 'left',
+                                  fontSize: '14px',
+                                  fontWeight: 500,
+                                  color: '#1A1A1A',
+                                  cursor: 'pointer',
+                                  transition: 'background 0.2s ease'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#F9FAFB'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                Preview
+                              </button>
+                            )}
+                            
+                            {file.type === 'file' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadFile(file);
+                                  setFileMenuOpen(null);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  padding: '12px 16px',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  borderBottom: '1px solid #F3F4F6',
+                                  textAlign: 'left',
+                                  fontSize: '14px',
+                                  fontWeight: 500,
+                                  color: '#10B981',
+                                  cursor: 'pointer',
+                                  transition: 'background 0.2s ease',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#D1FAE5'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <Download size={16} />
+                                Download
+                              </button>
+                            )}
+                            
+                            {(userRole === 'admin' || userRole === 'owner') && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteFile(file);
+                                  setFileMenuOpen(null);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  padding: '12px 16px',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  textAlign: 'left',
+                                  fontSize: '14px',
+                                  fontWeight: 500,
+                                  color: '#DC2626',
+                                  cursor: 'pointer',
+                                  transition: 'background 0.2s ease'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.background = '#FEE2E2'}
+                                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                              >
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex',
+              flexDirection: isMobile ? 'column' : 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: isMobile ? '10px 0' : '20px 0',
+              gap: isMobile ? '12px' : '16px'
+            }}>
+              {/* Upload File Card */}
+              <label
+                htmlFor="file-upload-input"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: isMobile ? '12px' : '16px',
+                  padding: isMobile ? '32px 24px' : '48px 32px',
+                  background: '#FAFAFA',
+                  border: '2px dashed #E5E7EB',
+                  borderRadius: '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  width: isMobile ? '100%' : 'auto'
+                }}
+                onMouseOver={(e) => {
+                  if (!isMobile) {
+                    e.currentTarget.style.background = '#F3F4F6';
+                    e.currentTarget.style.borderColor = '#1A1A1A';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!isMobile) {
+                    e.currentTarget.style.background = '#FAFAFA';
+                    e.currentTarget.style.borderColor = '#E5E7EB';
+                  }
+                }}
+              >
+                <Upload size={isMobile ? 48 : 64} strokeWidth={1.5} color="#6B7280" />
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{
+                    fontSize: isMobile ? '15px' : '16px',
+                    fontWeight: 600,
+                    color: '#1A1A1A',
+                    margin: '0 0 4px 0'
+                  }}>
+                    Upload Files
+                  </p>
+                  <p style={{
+                    fontSize: isMobile ? '12px' : '13px',
+                    color: '#6B7280',
+                    margin: 0
+                  }}>
+                    Click or drag files & folders
+                  </p>
+                </div>
+              </label>
+
+              {/* New Folder Card */}
+              <button
+                onClick={() => setShowNewFolderModal(true)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: isMobile ? '12px' : '16px',
+                  padding: isMobile ? '32px 24px' : '48px 32px',
+                  background: '#FAFAFA',
+                  border: '2px dashed #E5E7EB',
+                  borderRadius: '14px',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  width: isMobile ? '100%' : 'auto'
+                }}
+                onMouseOver={(e) => {
+                  if (!isMobile) {
+                    e.currentTarget.style.background = '#F3F4F6';
+                    e.currentTarget.style.borderColor = '#1A1A1A';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  if (!isMobile) {
+                    e.currentTarget.style.background = '#FAFAFA';
+                    e.currentTarget.style.borderColor = '#E5E7EB';
+                  }
+                }}
+              >
+                <FolderPlus size={isMobile ? 48 : 64} strokeWidth={1.5} color="#6B7280" />
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{
+                    fontSize: isMobile ? '15px' : '16px',
+                    fontWeight: 600,
+                    color: '#1A1A1A',
+                    margin: '0 0 4px 0'
+                  }}>
+                    New Folder
+                  </p>
+                  <p style={{
+                    fontSize: isMobile ? '12px' : '13px',
+                    color: '#6B7280',
+                    margin: 0
+                  }}>
+                    Create a new folder
+                  </p>
+                </div>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Chat Section - Hidden for clients */}
+        {userRole !== 'client' && (
+          <div style={{
+            background: '#FFFFFF',
+            border: '1px solid #E5E7EB',
+            borderRadius: '14px',
+            padding: '32px',
+            boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+            marginBottom: '32px'
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '24px'
+            }}>
+              <h2 style={{
+                fontSize: '18px',
+                fontWeight: 600,
+                color: '#1A1A1A',
+                margin: 0
+              }}>
+                Messages
+              </h2>
+              {!loadingMessages && !messagesError && (
+                <button
+                  onClick={loadMessages}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    background: 'transparent',
+                    color: '#6B7280',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = '#F3F4F6';
+                    e.currentTarget.style.color = '#1A1A1A';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = '#6B7280';
+                  }}
+                >
+                  <RefreshCw size={14} />
+                  Refresh
+                </button>
+              )}
+            </div>
+
+            {/* Messages Container */}
+            <div style={{
+              maxHeight: '400px',
+              overflowY: 'auto',
+              marginBottom: '20px',
+              padding: '16px',
+              background: '#F9FAFB',
+              borderRadius: '10px',
+              border: '1px solid #E5E7EB'
+            }}>
+              {loadingMessages ? (
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  padding: '40px 0'
+                }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    border: '3px solid #F3F4F6',
+                    borderTopColor: '#1A1A1A',
+                    borderRadius: '50%',
+                    animation: 'spin 0.8s linear infinite'
+                  }} />
+                </div>
+              ) : messagesError ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '40px 20px',
+                  gap: '12px'
+                }}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="1.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <p style={{
+                    fontSize: '14px',
+                    color: '#DC2626',
+                    margin: 0,
+                    textAlign: 'center'
+                  }}>
+                    {messagesError}
+                  </p>
+                </div>
+              ) : messages.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      style={{
+                        background: '#FFFFFF',
+                        padding: '12px 16px',
+                        borderRadius: '10px',
+                        border: '1px solid #E5E7EB'
+                      }}
+                    >
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        marginBottom: '6px'
+                      }}>
+                        <span style={{
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: '#1A1A1A'
+                        }}>
+                          {msg.sender_name}
+                        </span>
+                        <span style={{
+                          fontSize: '12px',
+                          color: '#6B7280'
+                        }}>
+                          {formatTime(msg.created_at)}
+                        </span>
+                      </div>
+                      <p style={{
+                        fontSize: '14px',
+                        color: '#1A1A1A',
+                        margin: 0,
+                        lineHeight: 1.5
+                      }}>
+                        {msg.message}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '40px 20px',
+                  gap: '12px'
+                }}>
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="1.5">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <p style={{
+                    fontSize: '14px',
+                    color: '#6B7280',
+                    margin: 0
+                  }}>
+                    No messages yet. Start the conversation!
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Message Input Form */}
+            {!messagesError && (
+              <form onSubmit={handleSendMessage} style={{ display: 'flex', gap: '12px' }}>
+                <input
+                  type="text"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  placeholder="Type your message..."
+                  disabled={sendingMessage}
+                  style={{
+                    flex: 1,
+                    padding: '12px 16px',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.2s ease'
+                  }}
+                  onFocus={(e) => e.currentTarget.style.borderColor = '#1A1A1A'}
+                  onBlur={(e) => e.currentTarget.style.borderColor = '#E5E7EB'}
+                />
+                <button
+                  type="submit"
+                  disabled={sendingMessage || !newMessage.trim()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '12px 20px',
+                    background: sendingMessage || !newMessage.trim() ? '#E5E7EB' : '#1A1A1A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    cursor: sendingMessage || !newMessage.trim() ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseOver={(e) => {
+                    if (!sendingMessage && newMessage.trim()) {
+                      e.currentTarget.style.background = '#2A2A2A';
+                    }
+                  }}
+                  onMouseLeave={(e) => e.currentTarget.style.background = '#FFFFFF'}
+                >
+                  <Send size={16} />
+                  {sendingMessage ? 'Sending...' : 'Send'}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
+
+        {/* Tickets Section */}
+        <div style={{
+          background: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '14px',
+          padding: '32px',
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+          marginBottom: '32px'
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '24px'
+          }}>
+            <h2 style={{
+              fontSize: '18px',
+              fontWeight: 600,
+              color: '#1A1A1A',
+              margin: 0
+            }}>
+              Support Tickets
+            </h2>
+            <button
+              onClick={() => setShowTicketModal(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                background: '#F3F4F6',
+                color: '#1A1A1A',
+                border: 'none',
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'background 0.2s ease'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.background = '#E5E7EB'}
+              onMouseOut={(e) => e.currentTarget.style.background = '#F3F4F6'}
+            >
+              <AlertCircle size={16} />
+              Create Ticket
+            </button>
+          </div>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '40px 20px',
+            gap: '12px'
+          }}>
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <p style={{
+              fontSize: '14px',
+              color: '#6B7280',
+              margin: 0
+            }}>
+              No tickets yet
+            </p>
+          </div>
+        </div>
+
+        {/* Project Details Card */}
+        <div style={{
+          background: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: '14px',
+          padding: '32px',
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.04)',
+          marginBottom: '32px'
+        }}>
+          <h2 style={{
+            fontSize: '18px',
+            fontWeight: 600,
+            color: '#1A1A1A',
+            margin: '0 0 24px 0'
+          }}>
+            Project Details
+          </h2>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+            {/* Category */}
+            {project.category && (
+              <div style={{
+                display: 'flex',
+                paddingTop: '16px',
+                paddingBottom: '16px',
+                borderBottom: '1px solid #F3F4F6'
+              }}>
+                <div style={{ flex: '0 0 180px' }}>
+                  <p style={{
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#6B7280',
+                    margin: 0
+                  }}>
+                    Category
+                  </p>
+                </div>
+                <div style={{ flex: '1' }}>
+                  <p style={{
+                    fontSize: '14px',
+                    color: '#1A1A1A',
+                    margin: 0
+                  }}>
+                    {project.category}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Created */}
+            <div style={{
+              display: 'flex',
+              paddingTop: '16px',
+              paddingBottom: '16px',
+              borderBottom: '1px solid #F3F4F6'
+            }}>
+              <div style={{ flex: '0 0 180px' }}>
+                <p style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  color: '#6B7280',
+                  margin: 0
+                }}>
+                  Created
+                </p>
+              </div>
+              <div style={{ flex: '1' }}>
+                <p style={{
+                  fontSize: '14px',
+                  color: '#1A1A1A',
+                  margin: 0
+                }}>
+                  {formatDate(project.created_at)}
+                </p>
+              </div>
+            </div>
+
+            {/* Last Updated */}
+            {project.last_update_at && (
+              <div style={{
+                display: 'flex',
+                paddingTop: '16px'
+              }}>
+                <div style={{ flex: '0 0 180px' }}>
+                  <p style={{
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#6B7280',
+                    margin: 0
+                  }}>
+                    Last Updated
+                  </p>
+                </div>
+                <div style={{ flex: '1' }}>
+                  <p style={{
+                    fontSize: '14px',
+                    color: '#1A1A1A',
+                    margin: 0
+                  }}>
+                    {formatDate(project.last_update_at)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Assigned To */}
+            {project.assigned_to && (
+              <div style={{
+                display: 'flex',
+                paddingTop: '16px'
+              }}>
+                <div style={{ flex: '0 0 180px' }}>
+                  <p style={{
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    color: '#6B7280',
+                    margin: 0
+                  }}>
+                    Assigned To
+                  </p>
+                </div>
+                <div style={{ flex: '1' }}>
+                  <p style={{
+                    fontSize: '14px',
+                    color: '#1A1A1A',
+                    margin: 0
+                  }}>
+                    {project.assigned_to}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* MODALS */}
+      <EditProjectModal
+        show={showEditModal}
+        onClose={() => setShowEditModal(false)}
+        form={editForm}
+        onChange={(field, value) => setEditForm(prev => ({ ...prev, [field]: value }))}
+        onSubmit={handleEditProject}
+        submitting={submitting}
+        userRole={userRole}
+        clients={clients}
+        loadingClients={loadingClients}
+      />
+
+      <CreateMilestoneModal
+        show={showMilestoneModal}
+        onClose={() => setShowMilestoneModal(false)}
+        form={milestoneForm}
+        onChange={(field, value) => setMilestoneForm(prev => ({ ...prev, [field]: value }))}
+        onSubmit={handleCreateMilestone}
+        submitting={submitting}
+      />
+
+      <CreateTicketModal
+        show={showTicketModal}
+        onClose={() => setShowTicketModal(false)}
+        form={ticketForm}
+        onChange={(field, value) => setTicketForm(prev => ({ ...prev, [field]: value }))}
+        onSubmit={handleCreateTicket}
+        submitting={submitting}
+      />
+
+      {/* ✅ File Preview Modal */}
+      {previewFile && (
+        <FilePreviewModal
+          file={previewFile}
+          allFiles={currentFiles?.filter(f => f.type === 'file') || []}
+          currentIndex={currentFiles?.filter(f => f.type === 'file').findIndex(f => f.id === previewFile.id) || 0}
+          isOpen={showPreviewModal}
+          onClose={handleClosePreview}
+          onNavigate={handleNavigateFile}
+        />
+      )}
+
+      {/* NEW FOLDER MODAL */}
+      {showNewFolderModal && (
+        <>
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 9998,
+              backdropFilter: 'blur(4px)'
+            }}
+            onClick={() => setShowNewFolderModal(false)}
+          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              background: '#FFFFFF',
+              borderRadius: '14px',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+              zIndex: 9999,
+              width: '90%',
+              maxWidth: '460px',
+              overflow: 'hidden'
+            }}
+          >
+            <div style={{
+              padding: '24px',
+              borderBottom: '1px solid #E5E7EB',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <h2 style={{
+                margin: 0,
+                fontSize: '18px',
+                fontWeight: 600,
+                color: '#1A1A1A'
+              }}>
+                Create New Folder
+              </h2>
+              <button
+                onClick={() => {
+                  setShowNewFolderModal(false);
+                  setNewFolderName('');
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: '4px',
+                  cursor: 'pointer',
+                  color: '#6B7280',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: '24px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '13px',
+                fontWeight: 500,
+                color: '#1A1A1A'
+              }}>
+                Folder Name
+              </label>
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Enter folder name"
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  fontSize: '14px',
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '10px',
+                  outline: 'none'
+                }}
+                onKeyPress={(e) => e.key === 'Enter' && newFolderName.trim() && handleCreateFolder()}
+              />
+            </div>
+            <div style={{
+              padding: '20px 24px',
+              borderTop: '1px solid #E5E7EB',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px'
+            }}>
+              <button
+                onClick={() => {
+                  setShowNewFolderModal(false);
+                  setNewFolderName('');
+                }}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  border: '1px solid #E5E7EB',
+                  borderRadius: '10px',
+                  background: '#FFFFFF',
+                  color: '#1A1A1A',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateFolder}
+                disabled={!newFolderName.trim()}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  border: 'none',
+                  borderRadius: '10px',
+                  background: !newFolderName.trim() ? '#9CA3AF' : '#1A1A1A',
+                  color: '#FFFFFF',
+                  cursor: !newFolderName.trim() ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <style>{`
+        @keyframes spin {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
+        }
+
+        @keyframes slideDownFadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(-8px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        @keyframes bounceIn {
+          0% {
+            transform: scale(0.3);
+            opacity: 0;
+          }
+          50% {
+            transform: scale(1.05);
+          }
+          70% {
+            transform: scale(0.9);
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+
+        @keyframes iconRotate {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(90deg);
+          }
+        }
+
+        @media (max-width: 768px) {
+          .project-detail-container {
+            padding: 5px !important;
+          }
+          
+          .project-detail-container > div {
+            margin-bottom: 16px !important;
+          }
+          
+          .project-detail-container h1 {
+            font-size: 22px !important;
+          }
+          
+          .project-detail-container button:not(.file-action-button),
+          .project-detail-container a:not(.file-action-button) {
+            font-size: 13px !important;
+            padding: 8px 12px !important;
+          }
+
+          .project-detail-container .file-action-button {
+            padding: 0 !important;
+            margin: 0 !important;
+            font-size: 0 !important;
+            line-height: 0 !important;
+          }
+        }
+      `}</style>
+    </>
+  );
+}
+
+
+
+
+
+
+
+
+
+
+

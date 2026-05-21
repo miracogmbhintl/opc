@@ -1,0 +1,23 @@
+---
+import Layout from '../../../layouts/main.astro';
+import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
+import ClientDetail from '../../../components/ClientDetail';
+import { baseUrl } from '../../../lib/base-url';
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect(`${baseUrl}/miraka-co-portal/clients`);
+}
+---
+
+<Layout>
+  <MirakaDashboardShell
+    client:only="react"
+    requiredRole={["owner", "admin"]}
+    currentPath={`/miraka-co-portal/client/${id}`}
+    hideTopBar={true}
+  >
+    <ClientDetail client:only="react" clientId={id} baseUrl={baseUrl} />
+  </MirakaDashboardShell>
+</Layout>

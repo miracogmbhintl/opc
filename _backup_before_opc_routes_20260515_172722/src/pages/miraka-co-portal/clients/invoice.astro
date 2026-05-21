@@ -1,0 +1,33 @@
+---
+/**
+ * Invoice Creation Page
+ * Route: /miraka-co-portal/clients/invoice
+ * Purpose: Create invoices for clients
+ * Non-destructive: New standalone page
+ */
+
+import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
+import InvoiceCreator from '../../../components/InvoiceCreator';
+import { baseUrl } from '../../../lib/base-url';
+
+// This page is protected by the middleware (src/middleware.ts)
+// Only authenticated users can access it
+---
+
+<MirakaDashboardShell 
+  client:only="react"
+  baseUrl={baseUrl}
+  currentPath="clients/invoice"
+  hideTopBarActions={true}
+>
+  <InvoiceCreator client:only="react" />
+</MirakaDashboardShell>
+
+<style>
+  /* Ensure full viewport height for dashboard shell */
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+  }
+</style>

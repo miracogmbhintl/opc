@@ -1,0 +1,78 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import BusinessDataScraper from '../../components/BusinessDataScraper';
+import '../../styles/miraka-portal.css';
+
+// Immediate fix: use the secret name that actually exists right now
+const GOOGLE_API_KEY =
+  Astro.locals?.runtime?.env?.GOOGLE_API_KEY || import.meta.env.GOOGLE_API_KEY || '';
+
+if (!GOOGLE_API_KEY) {
+  console.warn('GOOGLE_API_KEY is missing - map will not load');
+}
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unternehmensdaten-Scraper - Miraka & Co</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+
+  <script define:vars={{ GOOGLE_API_KEY }}>
+    window.googleMapsApiKey = GOOGLE_API_KEY;
+  </script>
+
+  <script is:inline>
+    window.initGoogleMaps = function () {
+      console.log('Google Maps API loaded');
+      window.dispatchEvent(new Event('googleMapsLoaded'));
+    };
+
+    window.gm_authFailure = function () {
+      console.error('Google Maps authentication failed');
+      window.dispatchEvent(new Event('googleMapsAuthFailure'));
+    };
+  </script>
+
+  <script
+    src={`https://maps.googleapis.com/maps/api/js?key=${GOOGLE_API_KEY}&libraries=places&callback=initGoogleMaps`}
+    async
+    defer>
+  </script>
+
+  <style>
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+
+    .full-width-tool {
+      padding: 0 !important;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    title="Unternehmensdaten-Scraper"
+    currentPath="/tools/business-data-scraper"
+    fullWidth={true}
+    hideTopBar={true}
+  >
+    <BusinessDataScraper />
+  </MirakaDashboardShell>
+</body>
+</html>

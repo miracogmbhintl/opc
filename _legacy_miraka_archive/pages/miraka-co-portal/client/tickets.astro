@@ -1,0 +1,14 @@
+---
+import Layout from '../../../layouts/main.astro';
+import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
+import TicketsPageWrapper from '../../../components/TicketsPageWrapper';
+import { baseUrl } from '../../../lib/base-url';
+import '../../../styles/miraka-portal.css';
+import '../../../styles/miraka-dashboard.css';
+---
+
+<Layout>
+  <MirakaDashboardShell client:only="react" baseUrl={baseUrl}>
+    <TicketsPageWrapper client:only="react" />
+  </MirakaDashboardShell>
+</Layout>

@@ -1,0 +1,44 @@
+---
+import { baseUrl } from '../../lib/base-url';
+
+const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logging Out - Miraka & Co</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+</head>
+<body>
+  <div style="display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #F7F7F9;">
+    <div style="text-align: center;">
+      <h2>Logging out...</h2>
+    </div>
+  </div>
+
+  <script define:vars={{ baseUrl, supabaseUrl, supabaseAnonKey }}>
+    (async function() {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        
+        await supabase.auth.signOut();
+        
+        // Small delay to ensure signout completes
+        setTimeout(() => {
+          window.location.href = `${baseUrl}/miraka-co-portal`;
+        }, 500);
+      } catch (error) {
+        console.error('Logout error:', error);
+        // Redirect anyway even if there's an error
+        window.location.href = `${baseUrl}/miraka-co-portal`;
+      }
+    })();
+  </script>
+</body>
+</html>

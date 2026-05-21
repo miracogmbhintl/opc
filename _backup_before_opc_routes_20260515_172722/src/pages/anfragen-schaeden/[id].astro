@@ -1,0 +1,43 @@
+---
+import MirakaDashboardShell from '../../components/MirakaDashboardShell';
+import InquiryDetailPage from '../../components/InquiryDetailPage';
+
+export const prerender = false;
+
+const inquiryId = Astro.params.id || '';
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anfrage öffnen - Orange Pro Clean</title>
+</head>
+
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    requiredRole={['owner', 'admin']}
+    currentPath="/anfragen"
+    fullWidth={true}
+    hideTopBar={true}
+  >
+    <InquiryDetailPage inquiryId={inquiryId} client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
+
+<style>
+  :global(html),
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    font-family: Inter, Helvetica, Arial, sans-serif;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+</style>

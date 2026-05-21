@@ -1,0 +1,15 @@
+---
+import MainLayout from '../../../layouts/main.astro';
+import ProjectDetailPage from '../../../components/ProjectDetailPage';
+import { baseUrl } from '../../../lib/base-url';
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect(`${baseUrl}/miraka-co-portal/projects`);
+}
+---
+
+<MainLayout pageClass="project-detail">
+  <ProjectDetailPage client:only="react" projectId={id} />
+</MainLayout>

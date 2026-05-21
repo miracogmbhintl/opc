@@ -1,0 +1,205 @@
+
+---
+import Layout from '../../layouts/main.astro';
+import { baseUrl } from '../../lib/base-url';
+---
+
+<Layout>
+  <div style="padding: 40px; font-family: 'Inter', sans-serif; max-width: 1200px;">
+    <h1 style="font-size: 24px; margin-bottom: 24px; font-weight: 600;">Work OS Auth Debug</h1>
+    
+    <div style="display: grid; gap: 20px;">
+      <div id="auth-status" style="padding: 20px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px;">
+        <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">Session Status</h2>
+        <p style="color: #6b7280;">Checking...</p>
+      </div>
+
+      <div id="cookie-status" style="padding: 20px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px;">
+        <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">Cookie Status</h2>
+        <p style="color: #6b7280;">Checking...</p>
+      </div>
+
+      <div style="padding: 20px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px;">
+        <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">Actions</h2>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <button 
+            id="refresh-cookies" 
+            style="padding: 10px 20px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500;"
+          >
+            Refresh Cookies
+          </button>
+          <button 
+            id="test-workspace-create" 
+            style="padding: 10px 20px; background: #1a1a1a; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500;"
+          >
+            Test Create Workspace
+          </button>
+        </div>
+      </div>
+
+      <div id="result" style="padding: 20px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 12px; min-height: 100px;">
+        <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">Results</h2>
+        <pre id="result-content" style="margin: 0; font-family: 'Monaco', monospace; font-size: 12px; color: #374151; overflow-x: auto;">Waiting for action...</pre>
+      </div>
+    </div>
+  </div>
+
+  <script define:vars={{ baseUrl }}>
+    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+
+    async function checkAuth() {
+      try {
+        // Use dynamic import for Supabase
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        const statusEl = document.getElementById('auth-status');
+        if (error) {
+          statusEl.innerHTML = `
+            <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">❌ Auth Error</h2>
+            <pre style="font-size: 12px; color: #dc2626; overflow-x: auto;">${JSON.stringify(error, null, 2)}</pre>
+          `;
+          return null;
+        }
+        
+        if (!session) {
+          statusEl.innerHTML = `
+            <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">❌ No Session</h2>
+            <p style="color: #6b7280;">You need to log in first</p>
+            <a href="${baseUrl}/" style="color: #3b82f6;">Go to Login</a>
+          `;
+          return null;
+        }
+
+        statusEl.innerHTML = `
+          <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">✅ Session Active</h2>
+          <p style="margin: 4px 0; color: #374151;"><strong>User ID:</strong> ${session.user.id}</p>
+          <p style="margin: 4px 0; color: #374151;"><strong>Email:</strong> ${session.user.email || 'N/A'}</p>
+        `;
+        return session;
+      } catch (error) {
+        const statusEl = document.getElementById('auth-status');
+        statusEl.innerHTML = `
+          <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">❌ Error</h2>
+          <pre style="font-size: 12px; color: #dc2626;">${error.message || error}</pre>
+        `;
+        return null;
+      }
+    }
+
+    async function checkCookies() {
+      try {
+        const response = await fetch(`${baseUrl}/api/auth/check-cookies`, {
+          credentials: 'include'
+        });
+        
+        const data = await response.json();
+        const cookieEl = document.getElementById('cookie-status');
+        
+        if (data.hasAccessToken && data.hasRefreshToken) {
+          cookieEl.innerHTML = `
+            <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">✅ Cookies Present</h2>
+            <p style="margin: 4px 0; color: #374151;"><strong>Access Token:</strong> ${data.hasAccessToken ? 'Yes' : 'No'}</p>
+            <p style="margin: 4px 0; color: #374151;"><strong>Refresh Token:</strong> ${data.hasRefreshToken ? 'Yes' : 'No'}</p>
+          `;
+        } else {
+          cookieEl.innerHTML = `
+            <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">⚠️ Cookies Missing</h2>
+            <p style="margin: 4px 0; color: #dc2626;"><strong>Access Token:</strong> ${data.hasAccessToken ? 'Yes' : 'No'}</p>
+            <p style="margin: 4px 0; color: #dc2626;"><strong>Refresh Token:</strong> ${data.hasRefreshToken ? 'Yes' : 'No'}</p>
+            <p style="margin-top: 12px; color: #6b7280;">Click "Refresh Cookies" to fix this.</p>
+          `;
+        }
+      } catch (error) {
+        const cookieEl = document.getElementById('cookie-status');
+        cookieEl.innerHTML = `
+          <h2 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">❌ Cookie Check Failed</h2>
+          <pre style="font-size: 12px; color: #dc2626;">${error.message || error}</pre>
+        `;
+      }
+    }
+
+    async function refreshCookies() {
+      const resultEl = document.getElementById('result-content');
+      resultEl.textContent = 'Refreshing cookies...';
+      
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error || !session) {
+          resultEl.textContent = `❌ Cannot refresh - no active session\n\n${error ? JSON.stringify(error, null, 2) : 'No session found'}`;
+          return;
+        }
+
+        const response = await fetch(`${baseUrl}/api/auth/set-session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+          })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+          resultEl.textContent = `✅ Cookies refreshed successfully\n\n${JSON.stringify(data, null, 2)}`;
+          // Re-check cookies
+          await checkCookies();
+        } else {
+          resultEl.textContent = `❌ Failed to refresh cookies (${response.status})\n\n${JSON.stringify(data, null, 2)}`;
+        }
+      } catch (error) {
+        resultEl.textContent = `❌ ERROR\n\n${error.message || error}`;
+      }
+    }
+
+    async function testWorkspaceCreate() {
+      const resultEl = document.getElementById('result-content');
+      resultEl.textContent = 'Testing workspace creation...';
+      
+      try {
+        const response = await fetch(`${baseUrl}/api/work-os/workspaces`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name: 'Test Workspace ' + Date.now(),
+            type: 'internal',
+            color: '#3B82F6'
+          })
+        });
+
+        const data = await response.json();
+        
+        if (response.ok) {
+          resultEl.textContent = `✅ SUCCESS - Workspace created!\n\n${JSON.stringify(data, null, 2)}`;
+        } else {
+          resultEl.textContent = `❌ FAILED (${response.status})\n\n${JSON.stringify(data, null, 2)}`;
+        }
+      } catch (error) {
+        resultEl.textContent = `❌ ERROR\n\n${error.message || error}`;
+      }
+    }
+
+    // Run checks on load
+    document.addEventListener('DOMContentLoaded', async () => {
+      const session = await checkAuth();
+      if (session) {
+        await checkCookies();
+      }
+
+      // Add button handlers
+      document.getElementById('refresh-cookies')?.addEventListener('click', refreshCookies);
+      document.getElementById('test-workspace-create')?.addEventListener('click', testWorkspaceCreate);
+    });
+  </script>
+</Layout>
+

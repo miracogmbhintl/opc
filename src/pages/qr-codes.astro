@@ -1,0 +1,41 @@
+---
+import MirakaDashboardShell from '../components/MirakaDashboardShell';
+import QRCodeOverviewPage from '../components/QRCodeOverviewPage';
+
+export const prerender = false;
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QR-Codes - Orange Pro Clean</title>
+</head>
+
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    requiredRole={['owner', 'admin', 'dispatch']}
+    currentPath="/qr-codes"
+    fullWidth={true}
+    hideTopBar={true}
+  >
+    <QRCodeOverviewPage client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
+
+<style>
+  :global(html),
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    font-family: Inter, Helvetica, Arial, sans-serif;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+</style>

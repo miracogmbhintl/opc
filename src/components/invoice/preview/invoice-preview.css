@@ -1,0 +1,313 @@
+@import url('https://fonts.cdnfonts.com/css/termina');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/**
+ * Invoice HTML Preview Styles
+ * Layout: A4 page with Swiss invoice formatting
+ * Typography: Termina Extra Bold (header) + Helvetica Neue/Inter (body)
+ * Matches React-PDF layout exactly for consistent print output
+ */
+
+
+/* ==========================================
+   PAGE LAYOUT - A4 Dimensions
+========================================== */
+.invoice-a4 {
+  width: 21cm;
+  min-height: 29.7cm;
+  background: white;
+  margin: 0 auto;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  
+  /* A4 padding (matching PDF: 95pt top, 55pt right, 60pt bottom, 70pt left) */
+  /* Convert pt to cm: 1pt ≈ 0.0353cm */
+  padding-top: 3.35cm;    /* 95pt */
+  padding-right: 1.94cm;  /* 55pt */
+  padding-bottom: 2.12cm; /* 60pt */
+  padding-left: 2.47cm;   /* 70pt */
+  
+  /* Typography */
+  font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.35;
+  color: #000;
+}
+
+/* Reset default margins */
+.invoice-a4 * {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ==========================================
+   HEADER - Logo (Text-based, Centered, 4cm width)
+========================================== */
+.invoice-a4 .header {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 22pt;
+}
+
+.invoice-a4 .logo {
+  width: 4cm;
+  text-align: center;
+  font-family: 'Termina', sans-serif;
+  font-weight: 800;
+  font-size: 18pt;
+  letter-spacing: 0.5pt;
+}
+
+/* ==========================================
+   ADDRESS SECTION - Two columns (Client | Miraka)
+========================================== */
+.invoice-a4 .address-row {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 18pt;
+  margin-bottom: 18pt;
+}
+
+.invoice-a4 .address-block {
+  width: 45%;
+}
+
+.invoice-a4 .address-name {
+  font-weight: 700;
+  margin-bottom: 2pt;
+  line-height: 1.2;
+}
+
+.invoice-a4 .address-line {
+  line-height: 1.2;
+  margin-bottom: 1pt;
+}
+
+/* ==========================================
+   META - Date and Invoice Number
+========================================== */
+.invoice-a4 .meta-section {
+  margin-top: 10pt;
+  margin-bottom: 26pt;
+}
+
+.invoice-a4 .meta-text {
+  font-size: 11pt;
+  line-height: 1.4;
+}
+
+/* ==========================================
+   TITLE - Project Name
+========================================== */
+.invoice-a4 .title {
+  font-size: 13pt;
+  font-weight: 700;
+  margin-bottom: 10pt;
+  line-height: 1.3;
+}
+
+/* ==========================================
+   GREETING
+========================================== */
+.invoice-a4 .greeting {
+  margin-bottom: 10pt;
+  line-height: 1.35;
+}
+
+/* ==========================================
+   INTRO TEXT
+========================================== */
+.invoice-a4 .intro {
+  margin-bottom: 22pt;
+  line-height: 1.35;
+}
+
+/* ==========================================
+   TABLE - Invoice Items
+========================================== */
+.invoice-a4 .invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12pt;
+}
+
+.invoice-a4 .invoice-table thead th {
+  font-weight: 700;
+  border-bottom: 1pt solid #000;
+  padding-bottom: 4pt;
+  padding-top: 0;
+  text-align: left;
+  font-size: 11pt;
+}
+
+.invoice-a4 .invoice-table tbody tr {
+  border-bottom: 0.5pt solid #ccc;
+}
+
+.invoice-a4 .invoice-table tbody td {
+  padding-top: 6pt;
+  padding-bottom: 6pt;
+  font-size: 11pt;
+}
+
+.invoice-a4 .col-pos {
+  width: 6%;
+}
+
+.invoice-a4 .col-desc {
+  width: 54%;
+}
+
+.invoice-a4 .col-qty {
+  width: 20%;
+}
+
+.invoice-a4 .col-price {
+  width: 20%;
+  text-align: right;
+}
+
+/* ==========================================
+   TOTALS SECTION
+========================================== */
+.invoice-a4 .totals-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-top: 12pt;
+}
+
+.invoice-a4 .subtotal-row,
+.invoice-a4 .vat-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 4pt;
+}
+
+.invoice-a4 .subtotal-label,
+.invoice-a4 .vat-label {
+  font-size: 11pt;
+  font-weight: 500;
+  margin-right: 20pt;
+}
+
+.invoice-a4 .subtotal-amount,
+.invoice-a4 .vat-amount {
+  font-size: 11pt;
+  font-weight: 700;
+  width: 100pt;
+  text-align: right;
+}
+
+.invoice-a4 .total-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+  margin-top: 10pt;
+  padding-top: 8pt;
+  border-top: 1pt solid #000;
+}
+
+.invoice-a4 .total-label {
+  font-size: 12pt;
+  font-weight: 700;
+  margin-right: 20pt;
+}
+
+.invoice-a4 .total-amount {
+  font-size: 13pt;
+  font-weight: 700;
+  width: 100pt;
+  text-align: right;
+}
+
+/* ==========================================
+   FOOTER - Fixed position, 4-column grid
+========================================== */
+.invoice-a4 .footer {
+  position: absolute;
+  bottom: 2.12cm;  /* Same as page paddingBottom */
+  left: 2.47cm;    /* Same as page paddingLeft */
+  right: 1.94cm;   /* Same as page paddingRight */
+  font-size: 7.5pt;
+  line-height: 1.45;
+}
+
+.invoice-a4 .footer-row {
+  display: flex;
+  width: 100%;
+  gap: 8pt;
+}
+
+/* Column widths: 1fr / 0.75fr / 1.25fr / 1fr (relative) */
+.invoice-a4 .footer-col-1 {
+  flex: 1;
+  min-width: 24%;
+}
+
+.invoice-a4 .footer-col-2 {
+  flex: 0.75;
+  min-width: 18%;
+}
+
+.invoice-a4 .footer-col-3 {
+  flex: 1.25;
+  min-width: 32%;
+}
+
+.invoice-a4 .footer-col-4 {
+  flex: 0.75;
+  min-width: 18%;
+}
+
+.invoice-a4 .footer-text {
+  font-size: 7.5pt;
+  line-height: 1.45;
+  margin-bottom: 1pt;
+}
+
+.invoice-a4 .footer-bold {
+  font-weight: 700;
+}
+
+/* ==========================================
+   PRINT OPTIMIZATION
+========================================== */
+@media print {
+  .invoice-a4 {
+    box-shadow: none;
+    margin: 0;
+    width: 21cm;
+    height: 29.7cm;
+  }
+  
+  /* Hide everything except the invoice */
+  body > *:not(.invoice-preview-print) {
+    display: none !important;
+  }
+  
+  /* Ensure proper page breaks */
+  .invoice-a4 {
+    page-break-after: always;
+  }
+  
+  /* Prevent content from breaking across pages */
+  .invoice-a4 .invoice-table,
+  .invoice-a4 .totals-section {
+    page-break-inside: avoid;
+  }
+}
+
+/* ==========================================
+   SCREEN OPTIMIZATION (Preview)
+========================================== */
+@media screen {
+  /* Add subtle hover effects for better preview experience */
+  .invoice-a4:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  }
+}

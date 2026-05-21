@@ -1,0 +1,65 @@
+---
+import LoginWrapper from '../components/LoginWrapper';
+import '../styles/miraka-auth.css';
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Miraka & Co - Client Portal Login</title>
+  <link rel="icon" type="image/png" href="/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <script is:inline>
+    // Global error handler - catch all errors
+    window.addEventListener('error', function(e) {
+      console.error('❌ Page error:', {
+        message: e.message,
+        filename: e.filename,
+        lineno: e.lineno,
+        colno: e.colno,
+        error: e.error
+      });
+      
+      // Display error on page
+      const body = document.body;
+      const errorDiv = document.createElement('div');
+      errorDiv.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #FEE; border: 2px solid #C00; padding: 20px; border-radius: 8px; max-width: 400px; z-index: 9999; font-family: monospace; font-size: 12px;';
+      errorDiv.innerHTML = '<strong style="color: #C00;">ERROR:</strong><br>' + e.message + '<br><small>' + (e.filename || 'unknown file') + '</small>';
+      body.appendChild(errorDiv);
+    });
+    
+    window.addEventListener('unhandledrejection', function(e) {
+      console.error('❌ Unhandled promise rejection:', e.reason);
+    });
+    
+    console.log('🚀 Portal page loading...', new Date().toISOString());
+    console.log('📍 URL:', window.location.href);
+  </script>
+</head>
+<body>
+  <LoginWrapper client:only="react" />
+  
+  <script is:inline>
+    console.log('✓ Portal HTML loaded');
+    console.log('⏳ Waiting for React to hydrate...');
+    
+    // Check if React loaded after a delay
+    setTimeout(() => {
+      const reactRoot = document.querySelector('[data-reactroot], [data-react-root]');
+      if (reactRoot) {
+        console.log('✓ React hydrated successfully');
+      } else {
+        console.warn('⚠️  React may not have hydrated - no React root found');
+      }
+    }, 2000);
+  </script>
+</body>
+</html>
+
+

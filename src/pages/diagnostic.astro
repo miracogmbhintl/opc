@@ -1,0 +1,143 @@
+---
+// Diagnostic page to check what's failing
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diagnostic - Miraka & Co</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1a1a1a;
+      color: #00ff00;
+    }
+    .check { color: #00ff00; }
+    .error { color: #ff0000; }
+    .warn { color: #ffaa00; }
+    pre { background: #000; padding: 10px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>🔍 Diagnostic Report</h1>
+  <div id="output"></div>
+
+  <script type="module">
+    const output = document.getElementById('output');
+    
+    function log(msg, type = 'check') {
+      const p = document.createElement('p');
+      p.className = type;
+      p.textContent = msg;
+      output.appendChild(p);
+      console.log(msg);
+    }
+    
+    async function runDiagnostics() {
+      log('=== STARTING DIAGNOSTICS ===');
+      
+      // 1. Check if we can import React
+      try {
+        const React = await import('react');
+        log('✅ React imported successfully', 'check');
+      } catch (err) {
+        log('❌ React import failed: ' + err.message, 'error');
+      }
+      
+      // 2. Check if we can import react-dom
+      try {
+        const ReactDOM = await import('react-dom/client');
+        log('✅ react-dom/client imported successfully', 'check');
+      } catch (err) {
+        log('❌ react-dom/client import failed: ' + err.message, 'error');
+      }
+      
+      // 3. Check if DevLinkProvider exists
+      try {
+        const { DevLinkProvider } = await import('../site-components/DevLinkProvider');
+        log('✅ DevLinkProvider imported successfully', 'check');
+      } catch (err) {
+        log('❌ DevLinkProvider import failed: ' + err.message, 'error');
+      }
+      
+      // 4. Check if LoadInScreen exists
+      try {
+        const { LoadInScreen } = await import('../site-components/LoadInScreen');
+        log('✅ LoadInScreen imported successfully', 'check');
+      } catch (err) {
+        log('❌ LoadInScreen import failed: ' + err.message, 'error');
+      }
+      
+      // 5. Check if TranslationProvider exists
+      try {
+        const { TranslationProvider } = await import('../lib/TranslationContext');
+        log('✅ TranslationProvider imported successfully', 'check');
+      } catch (err) {
+        log('❌ TranslationProvider import failed: ' + err.message, 'error');
+      }
+      
+      // 6. Check if MirakaLogin exists
+      try {
+        const MirakaLogin = await import('../components/MirakaLogin');
+        log('✅ MirakaLogin imported successfully', 'check');
+      } catch (err) {
+        log('❌ MirakaLogin import failed: ' + err.message, 'error');
+      }
+      
+      // 7. Check Supabase client
+      try {
+        const { getSupabaseClient } = await import('../lib/supabase-client');
+        const supabase = getSupabaseClient();
+        log('✅ Supabase client created', 'check');
+        
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          log('⚠️  Supabase connection error: ' + error.message, 'warn');
+        } else {
+          log('✅ Supabase connection successful', 'check');
+        }
+      } catch (err) {
+        log('❌ Supabase test failed: ' + err.message, 'error');
+      }
+      
+      // 8. Try to render React component
+      try {
+        log('Testing React render...', 'check');
+        const React = await import('react');
+        const ReactDOM = await import('react-dom/client');
+        
+        const testDiv = document.createElement('div');
+        testDiv.id = 'test-render';
+        document.body.appendChild(testDiv);
+        
+        const root = ReactDOM.createRoot(testDiv);
+        root.render(React.createElement('div', { style: { color: '#00ff00' } }, '✅ React render successful!'));
+        
+        log('✅ React render test passed', 'check');
+      } catch (err) {
+        log('❌ React render test failed: ' + err.message, 'error');
+      }
+      
+      // 9. Check if site-components global.css loads
+      try {
+        const response = await fetch('/generated/webflow.css');
+        if (response.ok) {
+          log('✅ webflow.css accessible', 'check');
+        } else {
+          log('⚠️  webflow.css returned: ' + response.status, 'warn');
+        }
+      } catch (err) {
+        log('❌ webflow.css fetch failed: ' + err.message, 'error');
+      }
+      
+      log('=== DIAGNOSTICS COMPLETE ===');
+      log('If all checks pass but main page is blank, issue is in index.astro script logic');
+    }
+    
+    runDiagnostics();
+  </script>
+</body>
+</html>

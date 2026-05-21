@@ -1,0 +1,132 @@
+---
+import Layout from '../layouts/main.astro';
+---
+
+<Layout>
+  <div style="min-height: 100vh; padding: 60px 40px; background: #F2F2F2; font-family: 'Inter', sans-serif;">
+    <div style="max-width: 800px; margin: 0 auto;">
+      <h1 style="font-family: 'Poppins', sans-serif; font-size: 32px; font-weight: 700; color: #1A1A1A; margin-bottom: 24px;">
+        Chat Button Test Page
+      </h1>
+      
+      <div style="background: #FFFFFF; border-radius: 18px; padding: 32px; margin-bottom: 24px; border: 1px solid #E5E5E5;">
+        <h2 style="font-family: 'Poppins', sans-serif; font-size: 20px; font-weight: 600; color: #1A1A1A; margin-bottom: 16px;">
+          ✅ What to Check:
+        </h2>
+        <ul style="margin: 0; padding-left: 24px; color: #2A2A2A; line-height: 1.8;">
+          <li><strong>Bottom Right Corner:</strong> You should see either:
+            <ul style="margin-top: 8px; color: #6B6B6B;">
+              <li>A black circular chat button (if logged in) 💬</li>
+              <li>A debug message "Chat: Warte auf Login..." (if not logged in)</li>
+            </ul>
+          </li>
+          <li><strong>Z-Index:</strong> The button should be above all other content (z-index: 999998)</li>
+          <li><strong>Console:</strong> Check browser console for debug logs starting with 🔍 🎨 ✅ or ❌</li>
+        </ul>
+      </div>
+
+      <div style="background: #FFFFFF; border-radius: 18px; padding: 32px; margin-bottom: 24px; border: 1px solid #E5E5E5;">
+        <h2 style="font-family: 'Poppins', sans-serif; font-size: 20px; font-weight: 600; color: #1A1A1A; margin-bottom: 16px;">
+          🧪 Test Authentication
+        </h2>
+        <p style="color: #6B6B6B; margin-bottom: 16px;">
+          Click the button below to simulate a logged-in user:
+        </p>
+        <button 
+          id="test-auth-btn"
+          style="background: #1A1A1A; color: #FFFFFF; border: none; padding: 14px 22px; border-radius: 12px; font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 15px; cursor: pointer;"
+        >
+          Simulate Login
+        </button>
+        <button 
+          id="test-logout-btn"
+          style="background: #DC2626; color: #FFFFFF; border: none; padding: 14px 22px; border-radius: 12px; font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 15px; cursor: pointer; margin-left: 12px;"
+        >
+          Simulate Logout
+        </button>
+      </div>
+
+      <div style="background: #FAFAFA; border-radius: 18px; padding: 32px; border: 1px solid #E5E5E5;">
+        <h2 style="font-family: 'Poppins', sans-serif; font-size: 20px; font-weight: 600; color: #1A1A1A; margin-bottom: 16px;">
+          📋 Current Status
+        </h2>
+        <div id="status-display" style="font-family: 'Monaco', monospace; font-size: 13px; color: #2A2A2A; background: #FFFFFF; padding: 20px; border-radius: 12px; border: 1px solid #E5E5E5; white-space: pre-wrap;">
+          Loading...
+        </div>
+      </div>
+
+      <div style="margin-top: 24px; padding: 20px; background: #FFF7ED; border-radius: 12px; border: 1px solid #FDBA74; color: #9A3412;">
+        <strong>⚠️ Troubleshooting:</strong> If you don't see the chat button:
+        <ol style="margin: 12px 0 0 0; padding-left: 24px;">
+          <li>Check the browser console for errors</li>
+          <li>Verify the component is rendering (look for logs)</li>
+          <li>Check if any CSS is setting overflow:hidden on body or html</li>
+          <li>Inspect the DOM to see if the chat button element exists</li>
+          <li>Try clearing localStorage and refreshing</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Display current auth status
+    function updateStatus() {
+      const token = localStorage.getItem('mco_auth_token');
+      const userRole = localStorage.getItem('mco_user_role');
+      const userData = localStorage.getItem('mco_user_data');
+      
+      const statusEl = document.getElementById('status-display');
+      if (statusEl) {
+        statusEl.textContent = `Token: ${token ? '✅ Present (' + token.substring(0, 20) + '...)' : '❌ Missing'}
+User Role: ${userRole || '❌ Missing'}
+User Data: ${userData ? '✅ Present' : '❌ Missing'}
+
+Chat Button Should: ${token && userRole && userData ? '✅ BE VISIBLE' : '⏳ Show Debug Message'}`;
+      }
+    }
+
+    // Initial status
+    updateStatus();
+
+    // Simulate login
+    document.getElementById('test-auth-btn')?.addEventListener('click', () => {
+      localStorage.setItem('mco_auth_token', 'test_token_12345');
+      localStorage.setItem('mco_user_role', 'client');
+      localStorage.setItem('mco_user_data', JSON.stringify({
+        id: 'test-user-123',
+        name: 'Test User',
+        username: 'testuser',
+        email: 'test@example.com'
+      }));
+      
+      console.log('✅ Test login completed');
+      updateStatus();
+      
+      // Trigger storage event manually (since same-tab doesn't trigger it)
+      window.dispatchEvent(new Event('storage'));
+      
+      // Force page reload to reinitialize React component
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    });
+
+    // Simulate logout
+    document.getElementById('test-logout-btn')?.addEventListener('click', () => {
+      localStorage.removeItem('mco_auth_token');
+      localStorage.removeItem('mco_user_role');
+      localStorage.removeItem('mco_user_data');
+      
+      console.log('❌ Test logout completed');
+      updateStatus();
+      
+      // Force page reload
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    });
+
+    // Update status when localStorage changes
+    window.addEventListener('storage', updateStatus);
+  </script>
+</Layout>

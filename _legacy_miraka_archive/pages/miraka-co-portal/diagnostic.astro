@@ -1,0 +1,210 @@
+
+---
+// Diagnostic page to test environment and rendering
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diagnostic - Miraka Portal</title>
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      padding: 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+      background: #F2F2F2;
+      color: #1A1A1A;
+    }
+    h1 {
+      font-family: 'Poppins', sans-serif;
+      color: #D6C39A;
+    }
+    .section {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .status {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .status.ok {
+      background: #D1FAE5;
+      color: #065F46;
+    }
+    .status.error {
+      background: #FEE2E2;
+      color: #991B1B;
+    }
+    .status.warning {
+      background: #FEF3C7;
+      color: #92400E;
+    }
+    code {
+      background: #F9FAFB;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+      border-bottom: 1px solid #E5E7EB;
+    }
+    th {
+      font-weight: 600;
+      color: #6B7280;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .test-btn {
+      background: #D6C39A;
+      color: #1A1A1A;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+    .test-btn:hover {
+      background: #C5B289;
+    }
+    #result {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      display: none;
+    }
+    #result.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 Miraka Portal Diagnostic</h1>
+  
+  <div class="section">
+    <h2>Environment Status</h2>
+    <table>
+      <tr>
+        <th>Variable</th>
+        <th>Status</th>
+        <th>Value Preview</th>
+      </tr>
+      <tr>
+        <td><code>SUPABASE_URL</code></td>
+        <td>
+          {import.meta.env.SUPABASE_URL ? 
+            <span class="status ok">✓ Set</span> : 
+            <span class="status error">✗ Missing</span>
+          }
+        </td>
+        <td>{import.meta.env.SUPABASE_URL ? `${import.meta.env.SUPABASE_URL.substring(0, 30)}...` : 'Not set'}</td>
+      </tr>
+      <tr>
+        <td><code>SUPABASE_ANON_KEY</code></td>
+        <td>
+          {import.meta.env.SUPABASE_ANON_KEY ? 
+            <span class="status ok">✓ Set</span> : 
+            <span class="status error">✗ Missing</span>
+          }
+        </td>
+        <td>{import.meta.env.SUPABASE_ANON_KEY ? `${import.meta.env.SUPABASE_ANON_KEY.substring(0, 20)}...` : 'Not set'}</td>
+      </tr>
+      <tr>
+        <td><code>NODE_ENV</code></td>
+        <td><span class="status ok">✓</span></td>
+        <td>{import.meta.env.MODE}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Client-Side Rendering Test</h2>
+    <p>This tests if React components can render properly:</p>
+    <div id="react-test"></div>
+    <button class="test-btn" onclick="testReact()">Test React Rendering</button>
+  </div>
+
+  <div class="section">
+    <h2>Supabase Connection Test</h2>
+    <p>Click to test if Supabase connection works:</p>
+    <button class="test-btn" onclick="testSupabase()">Test Supabase Connection</button>
+    <div id="result"></div>
+  </div>
+
+  <div class="section">
+    <h2>Console Log</h2>
+    <p>Check browser console for errors (F12 / Cmd+Option+I)</p>
+    <button class="test-btn" onclick="testConsole()">Log Test Message</button>
+  </div>
+
+  <script>
+    console.log('[Diagnostic] Page loaded successfully');
+    console.log('[Diagnostic] Environment:', import.meta.env.MODE);
+    
+    function testReact() {
+      const div = document.getElementById('react-test');
+      div.innerHTML = '<span class="status ok">✓ React rendering works!</span>';
+      console.log('[Diagnostic] React test passed');
+    }
+
+    async function testSupabase() {
+      const result = document.getElementById('result');
+      result.className = 'show';
+      result.style.background = '#FEF3C7';
+      result.style.color = '#92400E';
+      result.innerHTML = '⏳ Testing Supabase connection...';
+      
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: 'test@test.com', password: 'test' })
+        });
+        
+        if (response.ok || response.status === 400 || response.status === 401) {
+          result.style.background = '#D1FAE5';
+          result.style.color = '#065F46';
+          result.innerHTML = '✓ Supabase API is reachable (status: ' + response.status + ')';
+          console.log('[Diagnostic] Supabase test passed');
+        } else {
+          throw new Error('Unexpected status: ' + response.status);
+        }
+      } catch (error) {
+        result.style.background = '#FEE2E2';
+        result.style.color = '#991B1B';
+        result.innerHTML = '✗ Supabase connection failed: ' + error.message;
+        console.error('[Diagnostic] Supabase test failed:', error);
+      }
+    }
+
+    function testConsole() {
+      console.log('========================================');
+      console.log('DIAGNOSTIC TEST MESSAGE');
+      console.log('Timestamp:', new Date().toISOString());
+      console.log('User Agent:', navigator.userAgent);
+      console.log('Window dimensions:', window.innerWidth + 'x' + window.innerHeight);
+      console.log('========================================');
+      alert('✓ Check the browser console (F12)');
+    }
+  </script>
+</body>
+</html>
+
