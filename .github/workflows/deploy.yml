@@ -1,36 +1,50 @@
-# Optional: GitHub Actions workflow for additional CI/CD
-# Cloudflare Pages will auto-deploy, but this can run tests first
+# GitHub Actions CI for Astro + Cloudflare project
+# Cloudflare Pages can still auto-deploy separately.
+# This workflow only verifies that the committed app builds cleanly.
 
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  build:
+    name: Build Astro app
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 15
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NODE_OPTIONS: --max-old-space-size=4096
+
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
-      - name: Type check
-        run: npx astro check
-        continue-on-error: true
-      
+
       - name: Build
         run: npm run build
-      
-      - name: Build Success
-        run: echo "✅ Build completed successfully"
+
+      - name: Build success
+        run: echo "Build completed successfully"
