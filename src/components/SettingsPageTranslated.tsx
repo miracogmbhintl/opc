@@ -25,6 +25,7 @@ import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import PortalSkeleton from './shared/PortalSkeleton';
+import OPCGoogleIntegrationPanel from './opc/google/OPCGoogleIntegrationPanel';
 
 const SETTINGS_PAGE_CACHE_KEY = 'opc:page-cache:settings-profile';
 
@@ -1277,6 +1278,10 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
                   Diese Funktion ist vorbereitet und kann später mit Supabase Auth oder einem externen Anbieter aktiviert werden.
                 </div>
               </div>
+            </div>
+
+            <div style={{ margin: '22px 0 24px' }}>
+              <OPCGoogleIntegrationPanel variant="settings" />
             </div>
 
             <div style={buttonRowStyle}>
