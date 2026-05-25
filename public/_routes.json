@@ -1,19 +1,6 @@
 {
   "version": 1,
-  "include": [
-    "/api/*",
-    "/miraka-co-portal/*",
-    "/dashboard/*",
-    "/work-os/*",
-    "/tools/*",
-    "/auth-redirect",
-    "/diagnostic*",
-    "/health",
-    "/supabase-diagnostic",
-    "/test*",
-    "/verify-supabase",
-    "/"
-  ],
+  "include": ["/*"],
   "exclude": [
     "/_astro/*",
     "/favicon.ico",
@@ -21,7 +8,12 @@
     "/*.js",
     "/*.png",
     "/*.jpg",
+    "/*.jpeg",
     "/*.svg",
+    "/*.webp",
+    "/*.ico",
+    "/*.json",
+    "/*.xml",
     "/*.woff",
     "/*.woff2",
     "/_headers"
