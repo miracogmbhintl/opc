@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import {
   Building2,
   LockKeyhole,
@@ -13,6 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 import MirakaDashboardShell from './MirakaDashboardShell';
+import PortalSkeleton from './shared/PortalSkeleton';
 import {
   OPCPageShell,
   OPCTabs,
@@ -50,6 +52,8 @@ interface Client {
 type RawOpcClient = Record<string, any>;
 type ActiveTab = 'all' | 'internal' | 'portal';
 type ClientTypeFilter = 'all' | 'privatkunden' | 'geschaeftskunden' | 'baukunden' | 'unknown';
+
+const CLIENTS_PAGE_CACHE_KEY = 'opc:page-cache:clients-management';
 
 const clientTypeLabels: Record<string, string> = {
   privatkunden: 'Privatkunde',
@@ -260,11 +264,22 @@ export default function ClientsManagement() {
   const [grantingClientId, setGrantingClientId] = useState<string | null>(null);
 
   useEffect(() => {
+    const cachedClients = readOpcPageCache<Client[]>(CLIENTS_PAGE_CACHE_KEY);
+
+    if (cachedClients) {
+      setClients(cachedClients);
+      setLoading(false);
+      void loadClients({ background: true });
+      return;
+    }
+
     void loadClients();
   }, []);
 
-  async function loadClients() {
-    setLoading(true);
+  async function loadClients(options: { background?: boolean } = {}) {
+    const isBackground = Boolean(options.background);
+
+    if (!isBackground) setLoading(true);
     setErrorMessage('');
 
     try {
@@ -302,11 +317,12 @@ export default function ClientsManagement() {
         });
 
       setClients(mappedClients);
+      writeOpcPageCache<Client[]>(CLIENTS_PAGE_CACHE_KEY, mappedClients);
     } catch (error: any) {
       console.error('Kunden konnten nicht geladen werden:', error);
       setErrorMessage(error?.message || 'Kunden konnten nicht geladen werden.');
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 
@@ -405,7 +421,7 @@ export default function ClientsManagement() {
   if (loading) {
     return (
       <MirakaDashboardShell hideTopBar={true}>
-        <div style={loadingStyle}>Kunden werden geladen...</div>
+        <PortalSkeleton variant="table" />
       </MirakaDashboardShell>
     );
   }

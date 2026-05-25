@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { baseUrl } from '../lib/base-url';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
+import PortalSkeleton from './shared/PortalSkeleton';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -52,6 +54,8 @@ type ApiResponse = {
   tickets?: Ticket[];
   error?: string;
 };
+
+const TICKETS_OVERVIEW_CACHE_KEY = 'opc:page-cache:tickets-overview';
 
 type ActiveTab = 'tickets' | 'damages';
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'done';
@@ -221,12 +225,23 @@ export default function TicketsOverviewPage() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
 
   useEffect(() => {
-    loadItems();
+    const cachedItems = readOpcPageCache<TicketItem[]>(TICKETS_OVERVIEW_CACHE_KEY);
+
+    if (cachedItems) {
+      setItems(cachedItems);
+      setLoading(false);
+      void loadItems({ background: true });
+      return;
+    }
+
+    void loadItems();
   }, []);
 
-  async function loadItems() {
+  async function loadItems(options: { background?: boolean } = {}) {
+    const isBackground = Boolean(options.background);
+
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setErrorMessage('');
 
       const response = await fetch('/api/opc/tickets', {
@@ -241,11 +256,13 @@ export default function TicketsOverviewPage() {
         throw new Error(result.error || 'Tickets & Schäden konnten nicht geladen werden.');
       }
 
-      setItems((result.tickets || []).map(mapTicket));
+      const nextItems = (result.tickets || []).map(mapTicket);
+      setItems(nextItems);
+      writeOpcPageCache<TicketItem[]>(TICKETS_OVERVIEW_CACHE_KEY, nextItems);
     } catch (error: any) {
       setErrorMessage(error?.message || 'Tickets & Schäden konnten nicht geladen werden.');
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 
@@ -297,13 +314,7 @@ export default function TicketsOverviewPage() {
   }
 
   if (loading) {
-    return (
-      <div style={loadingStyle}>
-        <Loader2 size={20} className="spin" style={{ marginRight: 8 }} />
-        Tickets & Schäden werden geladen...
-        <style>{spinStyle}</style>
-      </div>
-    );
+    return <PortalSkeleton variant="table" />;
   }
 
   return (

@@ -23,7 +23,10 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import PortalSkeleton from './shared/PortalSkeleton';
+
+const SETTINGS_PAGE_CACHE_KEY = 'opc:page-cache:settings-profile';
 
 type UserRole = 'owner' | 'admin' | 'employee' | 'client';
 type TabType = 'account' | 'notifications' | 'security' | 'system';
@@ -513,6 +516,15 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
   }, [isOwner]);
 
   useEffect(() => {
+    const cachedProfile = readOpcPageCache<ApiProfile>(SETTINGS_PAGE_CACHE_KEY);
+
+    if (cachedProfile) {
+      applyProfile(cachedProfile);
+      setLoading(false);
+      void loadProfile({ background: true });
+      return;
+    }
+
     void loadProfile();
   }, []);
 
@@ -587,8 +599,10 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
     return session.access_token;
   }
 
-  async function loadProfile() {
-    setLoading(true);
+  async function loadProfile(options: { background?: boolean } = {}) {
+    const isBackground = Boolean(options.background);
+
+    if (!isBackground) setLoading(true);
     setError('');
 
     try {
@@ -609,12 +623,14 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         );
       }
 
-      applyProfile(result.profile as ApiProfile);
+      const nextProfile = result.profile as ApiProfile;
+      applyProfile(nextProfile);
+      writeOpcPageCache<ApiProfile>(SETTINGS_PAGE_CACHE_KEY, nextProfile);
     } catch (err: any) {
       console.error('Settings load error:', err);
       setError(err?.message || 'Einstellungen konnten nicht geladen werden.');
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 

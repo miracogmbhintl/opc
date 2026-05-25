@@ -4,7 +4,31 @@ import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
 import { TranslationProvider, useTranslation } from '../lib/TranslationContext';
-import OPCRouteWarmup from './opc/OPCRouteWarmup';
+
+function readCachedUserProfile(): UserProfile | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const rawUserData = localStorage.getItem('mco_user_data') || localStorage.getItem('mco_auth');
+    const cachedRole = localStorage.getItem('mco_user_role') as UserRole | null;
+
+    if (!rawUserData || !cachedRole) return null;
+
+    const cached = JSON.parse(rawUserData);
+
+    if (!cached?.id) return null;
+
+    return {
+      id: cached.id,
+      email: cached.email || '',
+      name: cached.username || cached.name || cached.full_name || cached.email || 'User',
+      full_name: cached.name || cached.full_name || cached.username || cached.email || 'User',
+      role: cachedRole,
+    } as UserProfile;
+  } catch {
+    return null;
+  }
+}
 
 interface DashboardShellProps {
   children: ReactNode;
@@ -56,8 +80,9 @@ function DashboardShellContent({
     };
   }
 
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const cachedUserProfile = readCachedUserProfile();
+  const [loading, setLoading] = useState(!cachedUserProfile);
+  const [user, setUser] = useState<UserProfile | null>(cachedUserProfile);
   const [error, setError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -190,10 +215,6 @@ function DashboardShellContent({
               margin: '0 auto 16px',
             }}
           />
-          <div style={{ fontSize: '15px', color: '#6B7280' }}>
-            {t.status?.loading || 'Loading...'}
-          </div>
-
           <style>{`
             @keyframes miraka-spin {
               to { transform: rotate(360deg); }
@@ -282,8 +303,6 @@ function DashboardShellContent({
         role={(user?.role || 'client') as UserRole}
         currentPath={currentPath || window.location.pathname}
       />
-
-      <OPCRouteWarmup />
 
       <div
         className={fullWidth ? 'miraka-dashboard-main full-width' : 'miraka-dashboard-main'}

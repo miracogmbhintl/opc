@@ -63,10 +63,6 @@ export default defineConfig({
   adapter: cloudflare({
     mode: 'directory'
   }),
-  prefetch: {
-    prefetchAll: true,
-    defaultStrategy: 'load',
-  },
   integrations: [
     react(),
     injectDevScript({scriptPath: '/generated/dev-only.js'}),

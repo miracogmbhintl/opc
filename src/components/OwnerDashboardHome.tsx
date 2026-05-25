@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import {
   AlertTriangle,
   CalendarDays,
@@ -13,6 +14,8 @@ import {
   Upload,
   Users,
 } from 'lucide-react';
+
+const DASHBOARD_PAGE_CACHE_KEY = 'opc:page-cache:dashboard-home';
 
 interface DashboardStats {
   todayJobs: number;
@@ -61,6 +64,13 @@ interface ReportItem {
 }
 
 type DashboardTab = 'today' | 'week' | 'overdue' | 'reports';
+
+interface DashboardPageCache {
+  stats: DashboardStats;
+  jobs: ServiceJob[];
+  activeTab: DashboardTab;
+}
+
 
 const BRAND = {
   bg: '#FFFFFF',
@@ -671,11 +681,24 @@ export default function OwnerDashboardHome() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const cached = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
+
+    if (cached) {
+      setStats(cached.stats);
+      setJobs(cached.jobs);
+      setActiveTab(cached.activeTab);
+      setLoading(false);
+      void loadData({ background: true });
+      return;
+    }
+
     void loadData();
   }, []);
 
-  async function loadData() {
-    setLoading(true);
+  async function loadData(options: { background?: boolean } = {}) {
+    const isBackground = Boolean(options.background);
+
+    if (!isBackground) setLoading(true);
 
     try {
       const [jobsData, inboxData, reportsData] = await Promise.all([
@@ -713,14 +736,16 @@ export default function OwnerDashboardHome() {
 
       const unreadMessages = inboxData.filter((message) => Boolean(message.unread)).length;
 
-      setStats({
+      const nextStats: DashboardStats = {
         todayJobs: todayJobs.length,
         jobsThisWeek: weekJobs.length,
         overdueJobs: overdueJobs.length,
         openReports: openReports.length,
         unreadMessages,
         urgentItems: overdueJobs.length + openReports.length + unreadMessages,
-      });
+      };
+
+      setStats(nextStats);
 
       const sortedVisibleJobs = [...visibleJobs].sort((a, b) => {
         const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
@@ -730,15 +755,20 @@ export default function OwnerDashboardHome() {
 
       setJobs(sortedVisibleJobs);
 
-      if (todayJobs.length === 0 && overdueJobs.length > 0) {
-        setActiveTab('overdue');
-      } else {
-        setActiveTab('today');
-      }
+      const nextActiveTab: DashboardTab =
+        todayJobs.length === 0 && overdueJobs.length > 0 ? 'overdue' : 'today';
+
+      setActiveTab(nextActiveTab);
+
+      writeOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY, {
+        stats: nextStats,
+        jobs: sortedVisibleJobs,
+        activeTab: nextActiveTab,
+      });
     } catch (error) {
       console.error('Error loading OPC dashboard:', error);
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 

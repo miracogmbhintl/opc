@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import PortalSkeleton from './shared/PortalSkeleton';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -15,6 +17,8 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+
+const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests';
 
 type ActiveTab = 'inquiries' | 'damages';
 type ItemType = 'inquiry' | 'damage' | 'job_damage';
@@ -1333,11 +1337,22 @@ export default function TicketsPageTranslated() {
   const [selectedInquiryPreview, setSelectedInquiryPreview] = useState<PortalItem | null>(null);
 
   useEffect(() => {
+    const cachedItems = readOpcPageCache<PortalItem[]>(REQUESTS_PAGE_CACHE_KEY);
+
+    if (cachedItems) {
+      setItems(cachedItems);
+      setLoading(false);
+      void loadItems({ background: true });
+      return;
+    }
+
     void loadItems();
   }, []);
 
-  async function loadItems() {
-    setLoading(true);
+  async function loadItems(options: { background?: boolean } = {}) {
+    const isBackground = Boolean(options.background);
+
+    if (!isBackground) setLoading(true);
     setErrorMessage('');
 
     try {
@@ -1371,11 +1386,12 @@ export default function TicketsPageTranslated() {
       });
 
       setItems(mergedItems);
+      writeOpcPageCache<PortalItem[]>(REQUESTS_PAGE_CACHE_KEY, mergedItems);
     } catch (error: any) {
       console.error('Anfragen & Schäden konnten nicht geladen werden:', error);
       setErrorMessage(error?.message || 'Anfragen & Schäden konnten nicht geladen werden.');
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 
@@ -1542,22 +1558,7 @@ export default function TicketsPageTranslated() {
   const hasFilters = Boolean(searchQuery || statusFilter !== 'all' || typeFilter !== 'all');
 
   if (loading) {
-    return (
-      <div
-        style={{
-          minHeight: '60vh',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: BRAND.muted,
-          fontSize: '14px',
-          fontWeight: 650,
-          fontFamily: pageFont,
-        }}
-      >
-        Anfragen & Schäden werden geladen...
-      </div>
-    );
+    return <PortalSkeleton variant="table" />;
   }
 
   return (

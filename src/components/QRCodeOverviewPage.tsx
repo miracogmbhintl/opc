@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import PortalSkeleton from './shared/PortalSkeleton';
 import {
   Building2,
   CheckCircle2,
@@ -30,6 +31,7 @@ import {
   opcSecondaryButtonStyle,
   opcCardStyle,
 } from './opc/OPCPageTop';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 
 type SiteOption = {
   id: string;
@@ -77,6 +79,8 @@ type ApiResponse = {
   warnings?: string[];
   error?: string;
 };
+
+const QR_CODES_CACHE_KEY = 'opc:page-cache:qr-codes';
 
 type ActiveTab = 'overview' | 'create';
 type ActiveFilter = 'all' | 'active' | 'inactive';
@@ -151,7 +155,19 @@ export default function QRCodeOverviewPage() {
   );
 
   useEffect(() => {
-    loadData();
+    const cached = readOpcPageCache<ApiResponse>(QR_CODES_CACHE_KEY);
+
+    if (cached?.ok) {
+      setLinks(cached.links || []);
+      setSites(cached.sites || []);
+      setFacilities(cached.facilities || []);
+      setWarnings(cached.warnings || []);
+      setLoading(false);
+      void loadData({ background: true });
+      return;
+    }
+
+    void loadData();
   }, []);
 
   const selectedSite = useMemo(() => {
@@ -201,9 +217,11 @@ export default function QRCodeOverviewPage() {
     };
   }, [links]);
 
-  async function loadData() {
+  async function loadData(options: { background?: boolean } = {}) {
+    const isBackground = Boolean(options.background);
+
     try {
-      setLoading(true);
+      if (!isBackground) setLoading(true);
       setErrorMessage('');
 
       const response = await fetch('/api/opc/qr-codes', {
@@ -224,11 +242,19 @@ export default function QRCodeOverviewPage() {
       setSites(result.sites || []);
       setFacilities(result.facilities || []);
       setWarnings(result.warnings || []);
+
+      writeOpcPageCache<ApiResponse>(QR_CODES_CACHE_KEY, {
+        ok: true,
+        links: result.links || [],
+        sites: result.sites || [],
+        facilities: result.facilities || [],
+        warnings: result.warnings || [],
+      });
     } catch (error: any) {
       console.error('QR-Codes konnten nicht geladen werden:', error);
       setErrorMessage(error?.message || 'QR-Codes konnten nicht geladen werden.');
     } finally {
-      setLoading(false);
+      if (!isBackground) setLoading(false);
     }
   }
 
@@ -297,7 +323,7 @@ export default function QRCodeOverviewPage() {
       setSuccessMessage('QR-Code wurde erstellt.');
       resetForm();
       setActiveTab('overview');
-      await loadData();
+      await loadData({ background: true });
     } catch (error: any) {
       console.error('QR-Code konnte nicht erstellt werden:', error);
       setErrorMessage(error?.message || 'QR-Code konnte nicht erstellt werden.');
@@ -316,13 +342,7 @@ export default function QRCodeOverviewPage() {
   }
 
   if (loading) {
-    return (
-      <div style={loadingStyle}>
-        <Loader2 size={20} className="spin" style={{ marginRight: 8 }} />
-        QR-Codes werden geladen...
-        <style>{spinStyle}</style>
-      </div>
-    );
+    return <PortalSkeleton variant="cards" />;
   }
 
   return (
