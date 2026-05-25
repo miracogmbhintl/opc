@@ -65,11 +65,6 @@ export default defineConfig({
   }),
   integrations: [
     react(),
-  // Enable link prefetching for all internal links
-  prefetch: {
-    prefetchAll: true,
-    defaultStrategy: 'load'
-  },
     injectDevScript({scriptPath: '/generated/dev-only.js'}),
   ],
   vite: {

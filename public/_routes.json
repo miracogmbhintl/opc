@@ -1,9 +1,29 @@
 {
   "version": 1,
-  "include": ["/*"],
+  "include": [
+    "/api/*",
+    "/miraka-co-portal/*",
+    "/dashboard/*",
+    "/work-os/*",
+    "/tools/*",
+    "/auth-redirect",
+    "/diagnostic*",
+    "/health",
+    "/supabase-diagnostic",
+    "/test*",
+    "/verify-supabase",
+    "/"
+  ],
   "exclude": [
     "/_astro/*",
-    "/*.{js,css,png,jpg,jpeg,svg,webp,ico,json,xml}",
-    "/favicon.ico"
+    "/favicon.ico",
+    "/*.css",
+    "/*.js",
+    "/*.png",
+    "/*.jpg",
+    "/*.svg",
+    "/*.woff",
+    "/*.woff2",
+    "/_headers"
   ]
 }
