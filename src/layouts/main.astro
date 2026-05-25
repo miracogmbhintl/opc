@@ -13,7 +13,38 @@ import '../styles/work-os.css';
 import { baseUrl } from '../lib/base-url';
 import { ClientRouter } from 'astro:transitions';
 
-const { pageClass = '' } = Astro.props;
+const { pageClass = '', title: explicitTitle } = Astro.props;
+
+const normalizedPath = Astro.url.pathname.replace(/\/$/, '') || '/';
+
+const PAGE_TITLES: Record<string, string> = {
+  '/': 'Login | Orange Pro Clean',
+  '/dashboard': 'Dashboard | Orange Pro Clean',
+  '/kunden': 'Kunden | Orange Pro Clean',
+  '/kunde-anlegen': 'Kunde anlegen | Orange Pro Clean',
+  '/anfragen': 'Anfragen | Orange Pro Clean',
+  '/anfragen-schaeden': 'Tickets & Schäden | Orange Pro Clean',
+  '/kalender': 'Kalender | Orange Pro Clean',
+  '/einsaetze': 'Einsätze | Orange Pro Clean',
+  '/einsatz-planen': 'Einsatz planen | Orange Pro Clean',
+  '/berichte-dateien': 'Berichte & Dateien | Orange Pro Clean',
+  '/qr-codes': 'QR-Codes | Orange Pro Clean',
+  '/einstellungen': 'Einstellungen | Orange Pro Clean',
+  '/forgot-password': 'Passwort vergessen | Orange Pro Clean',
+  '/reset-password': 'Passwort zurücksetzen | Orange Pro Clean',
+  '/set-password': 'Passwort setzen | Orange Pro Clean',
+  '/logout': 'Abmelden | Orange Pro Clean',
+  '/auth-redirect': 'Weiterleitung | Orange Pro Clean',
+  '/emergency-login': 'Notfall Login | Orange Pro Clean',
+};
+
+const pageTitle =
+  explicitTitle ||
+  PAGE_TITLES[normalizedPath] ||
+  (normalizedPath.startsWith('/kunde/') ? 'Kundendetail | Orange Pro Clean' : null) ||
+  (normalizedPath.startsWith('/einsatz/') ? 'Einsatzdetail | Orange Pro Clean' : null) ||
+  (normalizedPath.startsWith('/report/') ? 'Bericht | Orange Pro Clean' : null) ||
+  'Orange Pro Clean Portal';
 ---
 
 <html lang="de" class={pageClass}>
@@ -27,7 +58,7 @@ const { pageClass = '' } = Astro.props;
 <meta name="viewport" content="width=device-width" />
 <meta name="generator" content={Astro.generator} />
 <ClientRouter />
-<title>Orange Pro Clean Portal</title>
+<title>{pageTitle}</title>
 <meta name="description" content="Orange Pro Clean Kunden- und Mitarbeiterportal für Einsätze, Tickets, QR-Codes, Kalender, Berichte und Einstellungen." />
 <meta property="og:title" content="Orange Pro Clean Portal" />
 <meta property="og:description" content="Kunden- und Mitarbeiterportal der Orange Pro Clean GmbH." />
