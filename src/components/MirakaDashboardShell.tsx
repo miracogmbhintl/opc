@@ -4,6 +4,7 @@ import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
 import { TranslationProvider, useTranslation } from '../lib/TranslationContext';
+import OPCRouteWarmup from './opc/OPCRouteWarmup';
 
 interface DashboardShellProps {
   children: ReactNode;
@@ -281,6 +282,8 @@ function DashboardShellContent({
         role={(user?.role || 'client') as UserRole}
         currentPath={currentPath || window.location.pathname}
       />
+
+      <OPCRouteWarmup />
 
       <div
         className={fullWidth ? 'miraka-dashboard-main full-width' : 'miraka-dashboard-main'}
