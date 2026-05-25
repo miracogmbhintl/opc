@@ -11,21 +11,31 @@ import '../styles/global.css';
 import '../styles/miraka-unified.css';
 import '../styles/work-os.css';
 import { baseUrl } from '../lib/base-url';
+import { ClientRouter } from 'astro:transitions';
 
 const { pageClass = '' } = Astro.props;
 ---
 
-<html lang="en" class={pageClass}>
+<html lang="de" class={pageClass}>
 <head>
 <meta charset="utf-8" />
-<link rel="icon" type="image/png" href="/favicon.png" />
-<link rel="apple-touch-icon" href="/favicon.png" />
-<!-- Temporarily disabled until Cloudflare Pages static asset routing verified -->
-<!-- <link rel="manifest" href="/manifest.json" /> -->
-<meta name="theme-color" content="#1A1A1A" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="alternate icon" href="/favicon.ico" />
+<link rel="apple-touch-icon" href="/favicon.svg" />
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#F7931F" />
 <meta name="viewport" content="width=device-width" />
 <meta name="generator" content={Astro.generator} />
-<title>Miraka & Co - Client Portal</title>
+<ClientRouter />
+<title>Orange Pro Clean Portal</title>
+<meta name="description" content="Orange Pro Clean Kunden- und Mitarbeiterportal für Einsätze, Tickets, QR-Codes, Kalender, Berichte und Einstellungen." />
+<meta property="og:title" content="Orange Pro Clean Portal" />
+<meta property="og:description" content="Kunden- und Mitarbeiterportal der Orange Pro Clean GmbH." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="/favicon.svg" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="Orange Pro Clean Portal" />
+<meta name="twitter:description" content="Kunden- und Mitarbeiterportal der Orange Pro Clean GmbH." />
 <!-- Prevent flash of unstyled content for dark mode -->
 <script is:inline>
 (function() {

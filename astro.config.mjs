@@ -63,6 +63,10 @@ export default defineConfig({
   adapter: cloudflare({
     mode: 'directory'
   }),
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: 'hover',
+  },
   integrations: [
     react(),
     injectDevScript({scriptPath: '/generated/dev-only.js'}),
