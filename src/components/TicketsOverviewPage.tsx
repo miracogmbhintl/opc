@@ -128,7 +128,7 @@ function mapTicket(row: Ticket): TicketItem {
   const type: TicketItem['type'] =
     row.category === 'damage'
       ? 'damage'
-      : row.source === 'public_qr'
+      : (row.source === 'public_qr' || row.source === 'public_qr_general')
         ? 'qr_ticket'
         : 'ticket';
 

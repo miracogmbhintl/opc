@@ -15,20 +15,10 @@ const SITE_TABLE = 'opc_client_sites';
 function bestSiteLabel(site: Record<string, any> | null | undefined) {
   if (!site) return null;
 
-  const title =
-    site.site_name ||
-    site.name ||
-    site.address_text ||
-    site.address ||
-    site.id ||
-    null;
-
+  const title = site.site_name || site.name || site.address_text || site.address || site.id || null;
   const address = [site.address_text, site.postal_code, site.city].filter(Boolean).join(', ');
 
-  if (title && address && !String(title).includes(address)) {
-    return `${title} · ${address}`;
-  }
-
+  if (title && address && !String(title).includes(address)) return `${title} · ${address}`;
   return title;
 }
 
@@ -44,10 +34,14 @@ function bestFacilityLabel(facility: Record<string, any> | null | undefined) {
     null;
 
   const details = [facility.floor, facility.area_type].filter(Boolean).join(' · ');
-
   if (title && details) return `${title} · ${details}`;
-
   return title;
+}
+
+function normalizeLinkType(value: unknown) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (raw === 'general' || raw === 'mass_print' || raw === 'public_general') return 'general';
+  return 'facility';
 }
 
 export const GET: APIRoute = async ({ request, locals }) => {
@@ -56,13 +50,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const token = url.searchParams.get('token')?.trim();
 
     if (!token) {
-      return jsonResponse(
-        {
-          ok: false,
-          error: 'Token fehlt.',
-        },
-        400
-      );
+      return jsonResponse({ ok: false, error: 'Token fehlt.' }, 400);
     }
 
     const supabase = createOpcServiceClient(locals);
@@ -100,6 +88,25 @@ export const GET: APIRoute = async ({ request, locals }) => {
       );
     }
 
+    const linkType = normalizeLinkType(publicLink.link_type);
+    const isGeneral = linkType === 'general';
+
+    if (isGeneral) {
+      return jsonResponse({
+        ok: true,
+        token: publicLink.token,
+        link_type: linkType,
+        is_general: true,
+        title: publicLink.public_title || 'Meldung an Orange Pro Clean senden',
+        description:
+          publicLink.public_description ||
+          'Suchen Sie die Adresse, beschreiben Sie das Anliegen und laden Sie bei Bedarf ein Foto hoch.',
+        site_label: null,
+        facility_label: null,
+        metadata: publicLink.metadata || {},
+      });
+    }
+
     const [facilityResult, siteResult] = await Promise.all([
       publicLink.facility_id
         ? supabase.from(FACILITY_TABLE).select('*').eq('id', publicLink.facility_id).maybeSingle()
@@ -112,12 +119,15 @@ export const GET: APIRoute = async ({ request, locals }) => {
     return jsonResponse({
       ok: true,
       token: publicLink.token,
+      link_type: linkType,
+      is_general: false,
       title: publicLink.public_title || 'Meldung erstellen',
       description:
         publicLink.public_description ||
         'Der Standort wurde automatisch erkannt. Beschreiben Sie kurz, was geprüft werden soll.',
       site_label: bestSiteLabel(siteResult.data),
       facility_label: bestFacilityLabel(facilityResult.data),
+      metadata: publicLink.metadata || {},
     });
   } catch (error) {
     return jsonResponse(
