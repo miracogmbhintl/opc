@@ -61,6 +61,8 @@ type CalendarAttendee = {
 type CalendarEvent = {
   id: string;
   calendar_id: string;
+  create_google_meet?: boolean;
+  sync_google_calendar?: boolean;
   event_type:
     | 'job_requested'
     | 'job_scheduled'
@@ -673,8 +675,19 @@ function EventQuickView({
   );
 }
 
+function getInitialCalendarScrollTime() {
+  const now = new Date();
+  now.setHours(now.getHours() - 2);
+
+  const hours = Math.max(0, now.getHours()).toString().padStart(2, '0');
+  const minutes = now.getMinutes().toString().padStart(2, '0');
+
+  return `${hours}:${minutes}:00`;
+}
+
 export default function OPCCalendarPage() {
   const calendarRef = useRef<FullCalendar | null>(null);
+  const initialCalendarScrollTime = getInitialCalendarScrollTime();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -831,6 +844,8 @@ export default function OPCCalendarPage() {
   async function handleCreateOrUpdate(payload: {
     id?: string;
     calendar_id: string;
+    create_google_meet?: boolean;
+    sync_google_calendar?: boolean;
     event_type: CalendarEvent['event_type'];
     status: CalendarEvent['status'];
     title: string;
@@ -847,10 +862,30 @@ export default function OPCCalendarPage() {
     setErrorMessage('');
 
     try {
-      await apiFetch<{ event: CalendarEvent }>('/api/opc/calendar/create-event', {
+      const createResult = await apiFetch<{ event: CalendarEvent }>('/api/opc/calendar/create-event', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+
+      // OPC_GOOGLE_SYNC_ALWAYS_AFTER_SAVE_FINAL
+      if (createResult?.event?.id) {
+        try {
+          await apiFetch('/api/opc/calendar/create-google-meet', {
+            method: 'POST',
+            body: JSON.stringify({
+              event_id: createResult.event.id,
+              create_meet_link: Boolean((payload as any).create_google_meet),
+            }),
+          });
+        } catch (googleSyncError: any) {
+          console.warn('[OPC Calendar] Google sync failed:', googleSyncError?.message || googleSyncError);
+          setErrorMessage(
+            googleSyncError?.message ||
+              'Der Termin wurde im Portal gespeichert, konnte aber nicht mit Google synchronisiert werden.'
+          );
+        }
+      }
+
 
       setModal(null);
       setQuickViewEvent(null);
@@ -859,6 +894,76 @@ export default function OPCCalendarPage() {
       const message = error?.message || 'Kalendereintrag konnte nicht gespeichert werden.';
       setErrorMessage(message);
       throw new Error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+
+  async function handleQuickGoogleMeet() {
+    setSaving(true);
+    setErrorMessage('');
+
+    try {
+      const title = window.prompt('Titel für das Google Meet', 'Orange Pro Clean Meeting');
+      if (title === null) return;
+
+      const emailsRaw = window.prompt(
+        'Teilnehmer per E-Mail einladen. Mehrere E-Mails mit Komma trennen.',
+        ''
+      );
+      if (emailsRaw === null) return;
+
+      const durationRaw = window.prompt('Dauer in Minuten', '60');
+      if (durationRaw === null) return;
+
+      const durationMinutes = Number(durationRaw || 60);
+
+      const result = await apiFetch<{
+        google_meet_link?: string | null;
+        google_html_link?: string | null;
+        invited?: string[];
+      }>('/api/opc/calendar/quick-google-meet', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: title || 'Orange Pro Clean Meeting',
+          attendee_emails: emailsRaw,
+          duration_minutes: Number.isFinite(durationMinutes) ? durationMinutes : 60,
+        }),
+      });
+
+      if (result.google_meet_link) {
+        window.open(result.google_meet_link, '_blank', 'noopener,noreferrer');
+      } else if (result.google_html_link) {
+        window.open(result.google_html_link, '_blank', 'noopener,noreferrer');
+      }
+
+      await loadCalendarData();
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Google Meet konnte nicht erstellt werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAddGoogleMeetToEvent(eventId: string) {
+    if (!eventId) return;
+
+    setSaving(true);
+    setErrorMessage('');
+
+    try {
+      await apiFetch('/api/opc/calendar/create-google-meet', {
+        method: 'POST',
+        body: JSON.stringify({
+          event_id: eventId,
+          create_meet_link: true,
+        }),
+      });
+
+      await loadCalendarData();
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Google Meet konnte nicht hinzugefügt werden.');
     } finally {
       setSaving(false);
     }
@@ -1101,28 +1206,39 @@ export default function OPCCalendarPage() {
             {isRefreshing ? <Loader2 size={17} className="spin" /> : <RefreshCcw size={17} />}
             {isRefreshing ? 'Lädt' : 'Neu laden'}
           </button>
+            {isAdmin && (
+              <button
+                type="button"
+                className="opc-calendar-new-entry-button"
+                disabled={!defaultCalendarId}
+                onClick={() =>
+                  setModal({
+                    mode: 'create',
+                    startsAt: new Date().toISOString(),
+                    endsAt: addOneHourIso(new Date().toISOString()),
+                  })
+                }
+                style={{
+                  ...blackButtonStyle,
+                  opacity: defaultCalendarId ? 1 : 0.5,
+                  cursor: defaultCalendarId ? 'pointer' : 'not-allowed',
+                }}
+              >
+                <Plus size={17} />
+                Neuer Eintrag
+              </button>
+            )}
 
-          {isAdmin && (
+            {/* OPC_QUICK_GOOGLE_MEET_BUTTON_FINAL */}
             <button
               type="button"
-              disabled={!defaultCalendarId}
-              onClick={() =>
-                setModal({
-                  mode: 'create',
-                  startsAt: new Date().toISOString(),
-                  endsAt: addOneHourIso(new Date().toISOString()),
-                })
-              }
-              style={{
-                ...blackButtonStyle,
-                opacity: defaultCalendarId ? 1 : 0.5,
-                cursor: defaultCalendarId ? 'pointer' : 'not-allowed',
-              }}
+              className="opc-calendar-quick-meet-button"
+              onClick={handleQuickGoogleMeet}
+              disabled={saving}
             >
-              <Plus size={17} />
-              Neuer Eintrag
+              + Google Meet
             </button>
-          )}
+
         </div>
       </section>
 
@@ -1196,12 +1312,15 @@ export default function OPCCalendarPage() {
         <div className="opc-calendar-fullcalendar-wrap">
           <FullCalendar
             ref={calendarRef}
+            height="100%"
+            expandRows={false}
+            slotMinTime="00:00:00"
+            slotMaxTime="24:00:00"
+            scrollTime={initialCalendarScrollTime}
+            scrollTimeReset={false}
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
             initialView={viewMode}
             headerToolbar={false}
-            height={520}
-            slotMinTime="07:00:00"
-            slotMaxTime="20:00:00"
             slotDuration="01:00:00"
             slotLabelInterval="01:00:00"
             nowIndicator
@@ -1271,6 +1390,83 @@ export default function OPCCalendarPage() {
       )}
 
       <style>{`
+
+        /* OPC_CALENDAR_SCROLL_AND_MEET_BUTTON_FINAL_CLEAN */
+        .opc-calendar-new-entry-button,
+        .opc-calendar-quick-meet-button {
+          min-height: 52px;
+          border-radius: 18px;
+          padding: 0 18px;
+          font-weight: 800;
+          font-size: 14px;
+          white-space: nowrap;
+          cursor: pointer;
+          width: auto !important;
+          max-width: none !important;
+          flex: 0 0 auto;
+          grid-column: auto !important;
+        }
+
+        .opc-calendar-new-entry-button {
+          background: #111111;
+          color: #ffffff;
+        }
+
+        .opc-calendar-quick-meet-button {
+          border: 1px solid rgba(28, 83, 188, 0.18);
+          background: rgba(28, 83, 188, 0.06);
+          color: #1C53BC;
+        }
+
+        .opc-calendar-quick-meet-button:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+
+        .opc-calendar-fullcalendar-wrap {
+          height: min(760px, calc(100vh - 330px));
+          min-height: 560px;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          padding: 12px 14px 14px;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc {
+          height: 100% !important;
+          min-height: 0;
+          flex: 1 1 auto;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc-view-harness {
+          height: 100% !important;
+          min-height: 0;
+          flex: 1 1 auto;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc-view-harness-active {
+          height: 100% !important;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc-scroller,
+        .opc-calendar-fullcalendar-wrap .fc-scroller-liquid,
+        .opc-calendar-fullcalendar-wrap .fc-scroller-liquid-absolute {
+          overflow-y: auto !important;
+          overscroll-behavior: contain;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc-timegrid-body {
+          width: 100% !important;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc-timegrid-slot {
+          height: 60px !important;
+        }
+
+        .opc-calendar-fullcalendar-wrap .fc-timegrid-slots table {
+          height: 1440px !important;
+        }
+
         .spin {
           animation: opc-calendar-spin 0.9s linear infinite;
         }
@@ -1365,10 +1561,6 @@ export default function OPCCalendarPage() {
           min-width: 0;
         }
 
-        .opc-calendar-fullcalendar-wrap {
-          padding: 12px 14px 14px;
-        }
-
         .opc-calendar-fullcalendar-wrap .fc {
           --fc-border-color: #F3F4F6;
           --fc-today-bg-color: #FAFAFA;
@@ -1388,10 +1580,6 @@ export default function OPCCalendarPage() {
           color: ${BRAND.text};
           text-decoration: none;
           font-weight: 720;
-        }
-
-        .opc-calendar-fullcalendar-wrap .fc .fc-timegrid-slot {
-          height: 31px !important;
         }
 
         .opc-calendar-fullcalendar-wrap .fc .fc-timegrid-axis-cushion,

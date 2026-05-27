@@ -188,6 +188,22 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
+    const updatePath = () => {
+      setResolvedPath(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', updatePath);
+    document.addEventListener('astro:page-load', updatePath);
+
+    return () => {
+      window.removeEventListener('popstate', updatePath);
+      document.removeEventListener('astro:page-load', updatePath);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
     const width = isCollapsed ? COLLAPSED_WIDTH : EXPANDED_WIDTH;
 
     document.documentElement.style.setProperty('--miraka-sidebar-width', `${width}px`);

@@ -90,3 +90,8 @@ src/worker-configuration.ts
 _legacy_security_removed/
 .env.local
 .env.local
+
+# Local review/export artifacts
+_code_review/
+google-routing-meta-review.zip
+*.zip

@@ -25,7 +25,6 @@ import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import PortalSkeleton from './shared/PortalSkeleton';
-import OPCGoogleIntegrationPanel from './opc/google/OPCGoogleIntegrationPanel';
 
 const SETTINGS_PAGE_CACHE_KEY = 'opc:page-cache:settings-profile';
 
@@ -456,6 +455,418 @@ function PasswordField({
       >
         {visible ? <EyeOff size={17} /> : <Eye size={17} />}
       </button>
+    </div>
+  );
+}
+
+
+type GoogleCalendarAccount = {
+  id?: string;
+  google_email?: string;
+  selected_calendar_id?: string | null;
+  selected_calendar_name?: string | null;
+  selected_calendar_access_role?: string | null;
+  status?: string | null;
+  last_error?: string | null;
+};
+
+type GoogleCalendarOption = {
+  id: string;
+  summary: string;
+  description?: string;
+  primary?: boolean;
+  accessRole?: string;
+  backgroundColor?: string;
+  foregroundColor?: string;
+  timeZone?: string;
+  canWrite?: boolean;
+};
+
+function GoogleCalendarSystemPanel() {
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [account, setAccount] = useState<GoogleCalendarAccount | null>(null);
+  const [calendars, setCalendars] = useState<GoogleCalendarOption[]>([]);
+  const [selectedCalendarId, setSelectedCalendarId] = useState('');
+  const [message, setMessage] = useState('');
+  const [localError, setLocalError] = useState('');
+
+  async function getGoogleSessionToken() {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return session?.access_token || '';
+  }
+
+  async function googleFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+    const token = await getGoogleSessionToken();
+
+    const response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json',
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token
+          ? {
+              Authorization: `Bearer ${token}`,
+              'X-OPC-Auth-Token': token,
+            }
+          : {}),
+        ...(options.headers || {}),
+      },
+    });
+
+    const payload = (await response.json().catch(() => null)) as any;
+
+    if (!response.ok || payload?.success === false) {
+      throw new Error(payload?.error || 'Google Kalender Aktion konnte nicht ausgeführt werden.');
+    }
+
+    return payload as T;
+  }
+
+  async function loadGoogleStatus(options: { silent?: boolean } = {}) {
+    if (!options.silent) {
+      setLoading(true);
+    }
+
+    setLocalError('');
+
+    try {
+      const statusPayload = await googleFetch<{
+        success: boolean;
+        connected: boolean;
+        account?: GoogleCalendarAccount | null;
+      }>('/api/integrations/google/status');
+
+      setConnected(Boolean(statusPayload.connected));
+      setAccount(statusPayload.account || null);
+      setSelectedCalendarId(statusPayload.account?.selected_calendar_id || '');
+
+      if (statusPayload.connected) {
+        const calendarsPayload = await googleFetch<{
+          success: boolean;
+          calendars?: GoogleCalendarOption[];
+          selected_calendar_id?: string | null;
+        }>('/api/integrations/google/calendars');
+
+        const writableCalendars = (calendarsPayload.calendars || []).filter(
+          (calendar) => calendar.canWrite !== false
+        );
+
+        setCalendars(writableCalendars);
+        setSelectedCalendarId(
+          calendarsPayload.selected_calendar_id ||
+            statusPayload.account?.selected_calendar_id ||
+            writableCalendars[0]?.id ||
+            ''
+        );
+      } else {
+        setCalendars([]);
+      }
+    } catch (err: any) {
+      setLocalError(err?.message || 'Google Kalender Status konnte nicht geladen werden.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadGoogleStatus();
+  }, []);
+
+  async function handleConnectGoogle() {
+    setBusy(true);
+    setLocalError('');
+    setMessage('');
+
+    try {
+      const payload = await googleFetch<{
+        success: boolean;
+        url?: string;
+        auth_url?: string;
+        authorization_url?: string;
+        redirect_url?: string;
+      }>('/api/integrations/google/connect', {
+        method: 'POST',
+      });
+
+      const nextUrl =
+        payload.url || payload.auth_url || payload.authorization_url || payload.redirect_url;
+
+      if (!nextUrl) {
+        throw new Error('Google Login URL wurde nicht zurückgegeben.');
+      }
+
+      window.location.href = nextUrl;
+    } catch (err: any) {
+      setLocalError(err?.message || 'Google Verbindung konnte nicht gestartet werden.');
+      setBusy(false);
+    }
+  }
+
+  async function handleRefreshCalendars() {
+    setBusy(true);
+    setLocalError('');
+    setMessage('');
+
+    try {
+      await loadGoogleStatus({ silent: true });
+      setMessage('Google Kalender wurden aktualisiert.');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err: any) {
+      setLocalError(err?.message || 'Kalender konnten nicht aktualisiert werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSelectCalendar(nextCalendarId: string) {
+    setSelectedCalendarId(nextCalendarId);
+    setBusy(true);
+    setLocalError('');
+    setMessage('');
+
+    try {
+      const selectedCalendar = calendars.find((calendar) => calendar.id === nextCalendarId);
+
+      await googleFetch('/api/integrations/google/select-calendar', {
+        method: 'POST',
+        body: JSON.stringify({
+          calendar_id: nextCalendarId,
+          calendar_name: selectedCalendar?.summary || nextCalendarId,
+          access_role: selectedCalendar?.accessRole || null,
+        }),
+      });
+
+      setMessage('Google Kalender wurde gespeichert.');
+      setTimeout(() => setMessage(''), 3000);
+      await loadGoogleStatus({ silent: true });
+    } catch (err: any) {
+      setLocalError(err?.message || 'Google Kalender konnte nicht gespeichert werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDisconnectGoogle() {
+    const confirmed = window.confirm('Google Kalender wirklich trennen?');
+
+    if (!confirmed) return;
+
+    setBusy(true);
+    setLocalError('');
+    setMessage('');
+
+    try {
+      await googleFetch('/api/integrations/google/disconnect', {
+        method: 'POST',
+      });
+
+      setConnected(false);
+      setAccount(null);
+      setCalendars([]);
+      setSelectedCalendarId('');
+      setMessage('Google Kalender wurde getrennt.');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err: any) {
+      setLocalError(err?.message || 'Google Kalender konnte nicht getrennt werden.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: '22px',
+        padding: '20px',
+        borderRadius: '18px',
+        border: `1px solid ${BRAND.border}`,
+        background: '#FAFAFA',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: '16px',
+          marginBottom: '16px',
+        }}
+      >
+        <div>
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '9px',
+              marginBottom: '6px',
+              color: BRAND.text,
+              fontSize: '15px',
+              fontWeight: 860,
+            }}
+          >
+            <MonitorCog size={18} />
+            Google Kalender
+          </div>
+          <p
+            style={{
+              margin: 0,
+              color: BRAND.muted,
+              fontSize: '13px',
+              lineHeight: 1.55,
+              maxWidth: '720px',
+            }}
+          >
+            Verbinde Google Kalender, damit Portal-Termine automatisch synchronisiert werden und
+            Google Meet Links direkt aus dem Kalender erstellt werden können.
+          </p>
+        </div>
+
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '8px 11px',
+            borderRadius: '999px',
+            border: `1px solid ${connected ? '#BBF7D0' : BRAND.border}`,
+            background: connected ? BRAND.greenBg : '#FFFFFF',
+            color: connected ? BRAND.green : BRAND.muted,
+            fontSize: '12px',
+            fontWeight: 800,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {connected ? <CheckCircle2 size={14} /> : <MonitorCog size={14} />}
+          {connected ? 'Verbunden' : 'Nicht verbunden'}
+        </div>
+      </div>
+
+      {localError && <StatusMessage type="error" message={localError} />}
+      {message && <StatusMessage type="success" message={message} />}
+
+      {loading ? (
+        <div
+          style={{
+            color: BRAND.muted,
+            fontSize: '13px',
+            fontWeight: 650,
+            padding: '10px 0',
+          }}
+        >
+          Google Status wird geladen...
+        </div>
+      ) : connected ? (
+        <div style={{ display: 'grid', gap: '16px' }}>
+          <div
+            className="opc-settings-grid-2"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '16px',
+            }}
+          >
+            <div>
+              <FieldLabel>Verbundenes Google Konto</FieldLabel>
+              <TextInput value={account?.google_email || 'Google Konto verbunden'} disabled />
+            </div>
+
+            <div>
+              <FieldLabel>Aktiver Google Kalender</FieldLabel>
+              <SelectInput
+                value={selectedCalendarId}
+                onChange={(value) => void handleSelectCalendar(value)}
+              >
+                {calendars.length === 0 && <option value="">Kein beschreibbarer Kalender gefunden</option>}
+                {calendars.map((calendar) => (
+                  <option key={calendar.id} value={calendar.id}>
+                    {calendar.summary}
+                    {calendar.primary ? ' · Hauptkalender' : ''}
+                  </option>
+                ))}
+              </SelectInput>
+            </div>
+          </div>
+
+          {account?.last_error ? (
+            <StatusMessage type="error" message={`Letzter Google Fehler: ${account.last_error}`} />
+          ) : null}
+
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleRefreshCalendars}
+              style={{
+                ...primaryButtonStyle,
+                background: '#FFFFFF',
+                color: BRAND.text,
+                border: `1px solid ${BRAND.border}`,
+              }}
+            >
+              Kalender aktualisieren
+            </button>
+
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleDisconnectGoogle}
+              style={{
+                ...primaryButtonStyle,
+                background: '#FFFFFF',
+                color: BRAND.red,
+                border: `1px solid #FCA5A5`,
+              }}
+            >
+              Google trennen
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '16px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              color: BRAND.muted,
+              fontSize: '13px',
+              lineHeight: 1.55,
+              maxWidth: '620px',
+            }}
+          >
+            Noch kein Google Kalender verbunden. Die Verbindung erfolgt sicher über OAuth. Jeder
+            Nutzer verbindet nur sein eigenes Google Konto.
+          </p>
+
+          <button
+            type="button"
+            disabled={busy}
+            onClick={handleConnectGoogle}
+            style={primaryButtonStyle}
+          >
+            {busy ? 'Verbinden...' : 'Google Kalender verbinden'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1279,11 +1690,6 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
                 </div>
               </div>
             </div>
-
-            <div style={{ margin: '22px 0 24px' }}>
-              <OPCGoogleIntegrationPanel variant="settings" />
-            </div>
-
             <div style={buttonRowStyle}>
               <button type="submit" disabled={saving} style={primaryButtonStyle}>
                 <Lock size={16} />
@@ -1393,6 +1799,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
               description="Operative Alerts für neue Einsätze, Statuswechsel und Mitarbeiterantworten."
             />
           </div>
+
+          <GoogleCalendarSystemPanel />
 
           <div style={buttonRowStyle}>
             <button type="button" disabled={saving} onClick={handleSaveSystem} style={primaryButtonStyle}>
