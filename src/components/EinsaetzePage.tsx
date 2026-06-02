@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import MirakaDashboardShell from './MirakaDashboardShell';
-import { CalendarDays, FileText, Plus, Search } from 'lucide-react';
+import { Activity, CalendarDays, FileText, Plus, Search } from 'lucide-react';
 
 interface RawJob {
   [key: string]: any;
@@ -20,6 +20,8 @@ interface Job {
   plannedStart: string | null;
   plannedEnd: string | null;
 }
+
+type JobDateFilter = 'all' | 'today';
 
 const BRAND = {
   text: '#111827',
@@ -157,8 +159,42 @@ function formatTimeOnly(value?: string | null) {
   });
 }
 
+function isSameLocalDay(value: string | null | undefined, referenceDate: Date) {
+  if (!value) return false;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return false;
+
+  return (
+    date.getFullYear() === referenceDate.getFullYear() &&
+    date.getMonth() === referenceDate.getMonth() &&
+    date.getDate() === referenceDate.getDate()
+  );
+}
+
 function isActiveJob(job: Job) {
   return !closedStatuses.has(normalizeStatus(job.status));
+}
+
+function isLiveJob(job: Job, now: Date) {
+  if (!isActiveJob(job)) return false;
+
+  const normalizedStatus = normalizeStatus(job.status);
+
+  if (['on_site', 'onsite', 'in_progress'].includes(normalizedStatus)) {
+    return true;
+  }
+
+  if (!job.plannedStart || !job.plannedEnd) return false;
+
+  const startTime = new Date(job.plannedStart).getTime();
+  const endTime = new Date(job.plannedEnd).getTime();
+  const nowTime = now.getTime();
+
+  if (Number.isNaN(startTime) || Number.isNaN(endTime)) return false;
+
+  return startTime <= nowTime && nowTime <= endTime;
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -178,6 +214,7 @@ function StatusBadge({ status }: { status: string }) {
 
   return (
     <span
+      className="opc-status-badge"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -206,10 +243,11 @@ function MetricCard({
 }: {
   value: number;
   label: string;
-  icon?: React.ReactNode;
+  icon?: ReactNode;
 }) {
   return (
     <div
+      className="opc-jobs-metric-card"
       style={{
         ...cardStyle,
         minHeight: '112px',
@@ -222,6 +260,7 @@ function MetricCard({
     >
       <div>
         <div
+          className="opc-jobs-metric-value"
           style={{
             fontSize: '26px',
             lineHeight: 1,
@@ -235,6 +274,7 @@ function MetricCard({
         </div>
 
         <div
+          className="opc-jobs-metric-label"
           style={{
             fontSize: '13px',
             fontWeight: 720,
@@ -247,6 +287,7 @@ function MetricCard({
 
       {icon && (
         <div
+          className="opc-jobs-metric-icon"
           style={{
             width: '38px',
             height: '38px',
@@ -267,15 +308,60 @@ function MetricCard({
   );
 }
 
+function SmallFilterButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        height: '36px',
+        width: '100%',
+        borderRadius: '12px',
+        border: `1px solid ${active ? BRAND.black : BRAND.border}`,
+        background: active ? BRAND.black : '#FFFFFF',
+        color: active ? '#FFFFFF' : BRAND.muted,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '13px',
+        fontWeight: 760,
+        fontFamily: pageFont,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 export default function EinsaetzePage() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState<JobDateFilter>('all');
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     void loadJobs();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 60000);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   async function loadJobs() {
@@ -312,7 +398,7 @@ export default function EinsaetzePage() {
 
   const availableStatuses = useMemo(() => {
     const statuses = Array.from(
-      new Set(jobs.map((job) => normalizeStatus(job.status)).filter(Boolean))
+      new Set<string>(jobs.map((job) => normalizeStatus(job.status)).filter(Boolean))
     );
 
     return statuses.sort((a, b) => formatStatus(a).localeCompare(formatStatus(b), 'de'));
@@ -324,8 +410,9 @@ export default function EinsaetzePage() {
     return jobs.filter((job) => {
       const matchesStatus =
         statusFilter === 'all' || normalizeStatus(job.status) === normalizeStatus(statusFilter);
+      const matchesDate = dateFilter === 'all' || isSameLocalDay(job.plannedStart, now);
 
-      if (!matchesStatus) return false;
+      if (!matchesStatus || !matchesDate) return false;
 
       if (!query) return true;
 
@@ -341,8 +428,10 @@ export default function EinsaetzePage() {
         .toLowerCase()
         .includes(query);
     });
-  }, [jobs, searchQuery, statusFilter]);
+  }, [jobs, searchQuery, statusFilter, dateFilter, now]);
 
+  const todayJobs = useMemo(() => jobs.filter((job) => isSameLocalDay(job.plannedStart, now)), [jobs, now]);
+  const liveJobs = useMemo(() => jobs.filter((job) => isLiveJob(job, now)), [jobs, now]);
   const activeJobs = useMemo(() => jobs.filter(isActiveJob), [jobs]);
   const reportsCount = useMemo(() => {
     return jobs.filter((job) => {
@@ -387,13 +476,14 @@ export default function EinsaetzePage() {
           className="opc-jobs-metrics"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
             gap: '16px',
             marginBottom: '22px',
           }}
         >
           <MetricCard value={jobs.length} label="Alle Einsätze" icon={<CalendarDays size={18} />} />
           <MetricCard value={activeJobs.length} label="Aktive Einsätze" icon={<CalendarDays size={18} />} />
+          <MetricCard value={liveJobs.length} label="Live Einsätze" icon={<Activity size={18} />} />
           <MetricCard value={reportsCount} label="Berichte" icon={<FileText size={18} />} />
         </div>
 
@@ -410,7 +500,7 @@ export default function EinsaetzePage() {
               display: 'grid',
               gridTemplateColumns: 'minmax(0, 1fr) 220px 176px',
               gap: '12px',
-              alignItems: 'center',
+              alignItems: 'start',
             }}
           >
             <div style={{ position: 'relative', minWidth: 0 }}>
@@ -480,38 +570,61 @@ export default function EinsaetzePage() {
               ))}
             </select>
 
-            <button
-              type="button"
-              onClick={() => {
-                window.location.href = `${baseUrl}/einsatz-planen`;
-              }}
-              style={{
-                width: '100%',
-                height: '48px',
-                borderRadius: '14px',
-                border: `1px solid ${BRAND.black}`,
-                background: BRAND.black,
-                color: '#FFFFFF',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '9px',
-                fontSize: '14px',
-                fontWeight: 760,
-                fontFamily: pageFont,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = '#1A1A1A';
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = BRAND.black;
-              }}
-            >
-              <Plus size={17} />
-              Einsatz planen
-            </button>
+            <div className="opc-jobs-action-stack">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = `${baseUrl}/einsatz-planen`;
+                }}
+                style={{
+                  width: '100%',
+                  height: '48px',
+                  borderRadius: '14px',
+                  border: `1px solid ${BRAND.black}`,
+                  background: BRAND.black,
+                  color: '#FFFFFF',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '9px',
+                  fontSize: '14px',
+                  fontWeight: 760,
+                  fontFamily: pageFont,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.background = '#1A1A1A';
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.background = BRAND.black;
+                }}
+              >
+                <Plus size={17} />
+                Einsatz planen
+              </button>
+
+              <div
+                className="opc-jobs-date-switch"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: '8px',
+                  marginTop: '8px',
+                }}
+              >
+                <SmallFilterButton
+                  active={dateFilter === 'today'}
+                  label={`Heute (${todayJobs.length})`}
+                  onClick={() => setDateFilter('today')}
+                />
+                <SmallFilterButton
+                  active={dateFilter === 'all'}
+                  label="Alle"
+                  onClick={() => setDateFilter('all')}
+                />
+              </div>
+            </div>
           </div>
         </section>
 
@@ -533,14 +646,15 @@ export default function EinsaetzePage() {
         )}
 
         <section
+          className="opc-jobs-list-section"
           style={{
-            ...cardStyle,
-            overflow: 'hidden',
+            display: 'block',
           }}
         >
           {filteredJobs.length === 0 ? (
             <div
               style={{
+                ...cardStyle,
                 padding: '78px 22px',
                 textAlign: 'center',
               }}
@@ -602,8 +716,15 @@ export default function EinsaetzePage() {
             </div>
           ) : (
             <>
-              <div className="opc-jobs-desktop-table">
-                {filteredJobs.map((job, index) => (
+              <div
+                className="opc-jobs-desktop-table"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}
+              >
+                {filteredJobs.map((job) => (
                   <button
                     key={job.id}
                     type="button"
@@ -611,16 +732,16 @@ export default function EinsaetzePage() {
                       window.location.href = `${baseUrl}/einsatz/${job.id}`;
                     }}
                     style={{
+                      ...cardStyle,
                       width: '100%',
                       display: 'grid',
                       gridTemplateColumns: 'minmax(260px, 1.1fr) minmax(220px, 0.8fr) minmax(190px, 0.7fr) 130px',
                       alignItems: 'center',
                       gap: '22px',
                       padding: '20px 22px',
-                      border: 'none',
-                      borderBottom:
-                        index < filteredJobs.length - 1 ? `1px solid #F3F4F6` : 'none',
+                      borderRadius: '18px',
                       background: '#FFFFFF',
+                      boxSizing: 'border-box',
                       textAlign: 'left',
                       cursor: 'pointer',
                       fontFamily: pageFont,
@@ -741,6 +862,7 @@ export default function EinsaetzePage() {
                       border: `1px solid ${BRAND.border}`,
                       borderRadius: '18px',
                       background: '#FFFFFF',
+                      boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
                       padding: '16px',
                       textAlign: 'left',
                       cursor: 'pointer',
@@ -824,7 +946,7 @@ export default function EinsaetzePage() {
 
           @media (max-width: 1180px) {
             .opc-jobs-metrics {
-              grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
             }
 
             .opc-jobs-controls {
@@ -842,11 +964,48 @@ export default function EinsaetzePage() {
             }
 
             .opc-jobs-metrics {
-              grid-template-columns: 1fr !important;
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              gap: 10px !important;
+              margin-bottom: 16px !important;
+            }
+
+            .opc-jobs-metrics > * {
+              min-width: 0 !important;
+            }
+
+            .opc-jobs-metric-card {
+              min-height: 96px !important;
+              padding: 14px !important;
+              border-radius: 18px !important;
+              gap: 10px !important;
+            }
+
+            .opc-jobs-metric-value {
+              font-size: 24px !important;
+              margin-bottom: 8px !important;
+            }
+
+            .opc-jobs-metric-label {
+              font-size: 12px !important;
+              line-height: 1.2 !important;
+            }
+
+            .opc-jobs-metric-icon {
+              width: 34px !important;
+              height: 34px !important;
+              border-radius: 12px !important;
             }
 
             .opc-jobs-controls {
               grid-template-columns: 1fr !important;
+            }
+
+            .opc-jobs-action-stack {
+              width: 100% !important;
+            }
+
+            .opc-jobs-date-switch {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
             }
 
             .opc-jobs-desktop-table {
@@ -856,8 +1015,14 @@ export default function EinsaetzePage() {
             .opc-jobs-mobile-cards {
               display: flex !important;
               flex-direction: column;
-              gap: 14px;
-              padding: 14px;
+              gap: 12px;
+              padding: 0;
+            }
+
+            .opc-status-badge {
+              min-width: 84px !important;
+              padding: 0 10px !important;
+              font-size: 11px !important;
             }
           }
         `}</style>

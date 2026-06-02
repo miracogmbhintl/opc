@@ -1060,6 +1060,17 @@ export default function BerichteDateienPage() {
             }
           }
 
+          @media (max-width: 860px) {
+            .opc-reports-metrics {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              gap: 10px !important;
+            }
+
+            .opc-reports-metrics > * {
+              min-width: 0 !important;
+            }
+          }
+
           @media (max-width: 640px) {
             .opc-reports-metrics {
               grid-template-columns: 1fr !important;

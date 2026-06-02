@@ -337,25 +337,29 @@ function DetailStatCard({
 }) {
   return (
     <div
+      className="opc-time-detail-card"
       style={{
         ...cardStyle,
-        minHeight: '112px',
-        padding: '20px',
+        minHeight: '96px',
+        padding: '18px',
+        borderRadius: '18px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '16px',
+        gap: '14px',
+        fontFamily: pageFont,
       }}
     >
       <div style={{ minWidth: 0 }}>
         <div
+          className="opc-time-detail-card-value"
           style={{
-            fontSize: '24px',
-            lineHeight: 1.08,
-            fontWeight: 820,
+            fontSize: '22px',
+            lineHeight: 1.05,
+            fontWeight: 840,
             letterSpacing: '-0.04em',
             color: BRAND.text,
-            marginBottom: '12px',
+            marginBottom: '8px',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -365,10 +369,12 @@ function DetailStatCard({
         </div>
 
         <div
+          className="opc-time-detail-card-label"
           style={{
-            fontSize: '13px',
+            fontSize: '12px',
             fontWeight: 720,
             color: BRAND.muted,
+            lineHeight: 1.2,
           }}
         >
           {label}
@@ -377,9 +383,10 @@ function DetailStatCard({
 
       {icon && (
         <div
+          className="opc-time-detail-card-icon"
           style={{
-            width: '38px',
-            height: '38px',
+            width: '36px',
+            height: '36px',
             borderRadius: '13px',
             border: `1px solid ${BRAND.border}`,
             background: '#FAFAFA',
@@ -666,8 +673,42 @@ const opcResponsiveStyle = `
   }
 
   .opc-time-detail-cards > *,
-  .opc-time-work-grid > * {
+  .opc-time-work-grid > *,
+  .opc-team-presence-grid > * {
     min-width: 0 !important;
+  }
+
+  .opc-team-person-card {
+    transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  }
+
+  .opc-team-person-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(15, 17, 21, 0.08) !important;
+    border-color: ${BRAND.borderStrong} !important;
+  }
+
+  .opc-team-person-card:focus-visible {
+    box-shadow: 0 0 0 3px rgba(15, 17, 21, 0.12) !important;
+    border-color: ${BRAND.black} !important;
+  }
+
+
+
+  .opc-time-section-title {
+    font-family: ${pageFont};
+  }
+
+  .opc-time-capture-card,
+  .opc-time-entry-card,
+  .opc-time-detail-card {
+    font-family: ${pageFont};
+  }
+
+  .opc-time-capture-card textarea::placeholder,
+  .opc-time-controls input::placeholder {
+    color: ${BRAND.faint};
+    font-weight: 560;
   }
 
   @media (max-width: 1180px) {
@@ -677,10 +718,6 @@ const opcResponsiveStyle = `
 
     .opc-time-controls {
       grid-template-columns: minmax(0, 1fr) 160px 170px 170px !important;
-    }
-
-    .opc-requests-desktop-table > div {
-      gap: 16px !important;
     }
   }
 
@@ -735,23 +772,84 @@ const opcResponsiveStyle = `
       font-size: 13px !important;
     }
 
+    .opc-time-section-title {
+      margin-bottom: 10px !important;
+      font-size: 15px !important;
+      font-weight: 820 !important;
+      letter-spacing: -0.02em !important;
+    }
+
     .opc-time-detail-cards {
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
       gap: 10px !important;
+      margin-bottom: 14px !important;
     }
 
-    .opc-time-detail-cards > div {
-      min-height: 96px !important;
-      padding: 14px !important;
+    .opc-time-detail-card {
+      min-height: 82px !important;
+      padding: 13px 14px !important;
+      border-radius: 16px !important;
     }
 
-    .opc-time-detail-cards > div > div:first-child > div:first-child {
-      font-size: 20px !important;
+    .opc-time-detail-card-value {
+      font-size: 18px !important;
+      margin-bottom: 6px !important;
+      letter-spacing: -0.035em !important;
+    }
+
+    .opc-time-detail-card-label {
+      font-size: 11px !important;
+      font-weight: 720 !important;
+    }
+
+    .opc-time-detail-card-icon {
+      width: 32px !important;
+      height: 32px !important;
+      border-radius: 12px !important;
     }
 
     .opc-time-work-grid {
       grid-template-columns: 1fr !important;
       gap: 0 !important;
+    }
+
+    .opc-time-capture-card {
+      margin-bottom: 14px !important;
+      border-radius: 18px !important;
+    }
+
+    .opc-time-card-header {
+      padding: 15px 16px !important;
+      font-size: 14px !important;
+      font-weight: 820 !important;
+    }
+
+    .opc-time-capture-card > div:last-child {
+      padding: 16px !important;
+    }
+
+    .opc-time-capture-card label {
+      font-size: 12px !important;
+      font-weight: 760 !important;
+    }
+
+    .opc-time-capture-card textarea {
+      min-height: 78px !important;
+      border-radius: 13px !important;
+      padding: 11px 12px !important;
+      font-size: 13px !important;
+      line-height: 1.45 !important;
+    }
+
+    .opc-team-presence-grid {
+      grid-template-columns: 1fr !important;
+      gap: 12px !important;
+      margin-bottom: 16px !important;
+    }
+
+    .opc-team-person-card {
+      min-height: 172px !important;
+      padding: 16px !important;
     }
 
     .opc-time-action-buttons {
@@ -763,6 +861,61 @@ const opcResponsiveStyle = `
     .opc-time-action-buttons button {
       width: 100% !important;
       min-width: 0 !important;
+    }
+
+    .opc-time-entries-section {
+      margin-bottom: 16px !important;
+    }
+
+    .opc-time-entry-independent-list {
+      gap: 10px !important;
+    }
+
+    .opc-time-entry-card {
+      padding: 15px 16px !important;
+      border-radius: 18px !important;
+    }
+
+    .opc-time-entry-card > div:first-child {
+      margin-bottom: 12px !important;
+      gap: 10px !important;
+    }
+
+    .opc-time-entry-title {
+      font-size: 15px !important;
+      margin-bottom: 4px !important;
+      letter-spacing: -0.025em !important;
+    }
+
+    .opc-time-entry-subtitle {
+      font-size: 12px !important;
+      font-weight: 700 !important;
+    }
+
+    .opc-time-entry-card-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px 16px !important;
+      margin-bottom: 10px !important;
+    }
+
+    .opc-time-entry-meta-label {
+      font-size: 10px !important;
+      margin-bottom: 3px !important;
+      letter-spacing: 0.055em !important;
+    }
+
+    .opc-time-entry-meta-value {
+      font-size: 12px !important;
+      font-weight: 760 !important;
+    }
+
+    .opc-time-entry-note {
+      font-size: 12px !important;
+      font-weight: 640 !important;
+    }
+
+    .opc-time-entry-actions {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     }
   }
 `;
@@ -1094,62 +1247,6 @@ function EmployeeTimeTrackingContent() {
 
   return (
     <div className="opc-time-page" style={{ padding: 0, fontFamily: pageFont, color: BRAND.text }}>
-      <OPCMetricsGrid>
-        <OPCMetricCard value={formatMinutes(stats.todayTotal)} label="Heute" icon={<Clock3 size={18} />} />
-        <OPCMetricCard value={formatMinutes(stats.weekTotal)} label="Diese Woche" icon={<CalendarDays size={18} />} />
-        <OPCMetricCard value={formatMinutes(stats.monthTotal)} label="Dieser Monat" icon={<Clock3 size={18} />} />
-        <OPCMetricCard
-          value={`${stats.saldo < 0 ? '-' : '+'}${formatMinutes(Math.abs(stats.saldo))}`}
-          label="Saldo"
-          icon={<CheckCircle2 size={18} />}
-          tone={stats.saldo < 0 ? 'danger' : 'success'}
-        />
-      </OPCMetricsGrid>
-
-      <OPCToolbar columns="minmax(0, 1fr) 170px 180px 190px">
-        <div style={{ position: 'relative', minWidth: 0 }}>
-          <Search size={17} style={searchIconStyle} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Suche nach Datum, Status, Notiz oder Mitarbeiter"
-            style={inputWithIconStyle}
-          />
-        </div>
-
-        <input
-          type="month"
-          value={month}
-          onChange={(event) => setMonth(event.target.value)}
-          style={monthInputStyle}
-        />
-
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-          style={opcSelectStyle}
-        >
-          <option value="all">Alle Status</option>
-          <option value="open">Aktiv</option>
-          <option value="on_break">Pause</option>
-          <option value="submitted">Eingereicht</option>
-          <option value="approved">Genehmigt</option>
-          <option value="rejected">Abgelehnt</option>
-        </select>
-
-        <button
-          type="button"
-          onClick={() => void loadAll(false)}
-          disabled={Boolean(actionLoading)}
-          className="opc-time-refresh-button"
-          style={opcBlackButtonStyle}
-        >
-          <RefreshCw size={17} />
-          <span>Aktualisieren</span>
-        </button>
-      </OPCToolbar>
-
       <OPCTabs
         tabs={[
           {
@@ -1164,26 +1261,108 @@ function EmployeeTimeTrackingContent() {
             active: activeTab === 'team_live',
             onClick: () => setActiveTab('team_live'),
           },
-          ...(canManageTeam
-            ? [
-                {
-                  key: 'approvals',
-                  label: 'Kontrolle & Freigabe',
-                  active: activeTab === 'approvals',
-                  onClick: () => setActiveTab('approvals'),
-                },
-              ]
-            : []),
         ]}
       />
 
+      {activeTab === 'my_time' && (
+        <OPCMetricsGrid>
+          <OPCMetricCard value={formatMinutes(stats.todayTotal)} label="Heute" icon={<Clock3 size={18} />} />
+          <OPCMetricCard value={formatMinutes(stats.weekTotal)} label="Diese Woche" icon={<CalendarDays size={18} />} />
+          <OPCMetricCard value={formatMinutes(stats.monthTotal)} label="Dieser Monat" icon={<Clock3 size={18} />} />
+          <OPCMetricCard
+            value={`${stats.saldo < 0 ? '-' : '+'}${formatMinutes(Math.abs(stats.saldo))}`}
+            label="Saldo"
+            icon={<CheckCircle2 size={18} />}
+            tone={stats.saldo < 0 ? 'danger' : 'success'}
+          />
+        </OPCMetricsGrid>
+      )}
+
+      {activeTab === 'team_live' && (
+        <OPCMetricsGrid>
+          <OPCMetricCard value={teamStats.working} label="Arbeiten aktuell" icon={<Users size={18} />} />
+          <OPCMetricCard value={teamStats.onBreak} label="In Pause" icon={<Coffee size={18} />} />
+          <OPCMetricCard value={teamStats.workedToday} label="Heute aktiv" icon={<Clock3 size={18} />} />
+          <OPCMetricCard value={teamStats.totalStaff} label="Mitarbeiter" icon={<UserRound size={18} />} />
+        </OPCMetricsGrid>
+      )}
+
+      {activeTab === 'approvals' && canManageTeam && (
+        <OPCMetricsGrid>
+          <OPCMetricCard value={submittedEntries.length} label="Offen zur Freigabe" icon={<Clock3 size={18} />} />
+          <OPCMetricCard value={entries.filter((entry) => normalizeStatus(entry.status) === 'approved').length} label="Genehmigt" icon={<CheckCircle2 size={18} />} tone="success" />
+          <OPCMetricCard value={entries.filter((entry) => normalizeStatus(entry.status) === 'rejected').length} label="Abgelehnt" icon={<LogOut size={18} />} tone="danger" />
+          <OPCMetricCard value={entries.length} label="Einträge gesamt" icon={<CalendarDays size={18} />} />
+        </OPCMetricsGrid>
+      )}
+
+      {(activeTab === 'my_time' || activeTab === 'approvals') && (
+        <OPCToolbar columns="minmax(0, 1fr) 170px 180px 190px">
+          <div style={{ position: 'relative', minWidth: 0 }}>
+            <Search size={17} style={searchIconStyle} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Suche nach Datum, Status, Notiz oder Mitarbeiter"
+              style={inputWithIconStyle}
+            />
+          </div>
+
+          <input
+            type="month"
+            value={month}
+            onChange={(event) => setMonth(event.target.value)}
+            style={monthInputStyle}
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+            style={opcSelectStyle}
+          >
+            <option value="all">Alle Status</option>
+            <option value="open">Aktiv</option>
+            <option value="on_break">Pause</option>
+            <option value="submitted">Eingereicht</option>
+            <option value="approved">Genehmigt</option>
+            <option value="rejected">Abgelehnt</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => void loadAll(false)}
+            disabled={Boolean(actionLoading)}
+            className="opc-time-refresh-button"
+            style={opcBlackButtonStyle}
+          >
+            <RefreshCw size={17} />
+            <span>Aktualisieren</span>
+          </button>
+        </OPCToolbar>
+      )}
+
+      {activeTab === 'team_live' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
+          <button
+            type="button"
+            onClick={() => void loadAll(false)}
+            disabled={Boolean(actionLoading)}
+            className="opc-time-team-refresh-button"
+            style={{ ...opcSecondaryButtonStyle, width: 'auto', minWidth: 150 }}
+          >
+            <RefreshCw size={17} />
+            <span>Aktualisieren</span>
+          </button>
+        </div>
+      )}
 
       {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
       {successMessage && <div style={successStyle}>{successMessage}</div>}
 
       {activeTab === 'my_time' && (
         <>
-          <div style={contentSectionTitleStyle}>Heute</div>
+          <div className="opc-time-section-title" style={contentSectionTitleStyle}>Heute</div>
 
           <div className="opc-time-detail-cards" style={todayDetailsGridStyle}>
             <DetailStatCard
@@ -1201,8 +1380,8 @@ function EmployeeTimeTrackingContent() {
           </div>
 
           <div className="opc-time-work-grid" style={workGridStyle}>
-            <section style={actionCardStyle}>
-              <div style={sectionHeaderStyle}>Zeit erfassen</div>
+            <section className="opc-time-capture-card" style={actionCardStyle}>
+              <div className="opc-time-card-header" style={sectionHeaderStyle}>Zeit erfassen</div>
 
               <div style={cardBodyStyle}>
                 {!isActive && (
@@ -1280,16 +1459,6 @@ function EmployeeTimeTrackingContent() {
                 </div>
               </div>
             </section>
-
-            <section style={actionCardStyle}>
-              <div style={sectionHeaderStyle}>Ablauf</div>
-              <div style={{ display: 'grid', gap: 14, padding: 20 }}>
-                <StepItem title="Tag starten" text="Mitarbeiter stempelt ein, sobald der Arbeitstag beginnt." />
-                <StepItem title="Pause erfassen" text="Pausen werden separat gezählt und vom Total abgezogen." />
-                <StepItem title="Tag abschliessen" text="Beim Ausstempeln wird der Eintrag an Dispatch eingereicht." />
-                <StepItem title="Freigabe" text="Dispatch prüft die Zeit später für Abrechnung und Reporting." />
-              </div>
-            </section>
           </div>
 
           <TimeEntriesList entries={ownEntries} activeEntry={activeEntry} title="Meine Einträge" />
@@ -1297,89 +1466,11 @@ function EmployeeTimeTrackingContent() {
       )}
 
       {activeTab === 'team_live' && (
-        <>
-          <OPCMetricsGrid>
-            <OPCMetricCard value={teamStats.working} label="Arbeiten aktuell" icon={<Users size={18} />} />
-            <OPCMetricCard value={teamStats.onBreak} label="In Pause" icon={<Coffee size={18} />} />
-            <OPCMetricCard value={teamStats.workedToday} label="Heute aktiv" icon={<Clock3 size={18} />} />
-            <OPCMetricCard value={teamStats.totalStaff} label="Mitarbeiter" icon={<UserRound size={18} />} />
-          </OPCMetricsGrid>
-
-          <OPCListCard>
-            {teamPresence.length === 0 ? (
-              <div style={emptyStyle}>
-                <Users size={24} />
-                <strong>Kein Teamstatus vorhanden.</strong>
-                <span>Falls leer, prüfe die RPC-Funktion opc_get_team_time_presence.</span>
-              </div>
-            ) : (
-              <>
-                <div className="opc-requests-desktop-table">
-                  {teamPresence.map((person, index) => (
-                    <div
-                      key={person.staff_role_id}
-                      style={{
-                        ...teamRowStyle,
-                        borderBottom: index < teamPresence.length - 1 ? '1px solid #F3F4F6' : 'none',
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          window.location.href = `/zeiterfassung/${person.staff_role_id}`;
-                        }}
-                        style={linkCellStyle}
-                      >
-                        <div style={rowTitleStyle}>{person.display_name || 'Mitarbeiter'}</div>
-                        <div style={rowSubStyle}>{person.role || 'employee'}</div>
-                      </button>
-
-                      <div>
-                        <StatusBadge status={person.time_status} />
-                      </div>
-
-                      <div style={dateStyle}>{formatTime(person.clock_in_at)}</div>
-                      <div style={dateStyle}>{formatDateTime(person.last_activity_at)}</div>
-                      <ContactButtons person={person} />
-                    </div>
-                  ))}
-                </div>
-
-                <div className="opc-requests-mobile-cards">
-                  {teamPresence.map((person) => (
-                    <div key={person.staff_role_id} style={mobileCardStyle}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                        <div>
-                          <div style={rowTitleStyle}>{person.display_name || 'Mitarbeiter'}</div>
-                          <div style={rowSubStyle}>{person.role || 'employee'}</div>
-                        </div>
-                        <StatusBadge status={person.time_status} />
-                      </div>
-
-                      <div style={{ display: 'grid', gap: 7, marginBottom: 12, color: OPC_BRAND.muted, fontSize: 13 }}>
-                        <span>Start: {formatTime(person.clock_in_at)}</span>
-                        <span>Letzte Aktivität: {formatDateTime(person.last_activity_at)}</span>
-                      </div>
-
-                      <ContactButtons person={person} />
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </OPCListCard>
-        </>
+        <TeamPresenceCards people={teamPresence} />
       )}
 
       {activeTab === 'approvals' && canManageTeam && (
         <>
-          <OPCMetricsGrid>
-            <OPCMetricCard value={submittedEntries.length} label="Offen zur Freigabe" icon={<Clock3 size={18} />} />
-            <OPCMetricCard value={entries.filter((entry) => normalizeStatus(entry.status) === 'approved').length} label="Genehmigt" icon={<CheckCircle2 size={18} />} tone="success" />
-            <OPCMetricCard value={entries.filter((entry) => normalizeStatus(entry.status) === 'rejected').length} label="Abgelehnt" icon={<LogOut size={18} />} tone="danger" />
-            <OPCMetricCard value={entries.length} label="Einträge gesamt" icon={<CalendarDays size={18} />} />
-          </OPCMetricsGrid>
-
           <section style={actionCardStyle}>
             <div style={sectionHeaderStyle}>Freigabe-Notiz</div>
             <div style={{ padding: 20 }}>
@@ -1412,17 +1503,86 @@ function EmployeeTimeTrackingContent() {
   );
 }
 
-function StepItem({ title, text }: { title: string; text: string }) {
+function TeamPresenceCards({ people }: { people: TeamPresence[] }) {
+  if (people.length === 0) {
+    return (
+      <section
+        style={{
+          ...cardStyle,
+          ...emptyStyle,
+          marginBottom: 22,
+        }}
+      >
+        <Users size={24} />
+        <strong>Kein Teamstatus vorhanden.</strong>
+        <span>Falls leer, prüfe die RPC-Funktion opc_get_team_time_presence.</span>
+      </section>
+    );
+  }
+
   return (
-    <div style={stepRowStyle}>
-      <div style={stepIconStyle}>
-        <Clock3 size={14} />
-      </div>
-      <div>
-        <div style={stepTitleStyle}>{title}</div>
-        <div style={stepTextStyle}>{text}</div>
-      </div>
-    </div>
+    <section className="opc-team-presence-grid" style={teamPresenceGridStyle}>
+      {people.map((person) => {
+        const openDetail = () => {
+          window.location.href = `/zeiterfassung/${person.staff_role_id}`;
+        };
+
+        return (
+          <article
+            key={person.staff_role_id}
+            role="button"
+            tabIndex={0}
+            className="opc-team-person-card"
+            onClick={openDetail}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openDetail();
+              }
+            }}
+            style={teamPresenceCardStyle}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={teamPersonNameStyle}>{person.display_name || 'Mitarbeiter'}</div>
+                <div style={teamPersonRoleStyle}>{person.role || 'employee'}</div>
+              </div>
+
+              <StatusBadge status={person.time_status} />
+            </div>
+
+            <div style={teamPersonInfoGridStyle}>
+              <div>
+                <div style={teamPersonMetaLabelStyle}>Start</div>
+                <div style={teamPersonMetaValueStyle}>{formatTime(person.clock_in_at)}</div>
+              </div>
+
+              <div>
+                <div style={teamPersonMetaLabelStyle}>Letzte Aktivität</div>
+                <div style={teamPersonMetaValueStyle}>{formatDateTime(person.last_activity_at)}</div>
+              </div>
+            </div>
+
+            <div
+              style={teamPersonFooterStyle}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <span style={teamPersonDetailHintStyle}>Details öffnen</span>
+              <ContactButtons person={person} />
+            </div>
+          </article>
+        );
+      })}
+    </section>
   );
 }
 
@@ -1445,7 +1605,7 @@ function TimeEntriesList({
 }) {
   return (
     <section className="opc-time-entries-section" style={{ marginBottom: 22 }}>
-      <div style={{ ...contentSectionTitleStyle, marginBottom: 14 }}>{title}</div>
+      <div className="opc-time-section-title" style={{ ...contentSectionTitleStyle, marginBottom: 14 }}>{title}</div>
 
       {entries.length === 0 ? (
         <div
@@ -1459,160 +1619,151 @@ function TimeEntriesList({
           <span>Sobald Zeiten erfasst werden, erscheinen sie hier.</span>
         </div>
       ) : (
-        <>
-          <section className="opc-requests-desktop-table" style={{ ...cardStyle, overflow: 'hidden' }}>
-            {entries.map((entry, index) => {
-              const total = entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
-              const isSubmitted = normalizeStatus(entry.status) === 'submitted';
+        <div className="opc-time-entry-independent-list" style={entryIndependentListStyle}>
+          {entries.map((entry) => {
+            const total = entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
+            const isSubmitted = normalizeStatus(entry.status) === 'submitted';
 
-              return (
-                <div
-                  key={entry.id}
-                  style={{
-                    ...desktopRowStyle,
-                    borderBottom: index < entries.length - 1 ? '1px solid #F3F4F6' : 'none',
-                  }}
-                >
+            return (
+              <article key={entry.id} className="opc-time-entry-card" style={entryIndependentCardStyle}>
+                <div style={entryCardHeaderStyle}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={rowTitleStyle}>{formatDate(entry.work_date)}</div>
-                    <div style={rowSubStyle}>Pause {formatMinutes(entry.break_minutes || 0)}</div>
+                    <h3 className="opc-time-entry-title" style={entryCardTitleStyle}>{formatDate(entry.work_date)}</h3>
+                    <p className="opc-time-entry-subtitle" style={entryCardSubtitleStyle}>{entry.employee_name || 'Mitarbeiter'}</p>
                   </div>
 
-                  <div style={{ minWidth: 0 }}>
-                    <div style={rowTitleStyle}>{entry.employee_name || 'Mitarbeiter'}</div>
-                    <div style={rowSubStyle}>{entry.employee_note || 'Keine Notiz'}</div>
+                  <StatusBadge status={entry.status} />
+                </div>
+
+                <div className="opc-time-entry-card-grid" style={entryCardGridStyle}>
+                  <div>
+                    <div className="opc-time-entry-meta-label" style={entryMetaLabelStyle}>Start</div>
+                    <div className="opc-time-entry-meta-value" style={entryMetaValueStyle}>{formatTime(entry.clock_in_at)}</div>
                   </div>
 
-                  <div style={dateStyle}>{formatTime(entry.clock_in_at)}</div>
-                  <div style={dateStyle}>{formatTime(entry.clock_out_at)}</div>
-                  <div style={dateStyle}>{formatMinutes(total)}</div>
+                  <div>
+                    <div className="opc-time-entry-meta-label" style={entryMetaLabelStyle}>Ende</div>
+                    <div className="opc-time-entry-meta-value" style={entryMetaValueStyle}>{formatTime(entry.clock_out_at)}</div>
+                  </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
-                    <StatusBadge status={entry.status} />
+                  <div>
+                    <div className="opc-time-entry-meta-label" style={entryMetaLabelStyle}>Total</div>
+                    <div className="opc-time-entry-meta-value" style={entryMetaValueStyle}>{formatMinutes(total)}</div>
+                  </div>
 
-                    {showActions && isSubmitted && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => onApprove?.(entry.id)}
-                          disabled={actionLoading === `approve-${entry.id}`}
-                          style={smallApproveButtonStyle}
-                        >
-                          Genehmigen
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => onReject?.(entry.id)}
-                          disabled={actionLoading === `reject-${entry.id}`}
-                          style={smallRejectButtonStyle}
-                        >
-                          Ablehnen
-                        </button>
-                      </>
-                    )}
+                  <div>
+                    <div className="opc-time-entry-meta-label" style={entryMetaLabelStyle}>Pause</div>
+                    <div className="opc-time-entry-meta-value" style={entryMetaValueStyle}>{formatMinutes(entry.break_minutes || 0)}</div>
                   </div>
                 </div>
-              );
-            })}
-          </section>
 
-          <div className="opc-requests-mobile-cards opc-time-entry-mobile-cards">
-            {entries.map((entry) => {
-              const total = entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
-              const isSubmitted = normalizeStatus(entry.status) === 'submitted';
+                <div className="opc-time-entry-note" style={entryNoteStyle}>{entry.employee_note || 'Keine Notiz'}</div>
 
-              return (
-                <div key={entry.id} style={mobileCardStyle}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: '12px',
-                      marginBottom: '12px',
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <h3
-                        style={{
-                          margin: '0 0 6px',
-                          fontSize: '15px',
-                          lineHeight: 1.25,
-                          fontWeight: 820,
-                          color: BRAND.text,
-                        }}
-                      >
-                        {formatDate(entry.work_date)}
-                      </h3>
-
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          color: BRAND.muted,
-                        }}
-                      >
-                        {entry.employee_name || 'Mitarbeiter'}
-                      </p>
-                    </div>
-
-                    <StatusBadge status={entry.status} />
-                  </div>
-
-                  <div
-                    style={{
-                      display: 'grid',
-                      gap: '6px',
-                      fontSize: '13px',
-                      fontWeight: 560,
-                      color: BRAND.muted,
-                    }}
-                  >
-                    <div>{formatTime(entry.clock_in_at)} – {formatTime(entry.clock_out_at)}</div>
-                    <div>Total: {formatMinutes(total)}</div>
-                    <div>Pause: {formatMinutes(entry.break_minutes || 0)}</div>
-                    <div>{entry.employee_note || 'Keine Notiz'}</div>
-                  </div>
-
-                  {showActions && isSubmitted && (
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                        gap: 8,
-                        marginTop: 14,
-                      }}
+                {showActions && isSubmitted && (
+                  <div className="opc-time-entry-actions" style={entryActionGridStyle}>
+                    <button
+                      type="button"
+                      onClick={() => onApprove?.(entry.id)}
+                      disabled={actionLoading === `approve-${entry.id}`}
+                      style={{ ...smallApproveButtonStyle, width: '100%' }}
                     >
-                      <button
-                        type="button"
-                        onClick={() => onApprove?.(entry.id)}
-                        disabled={actionLoading === `approve-${entry.id}`}
-                        style={{ ...smallApproveButtonStyle, width: '100%' }}
-                      >
-                        Genehmigen
-                      </button>
+                      Genehmigen
+                    </button>
 
-                      <button
-                        type="button"
-                        onClick={() => onReject?.(entry.id)}
-                        disabled={actionLoading === `reject-${entry.id}`}
-                        style={{ ...smallRejectButtonStyle, width: '100%' }}
-                      >
-                        Ablehnen
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </>
+                    <button
+                      type="button"
+                      onClick={() => onReject?.(entry.id)}
+                      disabled={actionLoading === `reject-${entry.id}`}
+                      style={{ ...smallRejectButtonStyle, width: '100%' }}
+                    >
+                      Ablehnen
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
       )}
     </section>
   );
 }
+
+
+const entryIndependentListStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr',
+  gap: '12px',
+};
+
+const entryIndependentCardStyle: CSSProperties = {
+  ...cardStyle,
+  padding: '18px',
+  borderRadius: '18px',
+  minWidth: 0,
+  fontFamily: OPC_PAGE_FONT,
+};
+
+const entryCardHeaderStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'flex-start',
+  gap: '12px',
+  marginBottom: '12px',
+};
+
+const entryCardTitleStyle: CSSProperties = {
+  margin: '0 0 6px',
+  fontSize: '17px',
+  lineHeight: 1.2,
+  fontWeight: 840,
+  letterSpacing: '-0.03em',
+  color: BRAND.text,
+};
+
+const entryCardSubtitleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: '13px',
+  fontWeight: 700,
+  color: BRAND.muted,
+};
+
+const entryCardGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  gap: '12px',
+  marginBottom: '12px',
+};
+
+const entryMetaLabelStyle: CSSProperties = {
+  marginBottom: '4px',
+  fontSize: '11px',
+  fontWeight: 760,
+  color: BRAND.faint,
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+};
+
+const entryMetaValueStyle: CSSProperties = {
+  fontSize: '13px',
+  fontWeight: 760,
+  color: BRAND.text,
+  whiteSpace: 'nowrap',
+};
+
+const entryNoteStyle: CSSProperties = {
+  color: BRAND.muted,
+  fontSize: '12px',
+  fontWeight: 640,
+  lineHeight: 1.45,
+};
+
+const entryActionGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 8,
+  marginTop: 14,
+};
 
 const loadingStyle: CSSProperties = {
   minHeight: '60vh',
@@ -1663,7 +1814,7 @@ const inputStyle: CSSProperties = {
   background: '#FFFFFF',
   color: OPC_BRAND.text,
   outline: 'none',
-  fontSize: 14,
+  fontSize: 13,
   fontWeight: 560,
   fontFamily: OPC_PAGE_FONT,
   boxSizing: 'border-box',
@@ -1671,27 +1822,28 @@ const inputStyle: CSSProperties = {
 
 const actionCardStyle: CSSProperties = {
   ...cardStyle,
-  marginBottom: 22,
+  marginBottom: 18,
   overflow: 'hidden',
+  borderRadius: 18,
 };
 
 const contentSectionTitleStyle: CSSProperties = {
-  margin: '0 0 14px',
-  fontSize: '16px',
+  margin: '0 0 12px',
+  fontSize: '15px',
   fontWeight: 820,
   color: OPC_BRAND.text,
   letterSpacing: '-0.02em',
 };
 
 const cardBodyStyle: CSSProperties = {
-  padding: 20,
+  padding: 18,
 };
 
 const todayDetailsGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
   gap: '16px',
-  marginBottom: '22px',
+  marginBottom: '18px',
 };
 
 const workGridStyle: CSSProperties = {
@@ -1702,9 +1854,9 @@ const workGridStyle: CSSProperties = {
 };
 
 const sectionHeaderStyle: CSSProperties = {
-  padding: '18px 20px',
+  padding: '16px 18px',
   borderBottom: '1px solid #F3F4F6',
-  fontSize: '15px',
+  fontSize: '14px',
   fontWeight: 820,
   color: OPC_BRAND.text,
 };
@@ -1747,14 +1899,14 @@ const infoValueStyle: CSSProperties = {
 const labelStyle: CSSProperties = {
   display: 'grid',
   gap: 8,
-  fontSize: 13,
+  fontSize: 12,
   fontWeight: 760,
   color: OPC_BRAND.text,
 };
 
 const textareaStyle: CSSProperties = {
   width: '100%',
-  minHeight: 92,
+  minHeight: 84,
   resize: 'vertical',
   padding: '12px 13px',
   borderRadius: 14,
@@ -1762,7 +1914,7 @@ const textareaStyle: CSSProperties = {
   background: '#FFFFFF',
   color: OPC_BRAND.text,
   outline: 'none',
-  fontSize: 14,
+  fontSize: 13,
   fontWeight: 560,
   fontFamily: OPC_PAGE_FONT,
   lineHeight: 1.5,
@@ -1782,39 +1934,6 @@ const stepsPanelStyle: CSSProperties = {
   overflow: 'hidden',
   background: '#FFFFFF',
   boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
-};
-
-const stepRowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '30px 1fr',
-  gap: 10,
-  alignItems: 'flex-start',
-};
-
-const stepIconStyle: CSSProperties = {
-  width: 30,
-  height: 30,
-  borderRadius: 999,
-  border: `1px solid ${OPC_BRAND.border}`,
-  background: '#F8FAFC',
-  color: OPC_BRAND.muted,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const stepTitleStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 820,
-  color: OPC_BRAND.text,
-  marginBottom: 4,
-};
-
-const stepTextStyle: CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  lineHeight: 1.5,
-  color: OPC_BRAND.muted,
 };
 
 const desktopRowStyle: CSSProperties = {
@@ -1935,13 +2054,13 @@ const smallRejectButtonStyle: CSSProperties = {
 };
 
 const emptyStyle: CSSProperties = {
-  minHeight: '220px',
+  minHeight: '160px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   flexDirection: 'column',
   gap: '10px',
-  padding: '34px',
+  padding: '24px',
   color: OPC_BRAND.muted,
   textAlign: 'center',
 };
@@ -1955,6 +2074,85 @@ const mobileCardStyle: CSSProperties = {
   textAlign: 'left',
   fontFamily: OPC_PAGE_FONT,
   boxSizing: 'border-box',
+};
+
+const teamPresenceGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 16,
+  marginBottom: 22,
+};
+
+const teamPresenceCardStyle: CSSProperties = {
+  ...cardStyle,
+  padding: '20px',
+  minHeight: 190,
+  display: 'flex',
+  flexDirection: 'column',
+  justifyContent: 'space-between',
+  gap: 16,
+  cursor: 'pointer',
+  outline: 'none',
+  fontFamily: OPC_PAGE_FONT,
+};
+
+const teamPersonNameStyle: CSSProperties = {
+  fontSize: '17px',
+  lineHeight: 1.2,
+  fontWeight: 840,
+  letterSpacing: '-0.025em',
+  color: OPC_BRAND.text,
+  marginBottom: 7,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const teamPersonRoleStyle: CSSProperties = {
+  fontSize: '13px',
+  fontWeight: 700,
+  color: OPC_BRAND.muted,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const teamPersonInfoGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 12,
+};
+
+const teamPersonMetaLabelStyle: CSSProperties = {
+  fontSize: '11px',
+  fontWeight: 780,
+  color: OPC_BRAND.faint,
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  marginBottom: 5,
+};
+
+const teamPersonMetaValueStyle: CSSProperties = {
+  fontSize: '13px',
+  lineHeight: 1.35,
+  fontWeight: 720,
+  color: OPC_BRAND.text,
+};
+
+const teamPersonFooterStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  paddingTop: 14,
+  borderTop: '1px solid #F3F4F6',
+};
+
+const teamPersonDetailHintStyle: CSSProperties = {
+  fontSize: '12px',
+  fontWeight: 760,
+  color: OPC_BRAND.muted,
+  whiteSpace: 'nowrap',
 };
 
 const errorStyle: CSSProperties = {
@@ -1989,26 +2187,7 @@ const spinStyle = `
     to { transform: rotate(360deg); }
   }
 
-  .opc-requests-mobile-cards {
-    display: none;
-  }
-
   @media (max-width: 980px) {
-    .opc-requests-desktop-table {
-      display: none !important;
-    }
-
-    .opc-requests-mobile-cards {
-      display: flex !important;
-      flex-direction: column;
-      gap: 14px;
-      padding: 14px;
-    }
-
-    .opc-time-entry-mobile-cards {
-      padding: 0 !important;
-    }
-
     .opc-time-detail-cards {
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
       gap: 10px !important;

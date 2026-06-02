@@ -104,3 +104,13 @@ _debug/
 
 # Local Wrangler backup
 wrangler.manual-backup.jsonc
+
+# Local backup/debug/export files
+.backups/
+_debug/
+_code_review/
+*.zip
+*.backup-*
+wrangler.manual-backup.jsonc
+inject-opc-webapp-head.py
+patch-zeiterfassung-all-sidebars.py

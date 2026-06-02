@@ -1,10 +1,7 @@
 /**
  * Orange Pro Clean Sidebar
- * Fixed active-route matching.
- * Adds separate /anfragen route.
- * Adds /kalender route.
- * Keeps /anfragen-schaeden separate from /anfragen.
- * Zeiterfassung added for internal users (owner, admin, dispatch, manager, employee).
+ * Uses the same sidebar behavior/design structure as the reference Miraka sidebar.
+ * Only OPC-specific parts remain changed: logo, navigation pages, roles, and user information.
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -15,9 +12,11 @@ import {
   AlertTriangle,
   Briefcase,
   CalendarDays,
+  Clock,
   ChevronLeft,
   ChevronRight,
-  Clock3,
+  ChevronUp,
+  ChevronDown,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -49,8 +48,8 @@ const OPC_LOGO =
 const STORAGE_KEY_COLLAPSED = 'miraka_sidebar_collapsed';
 
 const COLLAPSED_WIDTH = 72;
-const EXPANDED_WIDTH = 280;
-const RAIL_PADDING_LEFT = 14;
+const EXPANDED_WIDTH = 260;
+const RAIL_PADDING_LEFT = 12;
 const ICON_RAIL_WIDTH = 48;
 
 const SIDEBAR_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
@@ -94,8 +93,7 @@ function normalizeRole(role: string): NormalizedRole {
   if (
     cleanRole === 'dispatch' ||
     cleanRole === 'dispatcher' ||
-    cleanRole === 'disposition' ||
-    cleanRole === 'manager'
+    cleanRole === 'disposition'
   ) {
     return 'dispatch';
   }
@@ -135,7 +133,7 @@ function getInitials(name: string) {
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .trim();
 
-  if (!cleaned) return 'A';
+  if (!cleaned) return 'O';
 
   const parts = cleaned.split(/\s+/).filter(Boolean);
 
@@ -159,10 +157,10 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
       clients: routeFor('clients', '/kunden'),
       jobs: routeFor('jobs', '/einsaetze'),
+      timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       files: routeFor('files', '/berichte-dateien'),
       tickets: routeFor('tickets', '/anfragen-schaeden'),
       qrCodes: routeFor('qrCodes', '/qr-codes'),
-      timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       settings: routeFor('settings', '/einstellungen'),
       logout: routeFor('logout', '/logout'),
     }),
@@ -179,7 +177,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   const [isMobileExpanded, setIsMobileExpanded] = useState(false);
   const [resolvedPath, setResolvedPath] = useState(currentPath);
-  const [showCollapsedFooter, setShowCollapsedFooter] = useState(isCollapsed);
+  const [showCollapsedLogout, setShowCollapsedLogout] = useState(false);
 
   useEffect(() => {
     loadUserProfile();
@@ -225,13 +223,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   useEffect(() => {
     if (!isCollapsed) {
-      setShowCollapsedFooter(false);
+      setShowCollapsedLogout(false);
       return;
     }
 
     const timer = window.setTimeout(() => {
-      setShowCollapsedFooter(true);
-    }, 430);
+      setShowCollapsedLogout(true);
+    }, 500);
 
     return () => window.clearTimeout(timer);
   }, [isCollapsed]);
@@ -325,18 +323,18 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
       },
       {
-        href: buildUrl(routes.timeTracking),
-        label: 'Zeiterfassung',
-        icon: Clock3,
-        key: 'time-tracking',
-        match: [routes.timeTracking, '/zeiterfassung', '/zeiterfassung/'],
-      },
-      {
         href: buildUrl(routes.jobs),
         label: 'Einsätze',
         icon: Briefcase,
         key: 'jobs',
         match: [routes.jobs, '/einsaetze', '/dashboard/jobs'],
+      },
+      {
+        href: buildUrl(routes.timeTracking),
+        label: 'Zeiterfassung',
+        icon: Clock,
+        key: 'zeiterfassung',
+        match: [routes.timeTracking, '/zeiterfassung', '/dashboard/zeiterfassung'],
       },
       {
         href: buildUrl(routes.tickets),
@@ -373,42 +371,42 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         href: buildUrl(routes.dashboard),
         label: 'Übersicht',
         icon: LayoutDashboard,
-        key: 'employee-overview',
+        key: 'overview',
         match: [routes.dashboard, '/dashboard'],
       },
       {
         href: buildUrl(routes.calendar),
         label: 'Kalender',
         icon: CalendarDays,
-        key: 'employee-calendar',
+        key: 'calendar',
         match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
-      },
-      {
-        href: buildUrl(routes.timeTracking),
-        label: 'Zeiterfassung',
-        icon: Clock3,
-        key: 'employee-time-tracking',
-        match: [routes.timeTracking, '/zeiterfassung', '/zeiterfassung/'],
       },
       {
         href: buildUrl(routes.jobs),
         label: 'Einsätze',
         icon: Briefcase,
-        key: 'employee-jobs',
+        key: 'jobs',
         match: [routes.jobs, '/einsaetze', '/dashboard/jobs'],
+      },
+      {
+        href: buildUrl(routes.timeTracking),
+        label: 'Zeiterfassung',
+        icon: Clock,
+        key: 'zeiterfassung',
+        match: [routes.timeTracking, '/zeiterfassung', '/dashboard/zeiterfassung'],
       },
       {
         href: buildUrl(routes.tickets),
         label: 'Tickets & Schäden',
         icon: AlertTriangle,
-        key: 'employee-tickets',
+        key: 'tickets',
         match: [routes.tickets, '/anfragen-schaeden', '/dashboard/tickets'],
       },
       {
         href: buildUrl(routes.files),
         label: 'Berichte & Dateien',
         icon: FileText,
-        key: 'employee-files',
+        key: 'files',
         match: [routes.files, '/berichte-dateien', '/dashboard/files'],
       },
     ];
@@ -418,35 +416,35 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         href: buildUrl(routes.dashboard),
         label: 'Übersicht',
         icon: LayoutDashboard,
-        key: 'client-overview',
+        key: 'overview',
         match: [routes.dashboard, '/dashboard'],
       },
       {
         href: buildUrl(routes.jobs),
         label: 'Einsätze',
         icon: Briefcase,
-        key: 'client-jobs',
+        key: 'jobs',
         match: [routes.jobs, '/einsaetze', '/dashboard/jobs'],
       },
       {
         href: buildUrl(routes.tickets),
         label: 'Tickets & Schäden',
         icon: AlertTriangle,
-        key: 'client-tickets',
+        key: 'tickets',
         match: [routes.tickets, '/anfragen-schaeden', '/dashboard/tickets'],
       },
       {
         href: buildUrl(routes.files),
         label: 'Berichte & Dateien',
         icon: FileText,
-        key: 'client-files',
+        key: 'files',
         match: [routes.files, '/berichte-dateien', '/dashboard/files'],
       },
       {
         href: buildUrl(routes.settings),
         label: 'Einstellungen',
         icon: Settings,
-        key: 'client-settings',
+        key: 'settings',
         match: [routes.settings, '/einstellungen', '/dashboard/settings'],
       },
     ];
@@ -479,12 +477,29 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
     });
   }
 
+  const mobilePrimaryButtons =
+    normalizedRole === 'client'
+      ? ['overview', 'jobs', 'tickets', 'settings']
+      : ['overview', 'zeiterfassung', 'jobs', 'settings'];
+
+  function toggleMobileNav() {
+    setIsMobileExpanded(!isMobileExpanded);
+  }
+
+  function handleMobileNavigate(href: string) {
+    setIsMobileExpanded(false);
+
+    if (typeof window !== 'undefined') {
+      window.location.href = href;
+    }
+  }
+
   const userDisplayName = getUserDisplayName(user);
   const initials = getInitials(userDisplayName);
 
   const revealLabelStyle: CSSProperties = {
     opacity: isCollapsed ? 0 : 1,
-    maxWidth: isCollapsed ? '0px' : '190px',
+    maxWidth: isCollapsed ? '0px' : '180px',
     marginLeft: isCollapsed ? '0px' : '12px',
     transform: isCollapsed ? 'translateX(-6px)' : 'translateX(0)',
     overflow: 'hidden',
@@ -511,16 +526,16 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
     justifyContent: 'flex-start',
     gap: '0px',
     padding: '0px',
-    borderRadius: isCollapsed ? '16px' : '14px',
+    borderRadius: isCollapsed ? '16px' : '12px',
     fontSize: '14px',
-    fontWeight: 700,
+    fontWeight: 500,
     cursor: 'pointer',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     border: 'none',
     width: isCollapsed ? `${ICON_RAIL_WIDTH}px` : '100%',
     height: `${ICON_RAIL_WIDTH}px`,
-    fontFamily: 'Inter, Helvetica, Arial, sans-serif',
+    fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
     textAlign: 'left',
     position: 'relative',
     flexShrink: 0,
@@ -552,14 +567,14 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         style={{
           width: isCollapsed ? `${COLLAPSED_WIDTH}px` : `${EXPANDED_WIDTH}px`,
           background: '#ffffff',
-          borderRight: '1px solid #E8E8E8',
+          borderRight: '1px solid #E5E5E5',
           display: 'flex',
           flexDirection: 'column',
           position: 'fixed',
           height: '100vh',
           left: 0,
           top: 0,
-          fontFamily: 'Inter, Helvetica, Arial, sans-serif',
+          fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
           zIndex: 100,
           transition: SIDEBAR_WIDTH_TRANSITION,
           overflow: 'hidden',
@@ -568,12 +583,12 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       >
         <div
           style={{
-            height: '102px',
+            height: '96px',
             display: 'flex',
             alignItems: 'center',
             paddingLeft: `${RAIL_PADDING_LEFT}px`,
-            paddingRight: isCollapsed ? '12px' : '18px',
-            borderBottom: '1px solid #EDEDED',
+            paddingRight: isCollapsed ? '12px' : '16px',
+            borderBottom: 'none',
             flexShrink: 0,
             boxSizing: 'border-box',
             transition: `padding 420ms ${SIDEBAR_EASE}`,
@@ -581,6 +596,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         >
           <a
             href={buildUrl(routes.dashboard)}
+            title="Orange Pro Clean GmbH"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -596,7 +612,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                 width: `${ICON_RAIL_WIDTH}px`,
                 minWidth: `${ICON_RAIL_WIDTH}px`,
                 height: `${ICON_RAIL_WIDTH}px`,
-                borderRadius: '13px',
+                borderRadius: '14px',
                 background: '#F7931F',
                 color: '#ffffff',
                 display: 'flex',
@@ -614,8 +630,8 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
               src={OPC_LOGO}
               alt="Orange Pro Clean GmbH"
               style={{
-                height: '62px',
-                width: '182px',
+                height: '58px',
+                width: '178px',
                 objectFit: 'contain',
                 objectPosition: 'left center',
                 marginLeft: isCollapsed ? '0px' : '14px',
@@ -631,18 +647,19 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
         <div
           style={{
-            padding: '22px 14px 10px 14px',
-            borderBottom: '1px solid #EDEDED',
+            padding: `8px 12px 8px ${RAIL_PADDING_LEFT}px`,
+            borderBottom: 'none',
             flexShrink: 0,
           }}
         >
           <button
             type="button"
             onClick={toggleSidebar}
+            title={isCollapsed ? 'Ausklappen' : 'Einklappen'}
             style={{
               ...desktopButtonBaseStyle,
               background: 'transparent',
-              color: '#707070',
+              color: '#7A7A7A',
             }}
           >
             <span style={iconSlotStyle}>
@@ -665,8 +682,8 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
           style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: '7px',
-            padding: '22px 14px',
+            gap: '8px',
+            padding: `16px 12px 16px ${RAIL_PADDING_LEFT}px`,
             flex: 1,
             overflowY: 'auto',
             overflowX: 'hidden',
@@ -683,37 +700,20 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                 title={isCollapsed ? item.label : undefined}
                 style={{
                   ...desktopButtonBaseStyle,
-                  background: active ? '#F3F3F1' : 'transparent',
-                  color: active ? '#111111' : '#6C6C6C',
+                  background: active ? '#F7F7F7' : 'transparent',
+                  color: active ? '#1A1A1A' : '#7A7A7A',
                   textDecoration: 'none',
                 }}
               >
-                {active ? (
-                  <span
-                    style={{
-                      position: 'absolute',
-                      left: '-14px',
-                      width: '3px',
-                      height: '24px',
-                      borderRadius: '999px',
-                      background: '#F7931F',
-                    }}
-                  />
-                ) : null}
-
                 <span style={iconSlotStyle}>
-                  <Icon
-                    size={21}
-                    strokeWidth={active ? 2.35 : 2.1}
-                    color={active ? '#F7931F' : '#6C6C6C'}
-                  />
+                  <Icon size={20} strokeWidth={1.5} />
                 </span>
 
                 <span
                   style={{
                     ...revealLabelStyle,
                     fontSize: '14px',
-                    fontWeight: active ? 900 : 760,
+                    fontWeight: 500,
                   }}
                 >
                   {item.label}
@@ -725,284 +725,397 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
         <div
           style={{
-            height: '92px',
-            borderTop: '1px solid #EDEDED',
-            padding: '14px',
+            position: 'relative',
+            height: isCollapsed ? '144px' : '88px',
+            borderTop: 'none',
+            padding: `16px 12px 16px ${RAIL_PADDING_LEFT}px`,
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-end',
             gap: '12px',
             flexShrink: 0,
             overflow: 'hidden',
+            boxSizing: 'border-box',
+            transition: `height 420ms ${SIDEBAR_EASE}`,
           }}
         >
-          {showCollapsedFooter && isCollapsed ? (
-            <button
-              type="button"
-              onClick={handleLogout}
-              title="Abmelden"
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Abmelden"
+            aria-label="Abmelden"
+            style={{
+              position: 'absolute',
+              left: `${RAIL_PADDING_LEFT}px`,
+              bottom: '76px',
+              width: `${ICON_RAIL_WIDTH}px`,
+              height: `${ICON_RAIL_WIDTH}px`,
+              minWidth: `${ICON_RAIL_WIDTH}px`,
+              borderRadius: '14px',
+              background: '#F4F4F2',
+              color: '#6C6C6C',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: isCollapsed && showCollapsedLogout ? 1 : 0,
+              transform: isCollapsed && showCollapsedLogout ? 'translateY(0)' : 'translateY(10px)',
+              pointerEvents: isCollapsed && showCollapsedLogout ? 'auto' : 'none',
+              transition: `
+                opacity 220ms ease,
+                transform 260ms ${SIDEBAR_EASE},
+                background 180ms ease,
+                color 180ms ease
+              `,
+            }}
+          >
+            <LogOut size={19} />
+          </button>
+
+          <div
+            title={userDisplayName}
+            style={{
+              width: isCollapsed ? `${ICON_RAIL_WIDTH}px` : '44px',
+              height: isCollapsed ? `${ICON_RAIL_WIDTH}px` : '44px',
+              minWidth: isCollapsed ? `${ICON_RAIL_WIDTH}px` : '44px',
+              borderRadius: '999px',
+              background: '#111111',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '13px',
+              fontWeight: 900,
+              letterSpacing: '-0.02em',
+              transition: `
+                width 420ms ${SIDEBAR_EASE},
+                height 420ms ${SIDEBAR_EASE},
+                min-width 420ms ${SIDEBAR_EASE}
+              `,
+            }}
+          >
+            {initials}
+          </div>
+
+          <div
+            style={{
+              ...revealLabelStyle,
+              display: 'grid',
+              gap: '3px',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            <strong
               style={{
-                width: `${ICON_RAIL_WIDTH}px`,
-                height: `${ICON_RAIL_WIDTH}px`,
-                minWidth: `${ICON_RAIL_WIDTH}px`,
-                borderRadius: '999px',
-                background: '#111111',
-                color: '#ffffff',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 900,
-                fontFamily: 'inherit',
+                fontSize: '13px',
+                lineHeight: 1.2,
+                color: '#111111',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
-              {initials}
-            </button>
-          ) : (
-            <>
-              <div
-                style={{
-                  width: '44px',
-                  height: '44px',
-                  minWidth: '44px',
-                  borderRadius: '999px',
-                  background: '#111111',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '13px',
-                  fontWeight: 900,
-                }}
-              >
-                {initials}
-              </div>
+              {userDisplayName}
+            </strong>
 
-              <div
-                style={{
-                  ...revealLabelStyle,
-                  display: 'grid',
-                  gap: '3px',
-                  flex: 1,
-                  minWidth: 0,
-                }}
-              >
-                <strong
-                  style={{
-                    fontSize: '13px',
-                    lineHeight: 1.2,
-                    color: '#111111',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {userDisplayName}
-                </strong>
+            <span
+              style={{
+                fontSize: '12px',
+                lineHeight: 1.2,
+                color: '#777777',
+              }}
+            >
+              {getRoleLabel(role)}
+            </span>
+          </div>
 
-                <span
-                  style={{
-                    fontSize: '12px',
-                    lineHeight: 1.2,
-                    color: '#777777',
-                  }}
-                >
-                  {getRoleLabel(role)}
-                </span>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleLogout}
-                title="Abmelden"
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  minWidth: '34px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#777777',
-                  display: isCollapsed ? 'none' : 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                }}
-              >
-                <LogOut size={19} />
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={handleLogout}
+            title="Abmelden"
+            aria-label="Abmelden"
+            style={{
+              width: '34px',
+              height: '34px',
+              minWidth: '34px',
+              borderRadius: '10px',
+              border: 'none',
+              background: 'transparent',
+              color: '#777777',
+              display: isCollapsed ? 'none' : 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <LogOut size={19} />
+          </button>
         </div>
       </aside>
 
-      <button
-        type="button"
-        className="miraka-sidebar-mobile-toggle"
-        onClick={() => setIsMobileExpanded(true)}
+      <div
+        className="miraka-mobile-nav"
         style={{
-          position: 'fixed',
-          left: '16px',
-          top: '16px',
-          zIndex: 210,
-          width: '46px',
-          height: '46px',
-          borderRadius: '14px',
-          background: '#F7931F',
-          color: '#ffffff',
-          border: 'none',
           display: 'none',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          boxShadow: '0 14px 35px rgba(0,0,0,0.18)',
-          fontWeight: 900,
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 1000,
+          fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+          pointerEvents: 'none',
+        }}
+      ></div>
+
+      <div
+        className="miraka-mobile-nav"
+        style={{
+          display: 'none',
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: 1000,
+          fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+          pointerEvents: 'none',
         }}
       >
-        O
-      </button>
-
-      {isMobileExpanded ? (
         <div
-          className="miraka-sidebar-mobile-overlay"
           onClick={() => setIsMobileExpanded(false)}
           style={{
             position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.34)',
-            zIndex: 220,
-            display: 'none',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(4px)',
+            zIndex: -1,
+            opacity: isMobileExpanded ? 1 : 0,
+            pointerEvents: isMobileExpanded ? 'auto' : 'none',
+            transition: 'opacity 0.3s ease',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'relative',
+            margin: '0 auto 20px',
+            background: '#FFFFFF',
+            borderRadius: isMobileExpanded ? '24px' : '27px',
+            boxShadow:
+              '0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08)',
+            overflow: 'hidden',
+            border: '1px solid rgba(0, 0, 0, 0.08)',
+            pointerEvents: 'auto',
+            width: isMobileExpanded ? '90vw' : 'fit-content',
+            maxWidth: isMobileExpanded ? '90vw' : 'none',
+            transition:
+              'width 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), border-radius 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
           }}
         >
-          <aside
-            onClick={(event) => event.stopPropagation()}
+          <div
             style={{
-              width: 'min(86vw, 320px)',
-              height: '100vh',
-              background: '#ffffff',
+              padding: isMobileExpanded ? '12px' : '9px',
               display: 'flex',
-              flexDirection: 'column',
-              padding: '18px',
-              boxSizing: 'border-box',
-              boxShadow: '20px 0 60px rgba(0,0,0,0.18)',
+              flexDirection: isMobileExpanded ? 'column' : 'row',
+              gap: isMobileExpanded ? '8px' : '6.75px',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                paddingBottom: '18px',
-                borderBottom: '1px solid #ededed',
-              }}
-            >
-              <div
-                style={{
-                  width: '46px',
-                  height: '46px',
-                  borderRadius: '14px',
-                  background: '#F7931F',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 900,
-                }}
-              >
-                O
-              </div>
+            {!isMobileExpanded && (
+              <>
+                <button
+                  type="button"
+                  onClick={toggleMobileNav}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '5.625px',
+                    borderRadius: '18px',
+                    background: 'transparent',
+                    color: '#7A7A7A',
+                    border: 'none',
+                    cursor: 'pointer',
+                    width: '49.5px',
+                    height: '49.5px',
+                    transition: 'background 0.3s ease, color 0.3s ease',
+                    flexShrink: 0,
+                  }}
+                >
+                  <ChevronUp size={27} strokeWidth={1.5} />
+                </button>
 
-              <img
-                src={OPC_LOGO}
-                alt="Orange Pro Clean GmbH"
-                style={{
-                  height: '58px',
-                  width: '180px',
-                  objectFit: 'contain',
-                  objectPosition: 'left center',
-                }}
-              />
-            </div>
+                {mobilePrimaryButtons.map((buttonKey) => {
+                  const item = navigationItems.find((nav) => nav.key === buttonKey);
 
-            <nav
-              style={{
-                display: 'grid',
-                gap: '8px',
-                paddingTop: '18px',
-                flex: 1,
-                overflowY: 'auto',
-              }}
-            >
-              {navigationItems.map((item) => {
+                  if (!item) return null;
+
+                  const Icon = item.icon;
+                  const active = isActive(item);
+                  const isPrimaryAction = item.key === 'zeiterfassung';
+
+                  return (
+                    <button
+                      type="button"
+                      key={item.key}
+                      onClick={() => handleMobileNavigate(item.href)}
+                      title={item.label}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '5.625px',
+                        borderRadius: '18px',
+                        background: active
+                          ? '#F7F7F7'
+                          : isPrimaryAction
+                            ? '#1A1A1A'
+                            : 'transparent',
+                        color: active
+                          ? '#1A1A1A'
+                          : isPrimaryAction
+                            ? '#FFFFFF'
+                            : '#7A7A7A',
+                        border: 'none',
+                        cursor: 'pointer',
+                        width: '49.5px',
+                        height: '49.5px',
+                        flexShrink: 0,
+                        transition: 'background 0.2s ease',
+                      }}
+                    >
+                      <Icon
+                        size={isPrimaryAction ? 29.25 : 27}
+                        strokeWidth={isPrimaryAction ? 2 : 1.5}
+                      />
+                    </button>
+                  );
+                })}
+              </>
+            )}
+
+            {isMobileExpanded &&
+              navigationItems.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item);
 
                 return (
-                  <a
+                  <button
+                    type="button"
                     key={item.key}
-                    href={item.href}
+                    onClick={() => handleMobileNavigate(item.href)}
                     style={{
-                      minHeight: '48px',
-                      borderRadius: '14px',
-                      background: active ? '#F3F3F1' : 'transparent',
-                      color: active ? '#111111' : '#666666',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
-                      padding: '0 14px',
-                      textDecoration: 'none',
-                      fontSize: '14px',
-                      fontWeight: active ? 900 : 750,
+                      padding: '14px 16px',
+                      borderRadius: '18px',
+                      background: active ? '#F7F7F7' : 'transparent',
+                      color: active ? '#1A1A1A' : '#7A7A7A',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '15px',
+                      fontWeight: 500,
+                      width: '100%',
+                      fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+                      textAlign: 'left',
                     }}
                   >
-                    <Icon size={20} color={active ? '#F7931F' : '#666666'} />
-                    {item.label}
-                  </a>
+                    <Icon size={24} strokeWidth={1.5} />
+                    <span style={{ flex: 1 }}>{item.label}</span>
+                  </button>
                 );
               })}
-            </nav>
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              style={{
-                minHeight: '46px',
-                borderRadius: '14px',
-                border: 'none',
-                background: '#111111',
-                color: '#ffffff',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontSize: '14px',
-                fontWeight: 850,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              <LogOut size={18} />
-              Abmelden
-            </button>
-          </aside>
+            {isMobileExpanded && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    padding: '14px 16px',
+                    borderRadius: '18px',
+                    background: 'transparent',
+                    color: '#DC2626',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '15px',
+                    fontWeight: 500,
+                    width: '100%',
+                    fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+                    textAlign: 'left',
+                  }}
+                >
+                  <LogOut size={24} strokeWidth={1.5} />
+                  <span style={{ flex: 1 }}>Abmelden</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleMobileNav}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '12px',
+                    padding: '14px',
+                    borderRadius: '18px',
+                    background: '#1A1A1A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '15px',
+                    fontWeight: 600,
+                    width: '100%',
+                    fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+                    transition: 'background 0.3s ease, color 0.3s ease',
+                    marginTop: '4px',
+                  }}
+                >
+                  <ChevronDown size={24} strokeWidth={2} />
+                  <span style={{ whiteSpace: 'nowrap' }}>Menü schließen</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
-      ) : null}
+      </div>
 
       <style>{`
+        .miraka-sidebar-desktop nav {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        .miraka-sidebar-desktop nav::-webkit-scrollbar {
+          display: none;
+        }
+
         @media (max-width: 768px) {
           .miraka-sidebar-desktop {
             display: none !important;
           }
 
-          .miraka-sidebar-mobile-toggle {
-            display: flex !important;
-          }
-
-          .miraka-sidebar-mobile-overlay {
+          .miraka-mobile-nav {
             display: block !important;
           }
 
           :root {
             --miraka-sidebar-width: 0px !important;
             --opc-sidebar-width: 0px !important;
+          }
+        }
+
+        @media (min-width: 769px) {
+          .miraka-mobile-nav {
+            display: none !important;
           }
         }
       `}</style>

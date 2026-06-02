@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import {
+  Activity,
   AlertTriangle,
   CalendarDays,
   ChevronRight,
@@ -19,9 +20,13 @@ const DASHBOARD_PAGE_CACHE_KEY = 'opc:page-cache:dashboard-home';
 
 interface DashboardStats {
   todayJobs: number;
-  jobsThisWeek: number;
+  liveJobs: number;
   overdueJobs: number;
   openReports: number;
+  newInquiries: number;
+  openTickets: number;
+  activeEmployees: number;
+  jobsThisWeek: number;
   unreadMessages: number;
   urgentItems: number;
 }
@@ -63,7 +68,41 @@ interface ReportItem {
   created_at?: string | null;
 }
 
-type DashboardTab = 'today' | 'week' | 'overdue' | 'reports';
+interface InquiryItem {
+  id?: string;
+  inquiry_id?: string;
+  status?: string | null;
+  source_channel?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+interface TicketItem {
+  id?: string;
+  ticket_id?: string;
+  status?: string | null;
+  priority?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+interface TimeLogItem {
+  id?: string;
+  employee_id?: string | null;
+  user_id?: string | null;
+  profile_id?: string | null;
+  status?: string | null;
+  start_time?: string | null;
+  started_at?: string | null;
+  clock_in?: string | null;
+  end_time?: string | null;
+  ended_at?: string | null;
+  clock_out?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+type DashboardTab = 'today' | 'live' | 'week' | 'overdue' | 'reports';
 
 interface DashboardPageCache {
   stats: DashboardStats;
@@ -71,6 +110,18 @@ interface DashboardPageCache {
   activeTab: DashboardTab;
 }
 
+const EMPTY_DASHBOARD_STATS: DashboardStats = {
+  todayJobs: 0,
+  liveJobs: 0,
+  overdueJobs: 0,
+  openReports: 0,
+  newInquiries: 0,
+  openTickets: 0,
+  activeEmployees: 0,
+  jobsThisWeek: 0,
+  unreadMessages: 0,
+  urgentItems: 0,
+};
 
 const BRAND = {
   bg: '#FFFFFF',
@@ -86,6 +137,9 @@ const BRAND = {
   amber: '#92400E',
   green: '#166534',
 };
+
+const pageFont =
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
 
 const CLOSED_JOB_STATUSES = new Set([
   'completed',
@@ -103,6 +157,11 @@ const OPEN_REPORT_STATUSES = new Set([
   'open',
   'in_review',
 ]);
+
+const LIVE_JOB_STATUSES = new Set(['on_site', 'onsite', 'in_progress', 'started', 'running']);
+const CLOSED_INQUIRY_STATUSES = new Set(['closed', 'converted', 'spam', 'archived', 'resolved', 'done', 'completed']);
+const CLOSED_TICKET_STATUSES = new Set(['closed', 'resolved', 'done', 'completed', 'cancelled', 'archived']);
+const CLOSED_TIME_LOG_STATUSES = new Set(['submitted', 'approved', 'cancelled', 'rejected', 'completed', 'closed']);
 
 const STALE_JOB_DAYS = 120;
 
@@ -132,12 +191,16 @@ const cardStyle: CSSProperties = {
 
 const sectionTitleStyle: CSSProperties = {
   margin: 0,
-  fontSize: '17px',
+  fontSize: '16px',
   lineHeight: 1.25,
-  fontWeight: 760,
-  letterSpacing: '-0.025em',
+  fontWeight: 820,
+  letterSpacing: '-0.02em',
   color: BRAND.text,
 };
+
+function navigateTo(href: string) {
+  window.location.href = href;
+}
 
 function normalizeStatus(status?: string | null) {
   return String(status || '').trim().toLowerCase();
@@ -161,6 +224,22 @@ function formatDate(dateString?: string | null) {
   return date.toLocaleDateString('de-CH', {
     day: '2-digit',
     month: 'short',
+  });
+}
+
+function formatDateTime(dateString?: string | null) {
+  if (!dateString) return '-';
+
+  const date = new Date(dateString);
+
+  if (Number.isNaN(date.getTime())) return '-';
+
+  return date.toLocaleString('de-CH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -214,6 +293,52 @@ function getJobClient(job: ServiceJob) {
   return job.billing_name || job.site_name || 'Ohne Kunde';
 }
 
+function getJobLocation(job: ServiceJob) {
+  if (job.site_name && job.billing_name && job.site_name !== job.billing_name) return job.site_name;
+  return job.site_name || '';
+}
+
+function getJobCardTitle(job: ServiceJob) {
+  const rawTitle = String(job.title || '').trim();
+  const service = String(job.service_category || '').trim();
+  const client = getJobClient(job);
+
+  if (rawTitle) return rawTitle;
+  if (!client || client === 'Ohne Kunde') return service || 'Einsatz';
+
+  return `${service || 'Einsatz'} · ${client}`;
+}
+
+function normalizeLine(value?: string | null) {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function uniqueJobDetails(job: ServiceJob) {
+  const titleKey = normalizeLine(getJobCardTitle(job));
+  const seen = new Set<string>([titleKey]);
+  const details: string[] = [];
+
+  const add = (value?: string | null) => {
+    const clean = String(value || '').trim();
+    const key = normalizeLine(clean);
+
+    if (!clean || !key || seen.has(key)) return;
+
+    seen.add(key);
+    details.push(clean);
+  };
+
+  add(getJobClient(job));
+  add(job.service_category);
+  add(getJobLocation(job));
+  add(formatDateTime(job.planned_start));
+
+  return details;
+}
+
 function isClosedJob(job: ServiceJob) {
   return CLOSED_JOB_STATUSES.has(normalizeStatus(job.status));
 }
@@ -250,6 +375,60 @@ function isStaleHistoricJob(job: ServiceJob, now = new Date()) {
   return !['on_site', 'onsite', 'in_progress', 'report_pending'].includes(status);
 }
 
+function isLiveJob(job: ServiceJob, now = new Date()) {
+  const status = normalizeStatus(job.status);
+
+  if (LIVE_JOB_STATUSES.has(status)) return true;
+  if (!job.planned_start || !job.planned_end) return false;
+
+  const start = new Date(job.planned_start).getTime();
+  const end = new Date(job.planned_end).getTime();
+  const current = now.getTime();
+
+  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+
+  return current >= start && current <= end && !isClosedJob(job);
+}
+
+function isNewInquiry(inquiry: InquiryItem) {
+  const status = normalizeStatus(inquiry.status);
+
+  if (!status) return true;
+
+  return !CLOSED_INQUIRY_STATUSES.has(status);
+}
+
+function isOpenTicket(ticket: TicketItem) {
+  const status = normalizeStatus(ticket.status);
+
+  if (!status) return true;
+
+  return !CLOSED_TICKET_STATUSES.has(status);
+}
+
+function isActiveTimeLog(log: TimeLogItem) {
+  const status = normalizeStatus(log.status);
+  const hasEnd = Boolean(log.end_time || log.ended_at || log.clock_out);
+
+  if (hasEnd) return false;
+  if (!status) return Boolean(log.start_time || log.started_at || log.clock_in);
+
+  return !CLOSED_TIME_LOG_STATUSES.has(status);
+}
+
+function countActiveEmployees(logs: TimeLogItem[]) {
+  const activeLogs = logs.filter(isActiveTimeLog);
+  const uniqueEmployees = new Set<string>();
+
+  activeLogs.forEach((log) => {
+    const employeeKey = log.employee_id || log.user_id || log.profile_id;
+
+    if (employeeKey) uniqueEmployees.add(employeeKey);
+  });
+
+  return uniqueEmployees.size || activeLogs.length;
+}
+
 async function readList<T>(table: string, select = '*', limit = 50): Promise<T[]> {
   const { data, error } = await supabase.from(table).select(select).limit(limit);
 
@@ -268,30 +447,29 @@ function StatusBadge({ status }: { status?: string | null }) {
   const isDone = ['completed', 'approved', 'report_approved', 'sent_to_client'].includes(normalized);
   const isActive = ['on_site', 'onsite', 'in_progress'].includes(normalized);
 
-  const style =
-    isDanger
-      ? { bg: '#FEF2F2', text: BRAND.red, border: '#FECACA' }
-      : isDone
-        ? { bg: '#F0FDF4', text: BRAND.green, border: '#BBF7D0' }
-        : isActive
-          ? { bg: '#F9FAFB', text: BRAND.black, border: BRAND.borderStrong }
-          : { bg: '#F9FAFB', text: BRAND.muted, border: BRAND.border };
+  const style = isDanger
+    ? { bg: '#FEF2F2', text: BRAND.red, border: '#FECACA' }
+    : isDone
+      ? { bg: '#F0FDF4', text: BRAND.green, border: '#BBF7D0' }
+      : isActive
+        ? { bg: '#F9FAFB', text: BRAND.black, border: BRAND.borderStrong }
+        : { bg: '#F9FAFB', text: BRAND.muted, border: BRAND.border };
 
   return (
     <span
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        height: '25px',
-        padding: '0 10px',
+        justifyContent: 'center',
+        minHeight: '29px',
+        padding: '0 15px',
         borderRadius: '999px',
         background: style.bg,
         border: `1px solid ${style.border}`,
         color: style.text,
-        fontSize: '11px',
-        fontWeight: 740,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
+        fontSize: '12px',
+        fontWeight: 780,
+        letterSpacing: '-0.01em',
         whiteSpace: 'nowrap',
       }}
     >
@@ -315,15 +493,15 @@ function TimeBadge({ value }: { value?: string | null }) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        height: '24px',
-        padding: '0 9px',
+        height: '26px',
+        padding: '0 10px',
         borderRadius: '999px',
         background: styles.bg,
         border: `1px solid ${styles.border}`,
         color: styles.color,
-        fontSize: '11px',
+        fontSize: '12px',
         fontWeight: 720,
-        letterSpacing: '0.01em',
+        letterSpacing: '-0.01em',
         whiteSpace: 'nowrap',
       }}
     >
@@ -337,75 +515,55 @@ function MetricCard({
   value,
   subline,
   icon,
+  href,
   tone = 'neutral',
 }: {
   label: string;
   value: number;
   subline: string;
   icon: ReactNode;
+  href: string;
   tone?: 'neutral' | 'danger' | 'dark';
 }) {
   const valueColor = tone === 'danger' ? BRAND.red : BRAND.text;
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => navigateTo(href)}
+      className="opc-dashboard-metric-card"
       style={{
         ...cardStyle,
-        padding: '18px',
         minHeight: '112px',
+        padding: '20px',
         display: 'flex',
-        flexDirection: 'column',
+        alignItems: 'center',
         justifyContent: 'space-between',
+        gap: '16px',
+        width: '100%',
+        textAlign: 'left',
+        fontFamily: pageFont,
+        cursor: 'pointer',
+      }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.borderColor = BRAND.borderStrong;
+        event.currentTarget.style.background = '#FAFAFA';
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.borderColor = BRAND.border;
+        event.currentTarget.style.background = '#FFFFFF';
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: '14px',
-          alignItems: 'flex-start',
-        }}
-      >
+      <div style={{ minWidth: 0 }}>
         <div
           style={{
-            color: BRAND.muted,
-            fontSize: '11px',
-            fontWeight: 760,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            lineHeight: 1.35,
-          }}
-        >
-          {label}
-        </div>
-
-        <div
-          style={{
-            width: '34px',
-            height: '34px',
-            borderRadius: '12px',
-            background: '#F9FAFB',
-            border: `1px solid ${BRAND.border}`,
-            color: BRAND.black,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          {icon}
-        </div>
-      </div>
-
-      <div>
-        <div
-          style={{
-            fontSize: '28px',
+            fontSize: '26px',
             lineHeight: 1,
             fontWeight: 820,
-            letterSpacing: '-0.045em',
+            letterSpacing: '-0.04em',
             color: valueColor,
-            marginBottom: '6px',
+            marginBottom: '12px',
+            whiteSpace: 'nowrap',
           }}
         >
           {value}
@@ -413,19 +571,50 @@ function MetricCard({
 
         <div
           style={{
+            fontSize: '13px',
+            fontWeight: 720,
+            color: BRAND.muted,
+            lineHeight: 1.25,
+          }}
+        >
+          {label}
+        </div>
+
+        <div
+          className="opc-dashboard-metric-subline"
+          style={{
+            marginTop: '4px',
             fontSize: '12px',
-            fontWeight: 600,
+            fontWeight: 620,
             color: BRAND.faint,
+            lineHeight: 1.25,
           }}
         >
           {subline}
         </div>
       </div>
-    </div>
+
+      <div
+        style={{
+          width: '38px',
+          height: '38px',
+          borderRadius: '13px',
+          border: `1px solid ${BRAND.border}`,
+          background: '#FAFAFA',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: BRAND.black,
+          flexShrink: 0,
+        }}
+      >
+        {icon}
+      </div>
+    </button>
   );
 }
 
-function ActionLink({
+function ActionButton({
   href,
   icon,
   label,
@@ -437,50 +626,54 @@ function ActionLink({
   dark?: boolean;
 }) {
   return (
-    <a
-      href={href}
+    <button
+      type="button"
+      onClick={() => navigateTo(href)}
       style={{
-        display: 'flex',
+        width: '100%',
+        height: '48px',
+        borderRadius: '14px',
+        border: dark ? `1px solid ${BRAND.black}` : `1px solid ${BRAND.border}`,
+        background: dark ? BRAND.black : '#FFFFFF',
+        color: dark ? '#FFFFFF' : BRAND.text,
+        display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '10px',
-        minHeight: '46px',
-        padding: '12px 14px',
-        borderRadius: '15px',
-        background: dark ? BRAND.black : '#FFFFFF',
-        border: dark ? `1px solid ${BRAND.black}` : `1px solid ${BRAND.border}`,
-        color: dark ? '#FFFFFF' : BRAND.text,
-        fontSize: '13px',
-        fontWeight: 720,
-        textDecoration: 'none',
+        gap: '9px',
+        fontSize: '14px',
+        fontWeight: 760,
+        fontFamily: pageFont,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
       }}
     >
       {icon}
       <span>{label}</span>
-    </a>
+    </button>
   );
 }
 
-function JobRow({ job }: { job: ServiceJob }) {
+function JobCard({ job }: { job: ServiceJob }) {
+  const details = uniqueJobDetails(job);
+
   return (
     <button
       type="button"
-      onClick={() => {
-        window.location.href = `${baseUrl}/einsatz/${job.job_id}`;
-      }}
+      onClick={() => navigateTo(`${baseUrl}/einsatz/${job.job_id}`)}
+      className="opc-dashboard-job-card"
       style={{
         width: '100%',
         border: `1px solid ${BRAND.border}`,
-        borderRadius: '15px',
+        borderRadius: '20px',
         background: '#FFFFFF',
-        padding: '15px 16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '14px',
+        padding: '20px 22px',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto',
+        gap: '18px',
         textAlign: 'left',
         cursor: 'pointer',
-        fontFamily: 'inherit',
+        fontFamily: pageFont,
+        boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
       }}
       onMouseEnter={(event) => {
         event.currentTarget.style.borderColor = BRAND.borderStrong;
@@ -491,41 +684,50 @@ function JobRow({ job }: { job: ServiceJob }) {
         event.currentTarget.style.background = '#FFFFFF';
       }}
     >
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ minWidth: 0 }}>
         <div
+          className="opc-dashboard-job-title"
           style={{
-            fontSize: '14px',
-            fontWeight: 760,
+            fontSize: '20px',
+            fontWeight: 820,
             color: BRAND.text,
-            letterSpacing: '-0.01em',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            marginBottom: '5px',
+            letterSpacing: '-0.04em',
+            lineHeight: 1.2,
+            marginBottom: '10px',
           }}
         >
-          {getJobName(job)}
+          {getJobCardTitle(job)}
         </div>
 
         <div
+          className="opc-dashboard-job-details"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            flexWrap: 'wrap',
             color: BRAND.muted,
-            fontSize: '12px',
-            fontWeight: 620,
+            fontSize: '16px',
+            fontWeight: 720,
+            lineHeight: 1.45,
+            display: 'grid',
+            gap: '5px',
           }}
         >
-          <span>{getJobClient(job)}</span>
-          <span>·</span>
-          <span>{formatDate(job.planned_start)}</span>
-          <TimeBadge value={job.planned_start} />
+          {details.map((detail) => (
+            <span key={detail}>{detail}</span>
+          ))}
         </div>
       </div>
 
-      <StatusBadge status={job.status} />
+      <div
+        className="opc-dashboard-job-badges"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '10px',
+        }}
+      >
+        <StatusBadge status={job.status} />
+        <TimeBadge value={job.planned_start} />
+      </div>
     </button>
   );
 }
@@ -541,17 +743,22 @@ function DashboardTabs({
 }) {
   const tabs: Array<{ key: DashboardTab; label: string }> = [
     { key: 'today', label: 'Heute' },
-    { key: 'week', label: 'Diese Woche' },
+    { key: 'live', label: 'Live' },
+    { key: 'week', label: 'Woche' },
     { key: 'overdue', label: 'Überfällig' },
-    { key: 'reports', label: 'Berichte offen' },
+    { key: 'reports', label: 'Berichte' },
   ];
 
   return (
     <div
+      className="opc-dashboard-tabs"
       style={{
         display: 'flex',
-        gap: '8px',
-        flexWrap: 'wrap',
+        gap: '12px',
+        alignItems: 'center',
+        marginBottom: '0',
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
       }}
     >
       {tabs.map((tab) => {
@@ -563,16 +770,22 @@ function DashboardTabs({
             type="button"
             onClick={() => onChange(tab.key)}
             style={{
-              height: '34px',
-              padding: '0 12px',
-              borderRadius: '999px',
-              border: `1px solid ${active ? BRAND.black : BRAND.border}`,
+              height: '48px',
+              minWidth: '128px',
+              padding: '0 18px',
+              borderRadius: '14px',
+              border: active ? `1px solid ${BRAND.black}` : `1px solid ${BRAND.border}`,
               background: active ? BRAND.black : '#FFFFFF',
-              color: active ? '#FFFFFF' : BRAND.muted,
-              fontSize: '12px',
-              fontWeight: 720,
+              color: active ? '#FFFFFF' : BRAND.text,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '14px',
+              fontWeight: 760,
+              fontFamily: pageFont,
               cursor: 'pointer',
-              fontFamily: 'inherit',
+              whiteSpace: 'nowrap',
+              boxShadow: active ? 'none' : '0 1px 2px rgba(15, 17, 21, 0.04)',
             }}
           >
             {tab.label} · {counts[tab.key] || 0}
@@ -604,9 +817,11 @@ function MiniStat({
           : BRAND.green;
 
   return (
-    <a
-      href={href}
+    <button
+      type="button"
+      onClick={() => navigateTo(href)}
       style={{
+        width: '100%',
         border: `1px solid ${BRAND.border}`,
         borderRadius: '15px',
         background: '#FFFFFF',
@@ -615,7 +830,8 @@ function MiniStat({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '14px',
-        textDecoration: 'none',
+        fontFamily: pageFont,
+        cursor: 'pointer',
       }}
     >
       <span
@@ -638,7 +854,7 @@ function MiniStat({
       >
         {value}
       </span>
-    </a>
+    </button>
   );
 }
 
@@ -648,14 +864,14 @@ function EmptyState({ text }: { text: string }) {
       style={{
         minHeight: '92px',
         border: `1px dashed ${BRAND.borderStrong}`,
-        borderRadius: '15px',
+        borderRadius: '20px',
         background: '#FAFAFA',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         color: BRAND.muted,
         fontSize: '13px',
-        fontWeight: 620,
+        fontWeight: 650,
         textAlign: 'center',
         padding: '18px',
       }}
@@ -667,14 +883,7 @@ function EmptyState({ text }: { text: string }) {
 }
 
 export default function OwnerDashboardHome() {
-  const [stats, setStats] = useState<DashboardStats>({
-    todayJobs: 0,
-    jobsThisWeek: 0,
-    overdueJobs: 0,
-    openReports: 0,
-    unreadMessages: 0,
-    urgentItems: 0,
-  });
+  const [stats, setStats] = useState<DashboardStats>(EMPTY_DASHBOARD_STATS);
 
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [activeTab, setActiveTab] = useState<DashboardTab>('today');
@@ -684,7 +893,7 @@ export default function OwnerDashboardHome() {
     const cached = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
 
     if (cached) {
-      setStats(cached.stats);
+      setStats({ ...EMPTY_DASHBOARD_STATS, ...cached.stats });
       setJobs(cached.jobs);
       setActiveTab(cached.activeTab);
       setLoading(false);
@@ -701,10 +910,13 @@ export default function OwnerDashboardHome() {
     if (!isBackground) setLoading(true);
 
     try {
-      const [jobsData, inboxData, reportsData] = await Promise.all([
+      const [jobsData, inboxData, reportsData, inquiriesData, ticketsData, timeLogsData] = await Promise.all([
         readList<ServiceJob>('opc_my_portal_job_feed', '*', 150),
         readList<InboxMessage>('opc_my_conversation_inbox', '*', 30),
         readList<ReportItem>('opc_portal_report_feed', '*', 100),
+        readList<InquiryItem>('opc_inquiries', '*', 100),
+        readList<TicketItem>('opc_tickets', '*', 100),
+        readList<TimeLogItem>('opc_job_time_logs', '*', 100),
       ]);
 
       const now = new Date();
@@ -732,17 +944,24 @@ export default function OwnerDashboardHome() {
         return new Date(job.planned_start) < todayStart;
       });
 
+      const liveJobs = operationalJobs.filter((job) => isLiveJob(job, now));
       const openReports = reportsData.filter(isOpenReport);
-
+      const newInquiries = inquiriesData.filter(isNewInquiry);
+      const openTickets = ticketsData.filter(isOpenTicket);
+      const activeEmployees = countActiveEmployees(timeLogsData);
       const unreadMessages = inboxData.filter((message) => Boolean(message.unread)).length;
 
       const nextStats: DashboardStats = {
         todayJobs: todayJobs.length,
-        jobsThisWeek: weekJobs.length,
+        liveJobs: liveJobs.length,
         overdueJobs: overdueJobs.length,
         openReports: openReports.length,
+        newInquiries: newInquiries.length,
+        openTickets: openTickets.length,
+        activeEmployees,
+        jobsThisWeek: weekJobs.length,
         unreadMessages,
-        urgentItems: overdueJobs.length + openReports.length + unreadMessages,
+        urgentItems: overdueJobs.length + openReports.length + newInquiries.length + openTickets.length + unreadMessages,
       };
 
       setStats(nextStats);
@@ -755,8 +974,7 @@ export default function OwnerDashboardHome() {
 
       setJobs(sortedVisibleJobs);
 
-      const nextActiveTab: DashboardTab =
-        todayJobs.length === 0 && overdueJobs.length > 0 ? 'overdue' : 'today';
+      const nextActiveTab: DashboardTab = todayJobs.length === 0 && overdueJobs.length > 0 ? 'overdue' : 'today';
 
       setActiveTab(nextActiveTab);
 
@@ -784,6 +1002,19 @@ export default function OwnerDashboardHome() {
         const planned = new Date(job.planned_start);
         return planned >= todayStart && planned <= todayEnd;
       })
+      .sort((a, b) => {
+        const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
+        const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
+        return aTime - bTime;
+      });
+  }, [jobs]);
+
+  const liveJobs = useMemo(() => {
+    const now = new Date();
+
+    return jobs
+      .filter((job) => !isClosedJob(job))
+      .filter((job) => isLiveJob(job, now))
       .sort((a, b) => {
         const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
         const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
@@ -838,13 +1069,15 @@ export default function OwnerDashboardHome() {
 
   const tabJobs = useMemo(() => {
     if (activeTab === 'today') return todayJobs;
+    if (activeTab === 'live') return liveJobs;
     if (activeTab === 'week') return weekJobs;
     if (activeTab === 'overdue') return overdueJobs;
     return reportJobs;
-  }, [activeTab, todayJobs, weekJobs, overdueJobs, reportJobs]);
+  }, [activeTab, todayJobs, liveJobs, weekJobs, overdueJobs, reportJobs]);
 
   const tabCounts: Record<DashboardTab, number> = {
     today: todayJobs.length,
+    live: liveJobs.length,
     week: weekJobs.length,
     overdue: overdueJobs.length,
     reports: reportJobs.length,
@@ -852,6 +1085,7 @@ export default function OwnerDashboardHome() {
 
   const tabEmptyText: Record<DashboardTab, string> = {
     today: 'Heute sind keine Einsätze geplant.',
+    live: 'Aktuell läuft kein Einsatz.',
     week: 'In den nächsten 7 Tagen sind keine Einsätze geplant.',
     overdue: 'Keine operativ relevanten überfälligen Einsätze.',
     reports: 'Keine offenen Berichte in der Einsatzliste.',
@@ -868,6 +1102,7 @@ export default function OwnerDashboardHome() {
           color: BRAND.muted,
           fontSize: '14px',
           fontWeight: 650,
+          fontFamily: pageFont,
         }}
       >
         Dashboard wird geladen...
@@ -878,8 +1113,9 @@ export default function OwnerDashboardHome() {
   return (
     <div className="opc-dashboard-page">
       <div className="opc-mobile-dashboard-action-wrap">
-        <a
-          href={`${baseUrl}/einsatz-planen`}
+        <button
+          type="button"
+          onClick={() => navigateTo(`${baseUrl}/einsatz-planen`)}
           className="opc-mobile-dashboard-action"
           style={{
             display: 'none',
@@ -891,16 +1127,18 @@ export default function OwnerDashboardHome() {
             padding: '0 16px',
             borderRadius: '14px',
             background: BRAND.black,
+            border: `1px solid ${BRAND.black}`,
             color: '#FFFFFF',
-            textDecoration: 'none',
             fontSize: '14px',
             fontWeight: 760,
+            fontFamily: pageFont,
             whiteSpace: 'nowrap',
+            cursor: 'pointer',
           }}
         >
           <Plus size={17} />
           Einsatz planen
-        </a>
+        </button>
       </div>
 
       <div
@@ -912,7 +1150,7 @@ export default function OwnerDashboardHome() {
         }}
         className="opc-dashboard-grid"
       >
-        <main style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <main style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
           <div
             style={{
               display: 'grid',
@@ -926,13 +1164,16 @@ export default function OwnerDashboardHome() {
               value={stats.todayJobs}
               subline="Geplante Einsätze"
               icon={<CalendarDays size={17} />}
+              href={`${baseUrl}/einsaetze?filter=today`}
             />
 
             <MetricCard
-              label="Diese Woche"
-              value={stats.jobsThisWeek}
-              subline="Nächste 7 Tage"
-              icon={<Clock3 size={17} />}
+              label="Live Einsätze"
+              value={stats.liveJobs}
+              subline="Aktuell laufend"
+              icon={<Activity size={17} />}
+              href={`${baseUrl}/einsaetze?filter=live`}
+              tone={stats.liveJobs > 0 ? 'dark' : 'neutral'}
             />
 
             <MetricCard
@@ -940,86 +1181,118 @@ export default function OwnerDashboardHome() {
               value={stats.overdueJobs}
               subline="Operativ relevant"
               icon={<AlertTriangle size={17} />}
+              href={`${baseUrl}/einsaetze?filter=overdue`}
               tone={stats.overdueJobs > 0 ? 'danger' : 'neutral'}
             />
 
             <MetricCard
-              label="Berichte offen"
+              label="Berichte"
               value={stats.openReports}
               subline="Zur Prüfung"
               icon={<FileText size={17} />}
+              href={`${baseUrl}/berichte-dateien?filter=open`}
+            />
+
+            <MetricCard
+              label="Neue Anfragen"
+              value={stats.newInquiries}
+              subline="Website, Portal, WhatsApp"
+              icon={<MessageSquare size={17} />}
+              href={`${baseUrl}/anfragen?filter=new`}
+              tone={stats.newInquiries > 0 ? 'dark' : 'neutral'}
+            />
+
+            <MetricCard
+              label="Tickets & Schäden"
+              value={stats.openTickets}
+              subline="Offene Meldungen"
+              icon={<AlertTriangle size={17} />}
+              href={`${baseUrl}/anfragen-schaeden?filter=open`}
+              tone={stats.openTickets > 0 ? 'danger' : 'neutral'}
+            />
+
+            <MetricCard
+              label="Mitarbeiter aktiv"
+              value={stats.activeEmployees}
+              subline="Eingestempelt"
+              icon={<Users size={17} />}
+              href={`${baseUrl}/zeiterfassung?filter=active`}
+              tone={stats.activeEmployees > 0 ? 'dark' : 'neutral'}
+            />
+
+            <MetricCard
+              label="Diese Woche"
+              value={stats.jobsThisWeek}
+              subline="Nächste 7 Tage"
+              icon={<Clock3 size={17} />}
+              href={`${baseUrl}/einsaetze?filter=week`}
             />
           </div>
 
-          <section style={{ ...cardStyle, padding: '20px' }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: '16px',
-                marginBottom: '16px',
-              }}
-              className="opc-section-header"
-            >
-              <div>
-                <h2 style={sectionTitleStyle}>Einsätze</h2>
-                <p
-                  style={{
-                    margin: '6px 0 0',
-                    color: BRAND.muted,
-                    fontSize: '13px',
-                    fontWeight: 580,
-                    lineHeight: 1.45,
-                  }}
-                >
-                  Heute, kommende Einsätze, überfällige Punkte und offene Berichte.
-                </p>
-              </div>
-
-              <a
-                href={`${baseUrl}/einsaetze`}
+          <div className="opc-dashboard-list-heading">
+            <div style={{ minWidth: 0 }}>
+              <h2 style={sectionTitleStyle}>Einsätze</h2>
+              <p
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
+                  margin: '6px 0 0',
                   color: BRAND.muted,
-                  textDecoration: 'none',
                   fontSize: '13px',
-                  fontWeight: 720,
-                  whiteSpace: 'nowrap',
+                  fontWeight: 600,
+                  lineHeight: 1.45,
                 }}
               >
-                Alle anzeigen
-                <ChevronRight size={15} />
-              </a>
+                Heute, live laufende Einsätze, kommende Termine und offene Berichte.
+              </p>
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <DashboardTabs activeTab={activeTab} onChange={setActiveTab} counts={tabCounts} />
-            </div>
+            <button
+              type="button"
+              onClick={() => navigateTo(`${baseUrl}/einsaetze`)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                minHeight: '36px',
+                padding: '0 14px',
+                borderRadius: '999px',
+                background: '#FFFFFF',
+                border: `1px solid ${BRAND.border}`,
+                color: BRAND.muted,
+                fontSize: '13px',
+                fontWeight: 740,
+                fontFamily: pageFont,
+                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+              }}
+            >
+              Alle anzeigen
+              <ChevronRight size={15} />
+            </button>
+          </div>
 
-            {tabJobs.length === 0 ? (
-              <EmptyState text={tabEmptyText[activeTab]} />
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {tabJobs.slice(0, 8).map((job) => (
-                  <JobRow key={job.job_id} job={job} />
-                ))}
-              </div>
-            )}
-          </section>
+          <DashboardTabs activeTab={activeTab} onChange={setActiveTab} counts={tabCounts} />
+
+          {tabJobs.length === 0 ? (
+            <EmptyState text={tabEmptyText[activeTab]} />
+          ) : (
+            <div className="opc-dashboard-job-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {tabJobs.slice(0, 8).map((job) => (
+                <JobCard key={job.job_id} job={job} />
+              ))}
+            </div>
+          )}
         </main>
 
-        <aside style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
           <section style={{ ...cardStyle, padding: '20px' }}>
             <h2 style={{ ...sectionTitleStyle, marginBottom: '16px' }}>Schnellaktionen</h2>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '10px' }}>
-              <ActionLink href={`${baseUrl}/einsatz-planen`} icon={<Plus size={17} />} label="Einsatz planen" dark />
-              <ActionLink href={`${baseUrl}/kunde-anlegen`} icon={<Users size={17} />} label="Kunde anlegen" />
-              <ActionLink href={`${baseUrl}/berichte-dateien`} icon={<Upload size={17} />} label="Bericht prüfen" />
-              <ActionLink href={`${baseUrl}/anfragen-schaeden`} icon={<MessageSquare size={17} />} label="Anfrage / Schaden" />
+              <ActionButton href={`${baseUrl}/einsatz-planen`} icon={<Plus size={17} />} label="Einsatz planen" dark />
+              <ActionButton href={`${baseUrl}/kunde-anlegen`} icon={<Users size={17} />} label="Kunde anlegen" />
+              <ActionButton href={`${baseUrl}/berichte-dateien`} icon={<Upload size={17} />} label="Bericht prüfen" />
+              <ActionButton href={`${baseUrl}/anfragen-schaeden`} icon={<MessageSquare size={17} />} label="Anfrage / Schaden" />
             </div>
           </section>
 
@@ -1043,6 +1316,7 @@ export default function OwnerDashboardHome() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                 }}
               >
                 <AlertTriangle size={17} />
@@ -1093,6 +1367,11 @@ export default function OwnerDashboardHome() {
         .opc-dashboard-page {
           padding: 0 0 140px;
           color: ${BRAND.text};
+          font-family: ${pageFont};
+        }
+
+        .opc-dashboard-page * {
+          box-sizing: border-box;
         }
 
         .opc-mobile-dashboard-action-wrap {
@@ -1102,6 +1381,26 @@ export default function OwnerDashboardHome() {
 
         .opc-mobile-dashboard-action {
           display: none !important;
+        }
+
+        .opc-dashboard-list-heading {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 16px;
+        }
+
+        .opc-dashboard-tabs::-webkit-scrollbar {
+          display: none;
+        }
+
+        .opc-dashboard-tabs {
+          scrollbar-width: none;
+        }
+
+        .opc-dashboard-metric-card:focus-visible {
+          outline: 2px solid ${BRAND.black};
+          outline-offset: 2px;
         }
 
         @media (max-width: 1180px) {
@@ -1123,20 +1422,80 @@ export default function OwnerDashboardHome() {
             display: inline-flex !important;
           }
 
-          .opc-section-header {
-            flex-direction: column !important;
+          .opc-dashboard-list-heading {
             align-items: flex-start !important;
+            flex-direction: column !important;
+            gap: 10px !important;
           }
 
-          .opc-section-header a {
+          .opc-dashboard-list-heading button {
             width: 100% !important;
             justify-content: space-between !important;
+            min-height: 42px !important;
+          }
+
+          .opc-dashboard-tabs {
+            gap: 8px !important;
+          }
+
+          .opc-dashboard-tabs button {
+            height: 42px !important;
+            min-width: 0 !important;
+            flex: 1 1 0 !important;
+            padding: 0 10px !important;
+            font-size: 13px !important;
           }
         }
 
         @media (max-width: 560px) {
+          .opc-dashboard-page {
+            padding-bottom: 120px !important;
+          }
+
           .opc-metric-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px !important;
+          }
+
+          .opc-metric-grid > * {
+            min-width: 0 !important;
+          }
+
+          .opc-dashboard-metric-card {
+            min-height: 96px !important;
+            padding: 14px !important;
+          }
+
+          .opc-dashboard-metric-card > div:first-child > div:first-child {
+            font-size: 22px !important;
+          }
+
+          .opc-dashboard-metric-subline {
+            display: none !important;
+          }
+
+          .opc-dashboard-job-card {
             grid-template-columns: 1fr !important;
+            gap: 12px !important;
+            padding: 18px !important;
+          }
+
+          .opc-dashboard-job-title {
+            font-size: 16px !important;
+            letter-spacing: -0.025em !important;
+            margin-bottom: 8px !important;
+          }
+
+          .opc-dashboard-job-details {
+            font-size: 13px !important;
+            font-weight: 650 !important;
+            gap: 4px !important;
+          }
+
+          .opc-dashboard-job-badges {
+            flex-direction: row !important;
+            align-items: center !important;
+            justify-content: space-between !important;
           }
         }
       `}</style>

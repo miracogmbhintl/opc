@@ -363,6 +363,17 @@ export const opcResponsiveStyle = `
     }
   }
 
+  @media (max-width: 860px) {
+    .opc-requests-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px !important;
+    }
+
+    .opc-requests-metrics > * {
+      min-width: 0 !important;
+    }
+  }
+
   @media (max-width: 640px) {
     .opc-requests-metrics {
       grid-template-columns: 1fr !important;

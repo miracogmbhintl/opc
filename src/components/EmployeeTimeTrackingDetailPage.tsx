@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import {
@@ -12,21 +12,56 @@ import {
   MessageCircle,
   Phone,
   RefreshCw,
+  StickyNote,
 } from 'lucide-react';
-import {
-  OPCPageShell,
-  OPCMetricsGrid,
-  OPCMetricCard,
-  OPCListCard,
-  OPC_BRAND,
-  OPC_PAGE_FONT,
-  opcResponsiveStyle,
-  opcSelectStyle,
-  opcInputStyle,
-  opcSecondaryButtonStyle,
-} from './opc/OPCPageTop';
+const BRAND = {
+  text: '#111827',
+  muted: '#6B7280',
+  faint: '#9CA3AF',
+  border: '#E5E7EB',
+  borderStrong: '#D1D5DB',
+  black: '#0F1115',
+  card: '#FFFFFF',
+  soft: '#FAFAFA',
+  green: '#166534',
+  red: '#B91C1C',
+  blue: '#155E75',
+};
 
-type StatusFilter = 'all' | 'open' | 'on_break' | 'submitted' | 'approved' | 'rejected';
+const OPC_BRAND = BRAND;
+
+const pageFont =
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+
+const OPC_PAGE_FONT = pageFont;
+
+const cardStyle: CSSProperties = {
+  background: BRAND.card,
+  border: `1px solid ${BRAND.border}`,
+  borderRadius: '20px',
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+};
+
+const opcSecondaryButtonStyle: CSSProperties = {
+  height: '42px',
+  padding: '0 14px',
+  borderRadius: '13px',
+  border: `1px solid ${BRAND.border}`,
+  background: '#FFFFFF',
+  color: BRAND.text,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '8px',
+  fontSize: '13px',
+  fontWeight: 760,
+  fontFamily: pageFont,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  textDecoration: 'none',
+};
+
+const opcResponsiveStyle = '';
 
 type ViewerAccess = {
   userId: string;
@@ -286,32 +321,34 @@ function getContactHref(type: 'phone' | 'email' | 'whatsapp', person: StaffRole 
 function StatusBadge({ status }: { status: string }) {
   const clean = normalize(status);
 
-  const style: CSSProperties =
+  const style =
     clean === 'approved'
-      ? { background: '#DCFCE7', color: OPC_BRAND.green }
+      ? { background: '#F0FDF4', color: '#166534', border: '#BBF7D0' }
       : clean === 'rejected'
-        ? { background: '#FEF2F2', color: OPC_BRAND.red }
+        ? { background: '#FEF2F2', color: '#B91C1C', border: '#FECACA' }
         : clean === 'submitted'
-          ? { background: '#FFFBEB', color: '#92400E' }
+          ? { background: '#FFFBEB', color: '#92400E', border: '#FDE68A' }
           : clean === 'on_break'
-            ? { background: '#ECFEFF', color: OPC_BRAND.blue }
+            ? { background: '#ECFEFF', color: '#155E75', border: '#A5F3FC' }
             : clean === 'open'
-              ? { background: '#F0FDF4', color: OPC_BRAND.green }
-              : { background: '#F8FAFC', color: OPC_BRAND.muted };
+              ? { background: '#F0FDF4', color: '#166534', border: '#BBF7D0' }
+              : { background: '#F9FAFB', color: OPC_BRAND.muted, border: OPC_BRAND.border };
 
   return (
     <span
       style={{
-        minHeight: '30px',
+        minHeight: '28px',
         padding: '0 12px',
         borderRadius: '999px',
+        border: `1px solid ${style.border}`,
+        background: style.background,
+        color: style.color,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: '12px',
         fontWeight: 760,
         whiteSpace: 'nowrap',
-        ...style,
       }}
     >
       {statusLabel(status)}
@@ -334,28 +371,41 @@ function ContactButtons({ person }: { person: StaffRole | TeamPresence | null })
   const whatsappHref = getContactHref('whatsapp', person);
 
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+    <>
       {phoneHref && (
         <a href={phoneHref} style={contactButtonStyle}>
-          <Phone size={15} />
+          <Phone size={16} />
           Anrufen
         </a>
       )}
 
       {emailHref && (
         <a href={emailHref} style={contactButtonStyle}>
-          <Mail size={15} />
+          <Mail size={16} />
           E-Mail
         </a>
       )}
 
       {whatsappHref && (
         <a href={whatsappHref} target="_blank" rel="noreferrer" style={contactButtonStyle}>
-          <MessageCircle size={15} />
+          <MessageCircle size={16} />
           WhatsApp
         </a>
       )}
-    </div>
+    </>
+  );
+}
+
+function DetailMetricCard({ value, label, icon }: { value: string | number; label: string; icon: ReactNode }) {
+  return (
+    <article className="opc-detail-metric-card" style={detailMetricCardStyle}>
+      <div style={{ minWidth: 0 }}>
+        <div className="opc-detail-metric-value" style={detailMetricValueStyle}>{value}</div>
+        <div className="opc-detail-metric-label" style={detailMetricLabelStyle}>{label}</div>
+      </div>
+
+      <div className="opc-detail-metric-icon" style={detailMetricIconStyle}>{icon}</div>
+    </article>
   );
 }
 
@@ -378,13 +428,13 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
   const [presence, setPresence] = useState<TeamPresence | null>(null);
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [month, setMonth] = useState(currentMonthValue());
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [reviewNote, setReviewNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [tick, setTick] = useState(0);
+  const notesSectionRef = useRef<HTMLElement | null>(null);
 
   const canManage = viewerAccess?.canManage === true;
 
@@ -412,10 +462,13 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
     ) || null;
   }, [entries]);
 
-  const filteredEntries = useMemo(() => {
-    if (statusFilter === 'all') return entries;
-    return entries.filter((entry) => normalize(entry.status) === statusFilter);
-  }, [entries, statusFilter]);
+  const noteEntries = useMemo(() => {
+    return entries.filter(
+      (entry) =>
+        Boolean(entry.employee_note && entry.employee_note.trim()) ||
+        Boolean(entry.dispatch_note && entry.dispatch_note.trim())
+    );
+  }, [entries]);
 
   const metrics = useMemo(() => {
     const today = todayString();
@@ -630,6 +683,11 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
     }
   }
 
+
+  function scrollToNotes() {
+    notesSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   if (loading) {
     return (
       <div style={loadingStyle}>
@@ -642,7 +700,7 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
 
   if (errorMessage && !targetStaffRole) {
     return (
-      <OPCPageShell>
+      <div className="opc-time-page" style={{ padding: 0, fontFamily: pageFont, color: BRAND.text }}>
         <button type="button" onClick={() => window.history.back()} style={backButtonStyle}>
           <ArrowLeft size={17} />
           Zurück
@@ -652,7 +710,7 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
           <AlertTriangle size={18} />
           {errorMessage}
         </div>
-      </OPCPageShell>
+      </div>
     );
   }
 
@@ -661,17 +719,26 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
   const status = presence?.time_status || 'not_clocked_in';
 
   return (
-    <OPCPageShell>
-      <div style={topBarStyle}>
+    <div className="opc-time-page" style={{ padding: 0, fontFamily: pageFont, color: BRAND.text }}>
+      <div className="opc-detail-topbar" style={topBarStyle}>
         <button type="button" onClick={() => window.history.back()} style={backButtonStyle}>
           <ArrowLeft size={17} />
           Zurück
         </button>
 
-        <button type="button" onClick={() => void loadAll()} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
-          <RefreshCw size={17} />
-          Aktualisieren
-        </button>
+        <div className="opc-detail-topbar-actions" style={topBarActionsStyle}>
+          {(canManage || noteEntries.length > 0) && (
+            <button type="button" onClick={scrollToNotes} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <StickyNote size={17} />
+              Notiz
+            </button>
+          )}
+
+          <button type="button" onClick={() => void loadAll()} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+            <RefreshCw size={17} />
+            Aktualisieren
+          </button>
+        </div>
       </div>
 
       {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
@@ -694,184 +761,153 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
         </div>
       </section>
 
-      <OPCMetricsGrid>
-        <OPCMetricCard value={formatMinutes(metrics.todayTotal)} label="Heute" icon={<Clock3 size={18} />} />
-        <OPCMetricCard value={formatMinutes(metrics.weekTotal)} label="Diese Woche" icon={<CalendarClock size={18} />} />
-        <OPCMetricCard value={formatMinutes(metrics.monthTotal)} label="Dieser Monat" icon={<CalendarClock size={18} />} />
-        <OPCMetricCard value={metrics.submitted} label="Offen zur Freigabe" icon={<CheckCircle2 size={18} />} />
-      </OPCMetricsGrid>
+      <div className="opc-detail-metric-grid" style={detailMetricGridStyle}>
+        <DetailMetricCard value={formatMinutes(metrics.todayTotal)} label="Heute" icon={<Clock3 size={18} />} />
+        <DetailMetricCard value={formatMinutes(metrics.weekTotal)} label="Diese Woche" icon={<CalendarClock size={18} />} />
+        <DetailMetricCard value={formatMinutes(metrics.monthTotal)} label="Dieser Monat" icon={<CalendarClock size={18} />} />
+        <DetailMetricCard value={metrics.submitted} label="Offen zur Freigabe" icon={<CheckCircle2 size={18} />} />
+      </div>
 
-      {canManage && (
-        <section style={actionCardStyle}>
-          <div style={sectionHeaderStyle}>Bearbeitung</div>
-
-          <div style={editGridStyle}>
-            <label style={labelStyle}>
-              Monat
-              <input
-                type="month"
-                value={month}
-                onChange={(event) => setMonth(event.target.value)}
-                style={opcInputStyle}
-              />
-            </label>
-
-            <label style={labelStyle}>
-              Status
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                style={opcSelectStyle}
-              >
-                <option value="all">Alle Status</option>
-                <option value="open">Aktiv</option>
-                <option value="on_break">Pause</option>
-                <option value="submitted">Eingereicht</option>
-                <option value="approved">Genehmigt</option>
-                <option value="rejected">Abgelehnt</option>
-              </select>
-            </label>
-
-            <label style={labelStyle}>
-              Freigabe-Notiz
-              <input
-                value={reviewNote}
-                onChange={(event) => setReviewNote(event.target.value)}
-                placeholder="Optional. Beispiel: Zeiten geprüft."
-                style={opcInputStyle}
-              />
-            </label>
-          </div>
-        </section>
-      )}
-
-      <div style={detailGridStyle}>
-        <OPCListCard>
+      <div className="opc-detail-two-grid" style={detailGridStyle}>
+        <section className="opc-info-card" style={infoCardStyle}>
           <div style={sectionHeaderStyle}>Kontakt & Rolle</div>
 
-          <div style={infoGridStyle}>
+          <div className="opc-info-card-body" style={infoGridStyle}>
             <InfoBlock label="Name" value={targetStaffRole.display_name || '—'} />
             <InfoBlock label="Rolle" value={targetStaffRole.role || 'employee'} />
             <InfoBlock label="Telefon" value={targetStaffRole.phone_raw || targetStaffRole.phone_e164 || '—'} />
             <InfoBlock label="E-Mail" value={targetStaffRole.email || '—'} />
           </div>
+        </section>
 
-          <div style={{ padding: '0 20px 20px' }}>
-            <ContactButtons person={targetStaffRole} />
-          </div>
-        </OPCListCard>
-
-        <OPCListCard>
+        <section className="opc-info-card" style={infoCardStyle}>
           <div style={sectionHeaderStyle}>Live-Status</div>
 
-          <div style={infoGridStyle}>
+          <div className="opc-info-card-body" style={infoGridStyle}>
             <InfoBlock label="Status" value={statusLabel(status)} />
             <InfoBlock label="Start heute" value={formatTime(presence?.clock_in_at)} />
             <InfoBlock label="Letzte Aktivität" value={formatDateTime(presence?.last_activity_at)} />
             <InfoBlock label="Heute total" value={formatMinutes(presence?.total_minutes || metrics.todayTotal)} />
           </div>
-        </OPCListCard>
+        </section>
+      </div>
+
+      <div className="opc-contact-actions" style={contactActionsWrapStyle}>
+        <ContactButtons person={targetStaffRole} />
       </div>
 
       <section style={{ marginTop: 22 }}>
-        <OPCListCard>
-          <div style={sectionHeaderStyle}>Zeiteinträge</div>
+        {entries.length === 0 ? (
+          <div style={emptyStandaloneStyle}>
+            <Clock3 size={24} />
+            Keine Einträge vorhanden.
+          </div>
+        ) : (
+          <div style={entryCardsWrapStyle}>
+            {entries.map((entry) => {
+              const total = entry.id === activeEntry?.id ? liveMinutesFromEntry(entry) : Number(entry.total_minutes || 0);
+              const isSubmitted = normalize(entry.status) === 'submitted';
 
-          {filteredEntries.length === 0 ? (
-            <div style={emptyStyle}>
-              <Clock3 size={24} />
-              Keine Einträge vorhanden.
-            </div>
-          ) : (
-            <>
-              <div className="opc-requests-desktop-table">
-                {filteredEntries.map((entry, index) => {
-                  const total = entry.id === activeEntry?.id ? liveMinutesFromEntry(entry) : Number(entry.total_minutes || 0);
-                  const isSubmitted = normalize(entry.status) === 'submitted';
-
-                  return (
-                    <div
-                      key={entry.id}
-                      style={{
-                        ...entryRowStyle,
-                        borderBottom: index < filteredEntries.length - 1 ? '1px solid #F3F4F6' : 'none',
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={rowTitleStyle}>{formatDate(entry.work_date)}</div>
-                        <div style={rowSubStyle}>Pause {formatMinutes(entry.break_minutes || 0)}</div>
-                      </div>
-
-                      <div style={dateStyle}>{formatTime(entry.clock_in_at)}</div>
-                      <div style={dateStyle}>{formatTime(entry.clock_out_at)}</div>
-                      <div style={dateStyle}>{formatMinutes(total)}</div>
-
-                      <div>
-                        <StatusBadge status={entry.status} />
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
-                        {canManage && isSubmitted ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => approveEntry(entry.id)}
-                              disabled={saving === `approve-${entry.id}`}
-                              style={smallApproveButtonStyle}
-                            >
-                              Genehmigen
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => rejectEntry(entry.id)}
-                              disabled={saving === `reject-${entry.id}`}
-                              style={smallRejectButtonStyle}
-                            >
-                              Ablehnen
-                            </button>
-                          </>
-                        ) : (
-                          <span style={badgeStyle}>Keine Aktion</span>
-                        )}
+              return (
+                <article key={entry.id} className="opc-entry-card" style={entryCardStyle}>
+                  <div style={entryCardHeaderStyle}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={rowTitleStyle}>{formatDate(entry.work_date)}</div>
+                      <div style={rowSubStyle}>
+                        {formatTime(entry.clock_in_at)} – {formatTime(entry.clock_out_at)}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
 
-              <div className="opc-requests-mobile-cards">
-                {filteredEntries.map((entry) => {
-                  const total = entry.id === activeEntry?.id ? liveMinutesFromEntry(entry) : Number(entry.total_minutes || 0);
+                    <StatusBadge status={entry.status} />
+                  </div>
 
-                  return (
-                    <div key={entry.id} style={mobileCardStyle}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
-                        <div>
-                          <div style={rowTitleStyle}>{formatDate(entry.work_date)}</div>
-                          <div style={rowSubStyle}>
-                            {formatTime(entry.clock_in_at)} – {formatTime(entry.clock_out_at)}
-                          </div>
-                        </div>
-                        <StatusBadge status={entry.status} />
-                      </div>
+                  <div className="opc-entry-card-grid" style={entryStatsGridStyle}>
+                    <InfoBlock label="Total" value={formatMinutes(total)} />
+                    <InfoBlock label="Pause" value={formatMinutes(entry.break_minutes || 0)} />
+                    <InfoBlock label="Start" value={formatTime(entry.clock_in_at)} />
+                    <InfoBlock label="Ende" value={formatTime(entry.clock_out_at)} />
+                  </div>
 
-                      <div style={{ display: 'grid', gap: 7, color: OPC_BRAND.muted, fontSize: 13 }}>
-                        <span>Total: {formatMinutes(total)}</span>
-                        <span>Pause: {formatMinutes(entry.break_minutes || 0)}</span>
-                        <span>{entry.employee_note || 'Keine Notiz'}</span>
-                      </div>
+                  {canManage && isSubmitted && (
+                    <div style={entryActionsStyle}>
+                      <button
+                        type="button"
+                        onClick={() => approveEntry(entry.id)}
+                        disabled={saving === `approve-${entry.id}`}
+                        style={smallApproveButtonStyle}
+                      >
+                        Genehmigen
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => rejectEntry(entry.id)}
+                        disabled={saving === `reject-${entry.id}`}
+                        style={smallRejectButtonStyle}
+                      >
+                        Ablehnen
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </OPCListCard>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
+      {(canManage || noteEntries.length > 0) && (
+        <section ref={notesSectionRef} id="zeit-notizen" style={notesSectionStyle}>
+          {canManage && (
+            <article style={noteCardStyle}>
+              <div style={noteCardTitleStyle}>Freigabe-Notiz</div>
+              <textarea
+                value={reviewNote}
+                onChange={(event) => setReviewNote(event.target.value)}
+                placeholder="Optional. Beispiel: Zeiten geprüft. Diese Notiz wird beim Genehmigen oder Ablehnen gespeichert."
+                style={noteTextareaStyle}
+                rows={4}
+              />
+            </article>
+          )}
+
+          {noteEntries.length > 0 && (
+            <div style={noteCardsWrapStyle}>
+              {noteEntries.map((entry) => (
+                <article key={`note-${entry.id}`} style={noteCardStyle}>
+                  <div style={noteCardHeaderStyle}>
+                    <div>
+                      <div style={noteCardTitleStyle}>{formatDate(entry.work_date)}</div>
+                      <div style={rowSubStyle}>
+                        {formatTime(entry.clock_in_at)} – {formatTime(entry.clock_out_at)}
+                      </div>
+                    </div>
+
+                    <StatusBadge status={entry.status} />
+                  </div>
+
+                  {entry.employee_note && entry.employee_note.trim() && (
+                    <div style={noteBlockStyle}>
+                      <div style={infoLabelStyle}>Mitarbeiter-Notiz</div>
+                      <p style={noteTextStyle}>{entry.employee_note}</p>
+                    </div>
+                  )}
+
+                  {entry.dispatch_note && entry.dispatch_note.trim() && (
+                    <div style={noteBlockStyle}>
+                      <div style={infoLabelStyle}>Dispatch-Notiz</div>
+                      <p style={noteTextStyle}>{entry.dispatch_note}</p>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
       <style>{`${opcResponsiveStyle}${spinStyle}`}</style>
-    </OPCPageShell>
+    </div>
   );
 }
 
@@ -894,6 +930,14 @@ const topBarStyle: CSSProperties = {
   marginBottom: 22,
 };
 
+const topBarActionsStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'flex-end',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
 const backButtonStyle: CSSProperties = {
   height: '42px',
   padding: '0 14px',
@@ -912,15 +956,13 @@ const backButtonStyle: CSSProperties = {
 };
 
 const heroStyle: CSSProperties = {
-  background: '#FFFFFF',
-  border: `1px solid ${OPC_BRAND.border}`,
-  borderRadius: '20px',
-  padding: '22px',
+  ...cardStyle,
+  padding: '20px',
   marginBottom: '22px',
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'flex-start',
-  gap: 18,
+  gap: '16px',
 };
 
 const eyebrowStyle: CSSProperties = {
@@ -932,19 +974,19 @@ const eyebrowStyle: CSSProperties = {
 
 const titleStyle: CSSProperties = {
   margin: 0,
-  fontSize: '28px',
-  lineHeight: 1.1,
+  fontSize: '24px',
+  lineHeight: 1.08,
   letterSpacing: '-0.04em',
-  fontWeight: 860,
+  fontWeight: 820,
   color: OPC_BRAND.text,
 };
 
 const subtitleStyle: CSSProperties = {
-  margin: '10px 0 0',
-  fontSize: '14px',
-  lineHeight: 1.55,
+  margin: '8px 0 0',
+  fontSize: '13px',
+  lineHeight: 1.45,
   color: OPC_BRAND.muted,
-  fontWeight: 560,
+  fontWeight: 620,
 };
 
 const badgeWrapStyle: CSSProperties = {
@@ -969,57 +1011,96 @@ const badgeStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const actionCardStyle: CSSProperties = {
-  background: '#FFFFFF',
-  border: `1px solid ${OPC_BRAND.border}`,
-  borderRadius: '20px',
-  marginBottom: 22,
-  overflow: 'hidden',
-};
 
 const sectionHeaderStyle: CSSProperties = {
-  padding: '18px 20px',
-  borderBottom: '1px solid #F3F4F6',
+  padding: '20px 20px 12px',
+  borderBottom: '0',
   fontSize: '15px',
   fontWeight: 820,
   color: OPC_BRAND.text,
+  letterSpacing: '-0.015em',
 };
 
-const editGridStyle: CSSProperties = {
+
+
+
+const detailMetricGridStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '180px 180px 1fr',
-  gap: 14,
-  padding: 20,
+  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  gap: '16px',
+  marginBottom: '22px',
 };
 
-const labelStyle: CSSProperties = {
-  display: 'grid',
-  gap: 8,
-  fontSize: 13,
-  fontWeight: 760,
+const detailMetricCardStyle: CSSProperties = {
+  ...cardStyle,
+  minHeight: '112px',
+  padding: '20px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '16px',
+  minWidth: 0,
+  boxSizing: 'border-box',
+};
+
+const detailMetricValueStyle: CSSProperties = {
+  fontSize: '26px',
+  lineHeight: 1,
+  letterSpacing: '-0.04em',
+  fontWeight: 820,
   color: OPC_BRAND.text,
+  whiteSpace: 'nowrap',
+};
+
+const detailMetricLabelStyle: CSSProperties = {
+  marginTop: '12px',
+  fontSize: '13px',
+  lineHeight: 1.2,
+  fontWeight: 720,
+  color: OPC_BRAND.muted,
+};
+
+const detailMetricIconStyle: CSSProperties = {
+  width: '38px',
+  height: '38px',
+  flex: '0 0 auto',
+  borderRadius: '13px',
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FAFAFA',
+  color: OPC_BRAND.black,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const infoCardStyle: CSSProperties = {
+  ...cardStyle,
+  width: '100%',
+  overflow: 'hidden',
+  boxSizing: 'border-box',
 };
 
 const detailGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-  gap: 22,
+  gap: '16px',
+  marginTop: 0,
 };
 
 const infoGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-  gap: 18,
-  padding: 20,
+  gap: '16px',
+  padding: '0 20px 20px',
 };
 
 const infoLabelStyle: CSSProperties = {
-  fontSize: '12px',
+  fontSize: '11px',
   fontWeight: 760,
   color: OPC_BRAND.faint,
   textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-  marginBottom: 7,
+  letterSpacing: '0.05em',
+  marginBottom: 5,
 };
 
 const infoValueStyle: CSSProperties = {
@@ -1027,64 +1108,59 @@ const infoValueStyle: CSSProperties = {
   fontWeight: 720,
   color: OPC_BRAND.text,
   lineHeight: 1.35,
+  overflowWrap: 'anywhere',
+};
+
+const contactActionsWrapStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  alignItems: 'center',
+  gap: '10px',
+  marginTop: '12px',
+  marginBottom: '22px',
 };
 
 const contactButtonStyle: CSSProperties = {
-  height: '38px',
-  padding: '0 13px',
+  height: '42px',
+  padding: '0 14px',
   borderRadius: '13px',
-  border: `1px solid ${OPC_BRAND.border}`,
-  background: '#FFFFFF',
-  color: OPC_BRAND.text,
+  border: `1px solid ${OPC_BRAND.black}`,
+  background: OPC_BRAND.black,
+  color: '#FFFFFF',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   gap: 8,
-  fontSize: '12px',
+  fontSize: '13px',
   fontWeight: 760,
   fontFamily: OPC_PAGE_FONT,
   textDecoration: 'none',
+  boxSizing: 'border-box',
+  whiteSpace: 'nowrap',
 };
 
-const entryRowStyle: CSSProperties = {
-  width: '100%',
-  display: 'grid',
-  gridTemplateColumns: 'minmax(180px, 1fr) 110px 110px 110px 140px minmax(180px, 1fr)',
-  alignItems: 'center',
-  gap: '20px',
-  padding: '20px 22px',
-  border: 'none',
-  background: '#FFFFFF',
-  textAlign: 'left',
-  fontFamily: OPC_PAGE_FONT,
-};
 
 const rowTitleStyle: CSSProperties = {
-  fontSize: '15px',
-  fontWeight: 800,
+  fontSize: '18px',
+  lineHeight: 1.2,
+  fontWeight: 840,
   color: OPC_BRAND.text,
-  letterSpacing: '-0.015em',
-  marginBottom: '7px',
+  letterSpacing: '-0.03em',
+  marginBottom: '6px',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 };
 
 const rowSubStyle: CSSProperties = {
-  fontSize: '13px',
-  fontWeight: 600,
+  fontSize: '14px',
+  fontWeight: 680,
   color: OPC_BRAND.muted,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 };
 
-const dateStyle: CSSProperties = {
-  fontSize: '13px',
-  fontWeight: 760,
-  color: OPC_BRAND.text,
-  whiteSpace: 'nowrap',
-};
 
 const smallApproveButtonStyle: CSSProperties = {
   height: 34,
@@ -1110,19 +1186,118 @@ const smallRejectButtonStyle: CSSProperties = {
   cursor: 'pointer',
 };
 
-const mobileCardStyle: CSSProperties = {
+
+const entryCardsWrapStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr',
+  gap: '14px',
+};
+
+const entryCardStyle: CSSProperties = {
+  ...cardStyle,
   width: '100%',
-  border: `1px solid ${OPC_BRAND.border}`,
-  borderRadius: '18px',
-  background: '#FFFFFF',
-  padding: '16px',
-  textAlign: 'left',
+  padding: '20px',
   fontFamily: OPC_PAGE_FONT,
   boxSizing: 'border-box',
 };
 
-const emptyStyle: CSSProperties = {
-  minHeight: 150,
+const entryCardHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: '14px',
+  marginBottom: '16px',
+};
+
+const entryStatsGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  gap: '12px',
+};
+
+const entryActionsStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'flex-start',
+  gap: 10,
+  flexWrap: 'wrap',
+  marginTop: 18,
+};
+
+const notesSectionStyle: CSSProperties = {
+  marginTop: '22px',
+  scrollMarginTop: 90,
+  display: 'grid',
+  gap: '14px',
+};
+
+
+
+
+const noteCardsWrapStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '1fr',
+  gap: 14,
+};
+
+const noteCardStyle: CSSProperties = {
+  ...cardStyle,
+  width: '100%',
+  padding: '20px',
+  boxSizing: 'border-box',
+};
+
+const noteCardHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 14,
+  marginBottom: 14,
+};
+
+const noteCardTitleStyle: CSSProperties = {
+  fontSize: '15px',
+  fontWeight: 820,
+  color: OPC_BRAND.text,
+  letterSpacing: '-0.015em',
+};
+
+const noteBlockStyle: CSSProperties = {
+  paddingTop: 12,
+  marginTop: 12,
+  borderTop: '1px solid #F3F4F6',
+};
+
+const noteTextStyle: CSSProperties = {
+  margin: '7px 0 0',
+  color: OPC_BRAND.muted,
+  fontSize: 13,
+  lineHeight: 1.55,
+  fontWeight: 620,
+  whiteSpace: 'pre-wrap',
+};
+
+const noteTextareaStyle: CSSProperties = {
+  width: '100%',
+  marginTop: 12,
+  padding: '13px 14px',
+  minHeight: 110,
+  borderRadius: 14,
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FFFFFF',
+  color: OPC_BRAND.text,
+  outline: 'none',
+  resize: 'vertical',
+  fontSize: 14,
+  fontWeight: 620,
+  lineHeight: 1.45,
+  fontFamily: OPC_PAGE_FONT,
+  boxSizing: 'border-box',
+};
+
+const emptyStandaloneStyle: CSSProperties = {
+  ...cardStyle,
+  minHeight: 118,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -1131,6 +1306,7 @@ const emptyStyle: CSSProperties = {
   fontSize: '14px',
   fontWeight: 700,
 };
+
 
 const errorStyle: CSSProperties = {
   marginBottom: 22,
@@ -1167,25 +1343,99 @@ const spinStyle = `
     to { transform: rotate(360deg); }
   }
 
-  .opc-requests-mobile-cards {
-    display: none;
+  .opc-detail-metric-grid > *,
+  .opc-detail-two-grid > *,
+  .opc-entry-card-grid > * {
+    min-width: 0 !important;
   }
 
-  @media (max-width: 980px) {
-    [style*="grid-template-columns: repeat(2"],
-    [style*="grid-template-columns: 180px 180px 1fr"] {
-      grid-template-columns: 1fr !important;
+  @media (max-width: 1180px) {
+    .opc-detail-metric-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+  }
+
+  @media (max-width: 860px) {
+    .opc-detail-metric-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px !important;
+      margin-bottom: 16px !important;
     }
 
-    .opc-requests-desktop-table {
-      display: none !important;
+    .opc-detail-metric-card {
+      min-height: 96px !important;
+      padding: 14px !important;
+      border-radius: 20px !important;
     }
 
-    .opc-requests-mobile-cards {
-      display: flex !important;
-      flex-direction: column;
-      gap: 14px;
-      padding: 14px;
+    .opc-detail-metric-value {
+      font-size: 22px !important;
+    }
+
+    .opc-detail-metric-label {
+      font-size: 12px !important;
+      margin-top: 8px !important;
+    }
+
+    .opc-detail-metric-icon {
+      width: 36px !important;
+      height: 36px !important;
+      border-radius: 12px !important;
+    }
+
+    .opc-detail-two-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px !important;
+    }
+
+    .opc-info-card {
+      border-radius: 18px !important;
+    }
+
+    .opc-info-card-body {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 12px !important;
+      padding: 0 14px 14px !important;
+    }
+
+    .opc-contact-actions {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      gap: 8px !important;
+      margin-bottom: 16px !important;
+    }
+
+    .opc-contact-actions a {
+      height: 40px !important;
+      min-width: 0 !important;
+      font-size: 12px !important;
+      padding: 0 8px !important;
+    }
+
+    .opc-entry-card-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px !important;
+    }
+
+    .opc-entry-card {
+      padding: 16px !important;
+      border-radius: 18px !important;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .opc-detail-topbar {
+      align-items: flex-start !important;
+    }
+
+    .opc-detail-topbar-actions {
+      justify-content: flex-end !important;
+      gap: 8px !important;
+    }
+
+    .opc-detail-topbar-actions button {
+      height: 40px !important;
+      font-size: 12px !important;
+      padding: 0 10px !important;
     }
   }
 `;
