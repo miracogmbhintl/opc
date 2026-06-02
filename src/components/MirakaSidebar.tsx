@@ -4,6 +4,7 @@
  * Adds separate /anfragen route.
  * Adds /kalender route.
  * Keeps /anfragen-schaeden separate from /anfragen.
+ * Zeiterfassung added for internal users (owner, admin, dispatch, manager, employee).
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -93,7 +94,8 @@ function normalizeRole(role: string): NormalizedRole {
   if (
     cleanRole === 'dispatch' ||
     cleanRole === 'dispatcher' ||
-    cleanRole === 'disposition'
+    cleanRole === 'disposition' ||
+    cleanRole === 'manager'
   ) {
     return 'dispatch';
   }
