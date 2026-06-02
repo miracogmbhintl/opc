@@ -16,6 +16,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   FileText,
   Inbox,
   LayoutDashboard,
@@ -159,6 +160,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       files: routeFor('files', '/berichte-dateien'),
       tickets: routeFor('tickets', '/anfragen-schaeden'),
       qrCodes: routeFor('qrCodes', '/qr-codes'),
+      timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       settings: routeFor('settings', '/einstellungen'),
       logout: routeFor('logout', '/logout'),
     }),
@@ -321,6 +323,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
       },
       {
+        href: buildUrl(routes.timeTracking),
+        label: 'Zeiterfassung',
+        icon: Clock3,
+        key: 'time-tracking',
+        match: [routes.timeTracking, '/zeiterfassung', '/zeiterfassung/'],
+      },
+      {
         href: buildUrl(routes.jobs),
         label: 'Einsätze',
         icon: Briefcase,
@@ -371,6 +380,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         icon: CalendarDays,
         key: 'employee-calendar',
         match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
+      },
+      {
+        href: buildUrl(routes.timeTracking),
+        label: 'Zeiterfassung',
+        icon: Clock3,
+        key: 'employee-time-tracking',
+        match: [routes.timeTracking, '/zeiterfassung', '/zeiterfassung/'],
       },
       {
         href: buildUrl(routes.jobs),

@@ -16,6 +16,7 @@ export const OPC_ROUTES = {
   files: '/berichte-dateien',
   tickets: '/anfragen-schaeden',
   qrCodes: '/qr-codes',
+  timeTracking: '/zeiterfassung',
   settings: '/einstellungen',
   logout: '/logout',
 
@@ -59,6 +60,8 @@ export function legacyRouteToOpc(path: string): string {
 
     [/^\/berichte-dateien$/, OPC_ROUTES.files],
     [/^\/qr-codes$/, OPC_ROUTES.qrCodes],
+    [/^\/zeiterfassung$/, OPC_ROUTES.timeTracking],
+    [/^\/zeiterfassung\/(.+)$/, `${OPC_ROUTES.timeTracking}/$1`],
     [/^\/einstellungen$/, OPC_ROUTES.settings],
     [/^\/logout$/, OPC_ROUTES.logout],
 
