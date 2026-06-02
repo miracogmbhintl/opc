@@ -95,3 +95,9 @@ _legacy_security_removed/
 _code_review/
 google-routing-meta-review.zip
 *.zip
+
+# Local backups/debug files
+.backups/
+_debug/
+*.backup-*
+*.backup-*
