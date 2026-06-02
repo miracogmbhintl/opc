@@ -101,3 +101,6 @@ google-routing-meta-review.zip
 _debug/
 *.backup-*
 *.backup-*
+
+# Local Wrangler backup
+wrangler.manual-backup.jsonc
