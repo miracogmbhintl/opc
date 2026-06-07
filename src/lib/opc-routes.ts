@@ -1,7 +1,6 @@
 export const OPC_ROUTES = {
   login: '/',
   dashboard: '/dashboard',
-  employeeDashboard: '/mitarbeiter',
 
   inquiries: '/anfragen',
   calendar: '/kalender',
@@ -26,7 +25,7 @@ export const OPC_ROUTES = {
 };
 
 export function getOpcDashboardRoute(role?: string | null): string {
-  if (role === 'employee') return OPC_ROUTES.employeeDashboard;
+  if (role === 'employee') return OPC_ROUTES.jobs;
   return OPC_ROUTES.dashboard;
 }
 
@@ -35,9 +34,6 @@ export function legacyRouteToOpc(path: string): string {
 
   const replacements: Array<[RegExp, string]> = [
     [/^\/dashboard$/, OPC_ROUTES.dashboard],
-    [/^\/mitarbeiter$/, OPC_ROUTES.employeeDashboard],
-    [/^\/dashboard\/mitarbeiter$/, OPC_ROUTES.employeeDashboard],
-    [/^\/dashboard\/employee$/, OPC_ROUTES.employeeDashboard],
 
     [/^\/dashboard\/tickets$/, OPC_ROUTES.tickets],
     [/^\/dashboard\/qr-codes$/, OPC_ROUTES.qrCodes],
