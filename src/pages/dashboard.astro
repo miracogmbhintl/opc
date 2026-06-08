@@ -3,12 +3,56 @@ import MirakaDashboardShell from '../components/MirakaDashboardShell';
 import OwnerDashboardHome from '../components/OwnerDashboardHome';
 import '../styles/miraka-portal.css';
 import '../styles/miraka-dashboard.css';
+import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
-<html lang="de">
+<html transition:name="root" transition:animate="none" lang="de">
 <head>
-  
+    <script is:inline>
+    (() => {
+      if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
+
+      window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
+
+      const noMotionTransition = (callback) => {
+        let callbackResult;
+
+        try {
+          callbackResult = typeof callback === 'function' ? callback() : undefined;
+        } catch (error) {
+          const rejected = Promise.reject(error);
+
+          return {
+            ready: rejected,
+            updateCallbackDone: rejected,
+            finished: rejected,
+            skipTransition() {},
+          };
+        }
+
+        const done = Promise.resolve(callbackResult);
+
+        return {
+          ready: done,
+          updateCallbackDone: done,
+          finished: done,
+          skipTransition() {},
+        };
+      };
+
+      try {
+        Object.defineProperty(document, 'startViewTransition', {
+          configurable: true,
+          writable: true,
+          value: noMotionTransition,
+        });
+      } catch {
+        document.startViewTransition = noMotionTransition;
+      }
+    })();
+  </script>
+  <ClientRouter fallback="swap" />
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
@@ -21,20 +65,23 @@ import '../styles/miraka-dashboard.css';
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <title>Dashboard | Orange Pro Clean</title>
+
   <link
     rel="icon"
     type="image/png"
     href="/favicon.ico"
   />
 </head>
+
 <body>
   <MirakaDashboardShell
     client:only="react"
     title="Orange Pro Clean Dashboard"
-    requiredRole="owner"
+    requiredRole={['owner', 'admin', 'dispatch']}
     currentPath="/dashboard"
     hideTopBar={true}
   >

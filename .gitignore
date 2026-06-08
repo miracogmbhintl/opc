@@ -114,3 +114,9 @@ _code_review/
 wrangler.manual-backup.jsonc
 inject-opc-webapp-head.py
 patch-zeiterfassung-all-sidebars.py
+
+# Local OPC repair/debug backups
+backup-before-*/
+opc_calendar_create_debug_*.txt
+opc_calendar_page_current_*.txt
+opc_pages_dump_*.txt

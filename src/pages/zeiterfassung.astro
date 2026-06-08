@@ -2,11 +2,56 @@
 import EmployeeTimeTrackingPage from '../components/EmployeeTimeTrackingPage';
 import '../styles/miraka-portal.css';
 import '../styles/miraka-dashboard.css';
+import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
-<html lang="de">
+<html transition:name="root" transition:animate="none" lang="de">
 <head>
+    <script is:inline>
+    (() => {
+      if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
+
+      window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
+
+      const noMotionTransition = (callback) => {
+        let callbackResult;
+
+        try {
+          callbackResult = typeof callback === 'function' ? callback() : undefined;
+        } catch (error) {
+          const rejected = Promise.reject(error);
+
+          return {
+            ready: rejected,
+            updateCallbackDone: rejected,
+            finished: rejected,
+            skipTransition() {},
+          };
+        }
+
+        const done = Promise.resolve(callbackResult);
+
+        return {
+          ready: done,
+          updateCallbackDone: done,
+          finished: done,
+          skipTransition() {},
+        };
+      };
+
+      try {
+        Object.defineProperty(document, 'startViewTransition', {
+          configurable: true,
+          writable: true,
+          value: noMotionTransition,
+        });
+      } catch {
+        document.startViewTransition = noMotionTransition;
+      }
+    })();
+  </script>
+  <ClientRouter fallback="swap" />
   
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />

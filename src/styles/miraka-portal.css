@@ -719,3 +719,163 @@ textarea.miraka-input,
     padding: 40px 20px;
   }
 }
+/* OPC: Disable Astro ClientRouter / View Transition movement animations.
+   Keeps client-side navigation active, but removes the right-to-left page slide. */
+::view-transition,
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Prevent individual matched elements from sliding/morphing between routes. */
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation: none !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+}
+
+/* OPC HARD NO-MOTION NAVIGATION
+   Keep Astro client-side navigation active, but remove all route slide/fade movement. */
+
+html,
+body,
+.miraka-dashboard-shell,
+.miraka-dashboard-main,
+.miraka-dashboard-content,
+[data-astro-transition-scope],
+[data-astro-transition-persist] {
+  view-transition-name: none !important;
+}
+
+::view-transition,
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation: none !important;
+  animation-name: none !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-fill-mode: none !important;
+  transition: none !important;
+  transform: none !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Prevent browser/app route swaps from creating horizontal slide perception. */
+html,
+body {
+  scroll-behavior: auto !important;
+  overscroll-behavior-x: none !important;
+}
+
+/* Keep skeletons static. No shimmer, pulse, slide, or fade movement. */
+.skeleton,
+.skeleton-loader,
+.loading-skeleton,
+[class*="skeleton"],
+[class*="Skeleton"],
+[class*="pulse"],
+.animate-pulse {
+  animation: none !important;
+  animation-name: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+/* Disable only page-level entrance animations. Keep normal button hover transitions intact. */
+.miraka-dashboard-content,
+.opc-page,
+.opc-time-page,
+.opc-clients-page,
+.opc-inquiries-page,
+.opc-calendar-page,
+.opc-tickets-page,
+.opc-settings-page,
+.opc-files-page {
+  animation: none !important;
+  animation-name: none !important;
+  transform: none !important;
+}
+
+/* OPC HARD ROUTE NO-MOTION PATCH
+   Keep Astro ClientRouter active, but remove all visible route movement. */
+
+html[transition\:animate],
+html[data-astro-transition],
+html[data-astro-transition] body,
+html[data-astro-transition] .miraka-dashboard-shell,
+html[data-astro-transition] .miraka-dashboard-main,
+html[data-astro-transition] .miraka-dashboard-content {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+html,
+body {
+  scroll-behavior: auto !important;
+  overscroll-behavior-x: none !important;
+}
+
+::view-transition,
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation: none !important;
+  animation-name: none !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-fill-mode: none !important;
+  transition: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+}
+
+.miraka-dashboard-main,
+.miraka-dashboard-content,
+.opc-page,
+.opc-time-page,
+.opc-clients-page,
+.opc-inquiries-page,
+.opc-calendar-page,
+.opc-tickets-page,
+.opc-settings-page,
+.opc-files-page {
+  animation: none !important;
+  transition-property: background-color, border-color, color, box-shadow !important;
+  transform: none !important;
+}
+
+/* Static skeletons only. No shimmer/pulse route movement. */
+.skeleton,
+.skeleton-loader,
+.loading-skeleton,
+[class*="skeleton"],
+[class*="Skeleton"],
+[class*="pulse"],
+.animate-pulse {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}

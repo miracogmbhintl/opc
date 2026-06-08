@@ -11,7 +11,6 @@ import '../styles/global.css';
 import '../styles/miraka-unified.css';
 import '../styles/work-os.css';
 import { baseUrl } from '../lib/base-url';
-import { ClientRouter } from 'astro:transitions';
 
 const { pageClass = '', title: explicitTitle } = Astro.props;
 
@@ -57,7 +56,6 @@ const pageTitle =
 <meta name="theme-color" content="#F7931F" />
 <meta name="viewport" content="width=device-width" />
 <meta name="generator" content={Astro.generator} />
-<ClientRouter />
 <title>{pageTitle}</title>
 <meta name="description" content="Orange Pro Clean Kunden- und Mitarbeiterportal für Einsätze, Tickets, QR-Codes, Kalender, Berichte und Einstellungen." />
 <meta property="og:title" content="Orange Pro Clean Portal" />
@@ -76,25 +74,6 @@ document.documentElement.classList.add('dark');
 }
 })();
 </script>
-
-<style is:global>
-  ::view-transition-old(root),
-  ::view-transition-new(root),
-  ::view-transition-group(root),
-  ::view-transition-image-pair(root) {
-    animation: none !important;
-    mix-blend-mode: normal !important;
-  }
-
-  html::view-transition,
-  body::view-transition {
-    animation: none !important;
-  }
-
-  * {
-    view-transition-name: none;
-  }
-</style>
 
 </head>
 <body style="position: relative; overflow-x: hidden;">
@@ -124,6 +103,27 @@ margin: 0 !important;
 /* Prevent any overflow issues */
 body, html {
 position: relative;
+}
+
+/* Disable all slide/transition animations on page load */
+body,
+html,
+main,
+*::before,
+*::after {
+  animation: none !important;
+}
+
+/* Explicitly disable view-transition animations */
+::view-transition,
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-group(root),
+::view-transition-image-pair(root),
+::view-transition-backdrop {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
 }
 
 /* Hide scrollbars completely on mobile */

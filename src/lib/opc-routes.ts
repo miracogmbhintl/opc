@@ -26,6 +26,7 @@ export const OPC_ROUTES = {
 
 export function getOpcDashboardRoute(role?: string | null): string {
   if (role === 'employee') return OPC_ROUTES.jobs;
+  // owner, admin, dispatch all get dashboard access
   return OPC_ROUTES.dashboard;
 }
 

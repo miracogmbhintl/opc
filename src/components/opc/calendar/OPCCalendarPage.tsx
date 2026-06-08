@@ -88,6 +88,16 @@ type CalendarEvent = {
   timezone: string;
   location_name?: string | null;
   location_address?: string | null;
+  google_calendar_id?: string | null;
+  google_event_id?: string | null;
+  google_html_link?: string | null;
+  google_meet_link?: string | null;
+  google_conference_id?: string | null;
+  google_conference_request_id?: string | null;
+  google_meet_space_name?: string | null;
+  google_sync_status?: string | null;
+  google_sync_error?: string | null;
+  metadata?: Record<string, any> | null;
   attendees?: CalendarAttendee[];
 };
 
@@ -526,6 +536,603 @@ function TypeBadge({ type }: { type: CalendarEvent['event_type'] }) {
   );
 }
 
+
+
+function toDateTimeLocalValue(date: Date) {
+  const copy = new Date(date);
+  copy.setSeconds(0, 0);
+
+  const year = copy.getFullYear();
+  const month = String(copy.getMonth() + 1).padStart(2, '0');
+  const day = String(copy.getDate()).padStart(2, '0');
+  const hours = String(copy.getHours()).padStart(2, '0');
+  const minutes = String(copy.getMinutes()).padStart(2, '0');
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function dateTimeLocalToIso(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('Ungültige Zeitangabe.');
+  }
+
+  return date.toISOString();
+}
+
+function QuickGoogleMeetModal({
+  calendars,
+  staff,
+  defaultCalendarId,
+  saving,
+  onClose,
+  onSubmit,
+}: {
+  calendars: Array<{ id: string; name: string; calendar_type?: string }>;
+  staff: Array<{ id: string; name: string; role?: string; is_active?: boolean; email?: string | null }>;
+  defaultCalendarId: string;
+  saving: boolean;
+  onClose: () => void;
+  onSubmit: (payload: {
+    calendar_id?: string;
+    title: string;
+    attendee_emails: string;
+    assigned_staff_role_ids?: string[];
+    starts_at: string;
+    ends_at: string;
+    description?: string;
+    location_address?: string;
+    reminder_minutes?: number;
+    guests_can_invite_others?: boolean;
+    guests_can_modify?: boolean;
+    guests_can_see_other_guests?: boolean;
+    visibility?: 'default' | 'public' | 'private';
+  }) => Promise<void>;
+}) {
+  const now = new Date();
+  const roundedStart = new Date(now);
+  roundedStart.setMinutes(Math.ceil(roundedStart.getMinutes() / 15) * 15, 0, 0);
+
+  const roundedEnd = new Date(roundedStart.getTime() + 60 * 60 * 1000);
+
+  const [calendarId, setCalendarId] = useState(defaultCalendarId);
+  const [title, setTitle] = useState('Orange Pro Clean Meeting');
+  const [guestEmails, setGuestEmails] = useState('');
+  const [selectedStaffRoleIds, setSelectedStaffRoleIds] = useState<string[]>([]);
+  const [reminderMinutes, setReminderMinutes] = useState(30);
+  const [guestsCanInviteOthers, setGuestsCanInviteOthers] = useState(true);
+  const [guestsCanModify, setGuestsCanModify] = useState(false);
+  const [guestsCanSeeOtherGuests, setGuestsCanSeeOtherGuests] = useState(true);
+  const [visibility, setVisibility] = useState<'default' | 'public' | 'private'>('default');
+  const [startsAt, setStartsAt] = useState(toDateTimeLocalValue(roundedStart));
+  const [endsAt, setEndsAt] = useState(toDateTimeLocalValue(roundedEnd));
+  const [locationAddress, setLocationAddress] = useState('');
+  const [description, setDescription] = useState('');
+  const [localError, setLocalError] = useState('');
+
+  async function submitForm(event: React.FormEvent) {
+    event.preventDefault();
+    setLocalError('');
+
+    try {
+      const startIso = dateTimeLocalToIso(startsAt);
+      const endIso = dateTimeLocalToIso(endsAt);
+
+      if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+        throw new Error('Das Ende muss nach dem Start liegen.');
+      }
+
+      await onSubmit({
+        calendar_id: calendarId || defaultCalendarId,
+        title: title.trim() || 'Orange Pro Clean Meeting',
+        attendee_emails: guestEmails,
+        assigned_staff_role_ids: selectedStaffRoleIds,
+        starts_at: startIso,
+        ends_at: endIso,
+        location_address: locationAddress,
+        description,
+        reminder_minutes: reminderMinutes,
+        guests_can_invite_others: guestsCanInviteOthers,
+        guests_can_modify: guestsCanModify,
+        guests_can_see_other_guests: guestsCanSeeOtherGuests,
+        visibility,
+      });
+    } catch (error: any) {
+      setLocalError(error?.message || 'Google Meet konnte nicht erstellt werden.');
+    }
+  }
+
+  return (
+    <div
+      className="opc-modal-backdrop"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        background: 'rgba(15, 17, 21, 0.42)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <form
+        onSubmit={submitForm}
+        style={{
+          width: 'min(760px, 100%)',
+          maxHeight: 'calc(100vh - 48px)',
+          overflowY: 'auto',
+          background: '#FFFFFF',
+          border: '1px solid #E5E7EB',
+          borderRadius: 26,
+          boxShadow: '0 24px 70px rgba(15, 17, 21, 0.18)',
+          padding: 28,
+          fontFamily: pageFont,
+          color: BRAND.text,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 18,
+            marginBottom: 22,
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 24,
+                fontWeight: 880,
+                letterSpacing: '-0.04em',
+              }}
+            >
+              Google Meet erstellen
+            </h2>
+            <p
+              style={{
+                margin: '6px 0 0',
+                color: BRAND.muted,
+                fontSize: 13,
+                fontWeight: 650,
+              }}
+            >
+              Termin wird im OPC Kalender gespeichert und mit Google Kalender synchronisiert.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 14,
+              border: `1px solid ${BRAND.border}`,
+              background: '#FFFFFF',
+              cursor: 'pointer',
+              fontSize: 22,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gap: 16 }}>
+          <label style={{ display: 'grid', gap: 7 }}>
+            <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>Titel</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="z.B. Team Meeting"
+              required
+              style={{
+                height: 52,
+                borderRadius: 14,
+                border: `1px solid ${BRAND.border}`,
+                padding: '0 16px',
+                fontSize: 15,
+                fontWeight: 720,
+                fontFamily: pageFont,
+              }}
+            />
+          </label>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <label style={{ display: 'grid', gap: 7 }}>
+              <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>Start</span>
+              <input
+                type="datetime-local"
+                value={startsAt}
+                onChange={(event) => setStartsAt(event.target.value)}
+                required
+                style={{
+                  height: 52,
+                  borderRadius: 14,
+                  border: `1px solid ${BRAND.border}`,
+                  padding: '0 16px',
+                  fontSize: 15,
+                  fontWeight: 720,
+                  fontFamily: pageFont,
+                }}
+              />
+            </label>
+
+            <label style={{ display: 'grid', gap: 7 }}>
+              <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>Ende</span>
+              <input
+                type="datetime-local"
+                value={endsAt}
+                onChange={(event) => setEndsAt(event.target.value)}
+                required
+                style={{
+                  height: 52,
+                  borderRadius: 14,
+                  border: `1px solid ${BRAND.border}`,
+                  padding: '0 16px',
+                  fontSize: 15,
+                  fontWeight: 720,
+                  fontFamily: pageFont,
+                }}
+              />
+            </label>
+          </div>
+
+          <label style={{ display: 'grid', gap: 7 }}>
+            <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>Kalender</span>
+            <select
+              value={calendarId}
+              onChange={(event) => setCalendarId(event.target.value)}
+              style={{
+                height: 52,
+                borderRadius: 14,
+                border: `1px solid ${BRAND.border}`,
+                padding: '0 16px',
+                fontSize: 15,
+                fontWeight: 720,
+                fontFamily: pageFont,
+                background: '#FFFFFF',
+              }}
+            >
+              {calendars.map((calendar) => (
+                <option key={calendar.id} value={calendar.id}>
+                  {calendar.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div style={{ display: 'grid', gap: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>
+              Teammitglieder einladen
+            </span>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 10,
+              }}
+            >
+              {staff
+                .filter((person) => person.is_active !== false)
+                .map((person) => {
+                  const checked = selectedStaffRoleIds.includes(person.id);
+
+                  return (
+                    <label
+                      key={person.id}
+                      style={{
+                        minHeight: 56,
+                        border: `1px solid ${checked ? BRAND.black : BRAND.border}`,
+                        borderRadius: 16,
+                        padding: '10px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        cursor: 'pointer',
+                        background: checked ? '#F9FAFB' : '#FFFFFF',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) => {
+                          setSelectedStaffRoleIds((current) => {
+                            if (event.target.checked) {
+                              return Array.from(new Set([...current, person.id]));
+                            }
+
+                            return current.filter((id) => id !== person.id);
+                          });
+                        }}
+                        style={{ width: 18, height: 18 }}
+                      />
+
+                      <span style={{ display: 'grid', gap: 2, minWidth: 0 }}>
+                        <span
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 850,
+                            color: BRAND.text,
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {person.name}
+                        </span>
+
+                        <span style={{ fontSize: 12, fontWeight: 650, color: BRAND.muted }}>
+                          {person.role || 'Team'}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+            </div>
+          </div>
+
+          <label style={{ display: 'grid', gap: 7 }}>
+            <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>
+              Gäste per E-Mail einladen
+            </span>
+            <input
+              value={guestEmails}
+              onChange={(event) => setGuestEmails(event.target.value)}
+              placeholder="kunde@email.ch, team@email.ch"
+              style={{
+                height: 52,
+                borderRadius: 14,
+                border: `1px solid ${BRAND.border}`,
+                padding: '0 16px',
+                fontSize: 15,
+                fontWeight: 720,
+                fontFamily: pageFont,
+              }}
+            />
+            <span style={{ fontSize: 12, fontWeight: 650, color: BRAND.muted }}>
+              Mehrere E-Mails mit Komma trennen. Google sendet die Einladung automatisch.
+            </span>
+          </label>
+
+          <label style={{ display: 'grid', gap: 7 }}>
+            <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>Ort / Hinweis</span>
+            <input
+              value={locationAddress}
+              onChange={(event) => setLocationAddress(event.target.value)}
+              placeholder="Optional, z.B. Online oder Kunde / Objekt"
+              style={{
+                height: 52,
+                borderRadius: 14,
+                border: `1px solid ${BRAND.border}`,
+                padding: '0 16px',
+                fontSize: 15,
+                fontWeight: 720,
+                fontFamily: pageFont,
+              }}
+            />
+          </label>
+
+          <div
+            style={{
+              border: `1px solid ${BRAND.border}`,
+              borderRadius: 18,
+              padding: 14,
+              display: 'grid',
+              gap: 12,
+              background: '#FFFFFF',
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 850, color: BRAND.muted }}>
+              Google Kalender Optionen
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <label style={{ display: 'grid', gap: 7 }}>
+                <span style={{ fontSize: 12, fontWeight: 760, color: BRAND.muted }}>Erinnerung</span>
+                <select
+                  value={reminderMinutes}
+                  onChange={(event) => setReminderMinutes(Number(event.target.value))}
+                  style={{
+                    height: 44,
+                    borderRadius: 12,
+                    border: `1px solid ${BRAND.border}`,
+                    padding: '0 12px',
+                    fontSize: 14,
+                    fontWeight: 720,
+                    fontFamily: pageFont,
+                    background: '#FFFFFF',
+                  }}
+                >
+                  <option value={0}>Zur Startzeit</option>
+                  <option value={10}>10 Minuten vorher</option>
+                  <option value={30}>30 Minuten vorher</option>
+                  <option value={60}>1 Stunde vorher</option>
+                  <option value={1440}>1 Tag vorher</option>
+                </select>
+              </label>
+
+              <label style={{ display: 'grid', gap: 7 }}>
+                <span style={{ fontSize: 12, fontWeight: 760, color: BRAND.muted }}>Sichtbarkeit</span>
+                <select
+                  value={visibility}
+                  onChange={(event) => setVisibility(event.target.value as 'default' | 'public' | 'private')}
+                  style={{
+                    height: 44,
+                    borderRadius: 12,
+                    border: `1px solid ${BRAND.border}`,
+                    padding: '0 12px',
+                    fontSize: 14,
+                    fontWeight: 720,
+                    fontFamily: pageFont,
+                    background: '#FFFFFF',
+                  }}
+                >
+                  <option value="default">Standardsichtbarkeit</option>
+                  <option value="private">Privat</option>
+                  <option value="public">Öffentlich</option>
+                </select>
+              </label>
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, fontWeight: 720 }}>
+              <input
+                type="checkbox"
+                checked={guestsCanModify}
+                onChange={(event) => setGuestsCanModify(event.target.checked)}
+              />
+              Gäste dürfen Termin bearbeiten
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, fontWeight: 720 }}>
+              <input
+                type="checkbox"
+                checked={guestsCanInviteOthers}
+                onChange={(event) => setGuestsCanInviteOthers(event.target.checked)}
+              />
+              Gäste dürfen weitere Personen einladen
+            </label>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, fontWeight: 720 }}>
+              <input
+                type="checkbox"
+                checked={guestsCanSeeOtherGuests}
+                onChange={(event) => setGuestsCanSeeOtherGuests(event.target.checked)}
+              />
+              Gästeliste anzeigen
+            </label>
+          </div>
+
+          <label style={{ display: 'grid', gap: 7 }}>
+            <span style={{ fontSize: 12, fontWeight: 820, color: BRAND.muted }}>Nachricht / Beschreibung</span>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Optional: Agenda, Hinweise oder interne Notiz"
+              rows={4}
+              style={{
+                borderRadius: 14,
+                border: `1px solid ${BRAND.border}`,
+                padding: 16,
+                fontSize: 15,
+                fontWeight: 650,
+                fontFamily: pageFont,
+                resize: 'vertical',
+              }}
+            />
+          </label>
+        </div>
+
+        {localError && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: '12px 14px',
+              borderRadius: 14,
+              background: '#FEF2F2',
+              border: '1px solid #FECACA',
+              color: '#991B1B',
+              fontSize: 13,
+              fontWeight: 720,
+            }}
+          >
+            {localError}
+          </div>
+        )}
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            gap: 10,
+            marginTop: 24,
+          }}
+        >
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            style={{
+              height: 46,
+              padding: '0 18px',
+              borderRadius: 14,
+              border: `1px solid ${BRAND.border}`,
+              background: '#FFFFFF',
+              color: BRAND.text,
+              fontSize: 14,
+              fontWeight: 820,
+              cursor: saving ? 'wait' : 'pointer',
+            }}
+          >
+            Schliessen
+          </button>
+
+          <button
+            type="submit"
+            disabled={saving}
+            style={{
+              height: 46,
+              padding: '0 20px',
+              borderRadius: 14,
+              border: '1px solid #111111',
+              background: '#111111',
+              color: '#FFFFFF',
+              fontSize: 14,
+              fontWeight: 850,
+              cursor: saving ? 'wait' : 'pointer',
+              opacity: saving ? 0.72 : 1,
+            }}
+          >
+            {saving ? 'Erstellt...' : 'Meet erstellen & Gäste einladen'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
+
+function getGuestEmails(event: CalendarEvent): string[] {
+  const metadata = (event.metadata || {}) as any;
+  const emails = metadata.guest_attendee_emails;
+
+  if (!Array.isArray(emails)) return [];
+
+  return emails
+    .map((email) => String(email || '').trim())
+    .filter(Boolean);
+}
+
+function getMeetOptions(event: CalendarEvent) {
+  const metadata = (event.metadata || {}) as any;
+  return metadata.google_meet_options || {};
+}
+
+async function copyTextToClipboard(value: string) {
+  if (!value) return;
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
 function EventQuickView({
   event,
   isAdmin,
@@ -537,6 +1144,11 @@ function EventQuickView({
   onClose: () => void;
   onEdit: () => void;
 }) {
+  const guestEmails = getGuestEmails(event);
+  const meetOptions = getMeetOptions(event);
+  const hasMeet = Boolean(event.google_meet_link);
+  const internalAttendeeCount = event.attendees?.length || 0;
+
   return (
     <div
       role="dialog"
@@ -557,33 +1169,67 @@ function EventQuickView({
         onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()}
         style={{
           width: '100%',
-          maxWidth: '520px',
+          maxWidth: '720px',
+          maxHeight: 'calc(100vh - 44px)',
+          overflowY: 'auto',
           background: '#FFFFFF',
           border: `1px solid ${BRAND.border}`,
-          borderRadius: '24px',
+          borderRadius: '26px',
           boxShadow: '0 24px 80px rgba(15, 17, 21, 0.22)',
-          overflow: 'hidden',
           fontFamily: pageFont,
         }}
       >
         <div
           style={{
-            padding: '18px 20px',
+            padding: '22px 24px',
             borderBottom: `1px solid ${BRAND.softBorder}`,
             display: 'flex',
             justifyContent: 'space-between',
-            gap: '16px',
+            gap: '18px',
             alignItems: 'flex-start',
           }}
         >
           <div style={{ minWidth: 0 }}>
             <div
               style={{
-                fontSize: '20px',
-                fontWeight: 820,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                flexWrap: 'wrap',
+                marginBottom: 8,
+              }}
+            >
+              {hasMeet && (
+                <span
+                  style={{
+                    height: 27,
+                    padding: '0 10px',
+                    borderRadius: 999,
+                    background: '#0F1115',
+                    color: '#FFFFFF',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    fontSize: 11,
+                    fontWeight: 850,
+                    letterSpacing: '0.02em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Google Meet
+                </span>
+              )}
+
+              <StatusBadge status={event.status} />
+              <TypeBadge type={event.event_type} />
+            </div>
+
+            <div
+              style={{
+                fontSize: '23px',
+                fontWeight: 880,
                 color: BRAND.text,
-                letterSpacing: '-0.035em',
-                lineHeight: 1.2,
+                letterSpacing: '-0.045em',
+                lineHeight: 1.15,
                 marginBottom: '8px',
               }}
             >
@@ -592,8 +1238,8 @@ function EventQuickView({
 
             <div
               style={{
-                fontSize: '13px',
-                fontWeight: 650,
+                fontSize: '14px',
+                fontWeight: 720,
                 color: BRAND.muted,
               }}
             >
@@ -605,9 +1251,9 @@ function EventQuickView({
             type="button"
             onClick={onClose}
             style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '12px',
+              width: '42px',
+              height: '42px',
+              borderRadius: '14px',
               border: `1px solid ${BRAND.border}`,
               background: '#FFFFFF',
               color: BRAND.text,
@@ -618,39 +1264,249 @@ function EventQuickView({
               flexShrink: 0,
             }}
           >
-            <X size={17} />
+            <X size={18} />
           </button>
         </div>
 
-        <div style={{ padding: '20px', display: 'grid', gap: '16px' }}>
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            <StatusBadge status={event.status} />
-            <TypeBadge type={event.event_type} />
-          </div>
-
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-            <MapPin size={17} color={BRAND.muted} style={{ marginTop: 1, flexShrink: 0 }} />
-            <div>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: BRAND.text }}>
-                {event.location_name || 'Kein Standort'}
+        <div style={{ padding: '22px 24px 24px', display: 'grid', gap: '16px' }}>
+          {hasMeet && (
+            <div
+              style={{
+                border: `1px solid ${BRAND.border}`,
+                background: '#FAFAFA',
+                borderRadius: 20,
+                padding: 16,
+                display: 'grid',
+                gap: 12,
+              }}
+            >
+              <div style={{ display: 'grid', gap: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 850, color: BRAND.text }}>
+                  Google Meet
+                </div>
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 650,
+                    color: BRAND.muted,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {event.google_meet_link}
+                </div>
               </div>
-              <div style={{ marginTop: 3, color: BRAND.muted, fontSize: '13px', fontWeight: 600 }}>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                  gap: 8,
+                }}
+              >
+                <a
+                  href={event.google_meet_link || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    minHeight: 42,
+                    borderRadius: 999,
+                    padding: '0 12px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textDecoration: 'none',
+                    background: BRAND.black,
+                    color: '#FFFFFF',
+                    border: `1px solid ${BRAND.black}`,
+                    fontSize: 12,
+                    fontWeight: 850,
+                    textAlign: 'center',
+                  }}
+                >
+                  Mit Google Meet teilnehmen
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => void copyTextToClipboard(event.google_meet_link || '')}
+                  style={{
+                    minHeight: 42,
+                    borderRadius: 999,
+                    padding: '0 12px',
+                    background: '#FFFFFF',
+                    color: BRAND.text,
+                    border: `1px solid ${BRAND.border}`,
+                    fontSize: 12,
+                    fontWeight: 850,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Meet-Link kopieren
+                </button>
+
+                {event.google_html_link ? (
+                  <a
+                    href={event.google_html_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      minHeight: 42,
+                      borderRadius: 999,
+                      padding: '0 12px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      textDecoration: 'none',
+                      background: '#FFFFFF',
+                      color: BRAND.text,
+                      border: `1px solid ${BRAND.border}`,
+                      fontSize: 12,
+                      fontWeight: 850,
+                      textAlign: 'center',
+                    }}
+                  >
+                    Google Kalender öffnen
+                  </a>
+                ) : (
+                  <span />
+                )}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div
+              style={{
+                border: `1px solid ${BRAND.border}`,
+                background: '#FFFFFF',
+                borderRadius: 18,
+                padding: 14,
+                display: 'grid',
+                gap: 5,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 850, color: BRAND.muted, textTransform: 'uppercase' }}>
+                Ort / Objekt
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: BRAND.text }}>
+                {event.location_name || (hasMeet ? 'Google Meet' : 'Kein Standort')}
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 650, color: BRAND.muted }}>
                 {event.location_address || 'Keine Adresse hinterlegt'}
               </div>
             </div>
+
+            <div
+              style={{
+                border: `1px solid ${BRAND.border}`,
+                background: '#FFFFFF',
+                borderRadius: 18,
+                padding: 14,
+                display: 'grid',
+                gap: 5,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 850, color: BRAND.muted, textTransform: 'uppercase' }}>
+                Teilnehmer
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: BRAND.text }}>
+                {internalAttendeeCount} intern · {guestEmails.length} extern
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 650, color: BRAND.muted }}>
+                Erinnerung: {Number(meetOptions.reminder_minutes ?? 30)} Minuten vorher
+              </div>
+            </div>
           </div>
+
+          {internalAttendeeCount > 0 && (
+            <div
+              style={{
+                border: `1px solid ${BRAND.border}`,
+                background: '#FFFFFF',
+                borderRadius: 18,
+                padding: 14,
+                display: 'grid',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 850, color: BRAND.muted, textTransform: 'uppercase' }}>
+                Interne Teammitglieder
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {event.attendees?.map((attendee) => (
+                  <span
+                    key={attendee.id || attendee.staff_role_id || attendee.user_id || Math.random()}
+                    style={{
+                      height: 28,
+                      padding: '0 10px',
+                      borderRadius: 999,
+                      background: '#F9FAFB',
+                      border: `1px solid ${BRAND.border}`,
+                      color: BRAND.text,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      fontSize: 12,
+                      fontWeight: 720,
+                    }}
+                  >
+                    {attendee.status || 'accepted'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {guestEmails.length > 0 && (
+            <div
+              style={{
+                border: `1px solid ${BRAND.border}`,
+                background: '#FFFFFF',
+                borderRadius: 18,
+                padding: 14,
+                display: 'grid',
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 850, color: BRAND.muted, textTransform: 'uppercase' }}>
+                Eingeladene Gäste
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {guestEmails.map((email) => (
+                  <span
+                    key={email}
+                    style={{
+                      height: 28,
+                      padding: '0 10px',
+                      borderRadius: 999,
+                      background: '#F9FAFB',
+                      border: `1px solid ${BRAND.border}`,
+                      color: BRAND.text,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      fontSize: 12,
+                      fontWeight: 720,
+                    }}
+                  >
+                    {email}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {event.description && (
             <div
               style={{
                 border: `1px solid ${BRAND.border}`,
                 background: BRAND.soft,
-                borderRadius: '16px',
-                padding: '13px',
+                borderRadius: '18px',
+                padding: '14px',
                 color: BRAND.muted,
                 fontSize: '13px',
                 lineHeight: 1.5,
-                fontWeight: 600,
+                fontWeight: 650,
               }}
             >
               {event.description}
@@ -666,12 +1522,12 @@ function EventQuickView({
               paddingTop: '4px',
             }}
           >
-            <button type="button" onClick={onClose} style={{ ...compactButtonStyle, height: '40px' }}>
+            <button type="button" onClick={onClose} style={{ ...compactButtonStyle, height: '42px' }}>
               Schliessen
             </button>
 
             {isAdmin && (
-              <button type="button" onClick={onEdit} style={{ ...compactBlackButtonStyle, height: '40px' }}>
+              <button type="button" onClick={onEdit} style={{ ...compactBlackButtonStyle, height: '42px' }}>
                 <Pencil size={15} />
                 Bearbeiten
               </button>
@@ -682,6 +1538,7 @@ function EventQuickView({
     </div>
   );
 }
+
 
 function getInitialCalendarScrollTime() {
   const now = new Date();
@@ -716,6 +1573,7 @@ export default function OPCCalendarPage() {
 
   const [modal, setModal] = useState<ModalState>(null);
   const [quickViewEvent, setQuickViewEvent] = useState<CalendarEvent | null>(null);
+  const [quickMeetModalOpen, setQuickMeetModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const isAdmin = useMemo(() => {
@@ -864,6 +1722,8 @@ export default function OPCCalendarPage() {
     location_name?: string;
     location_address?: string;
     assigned_staff_role_ids: string[];
+    attendee_emails?: string;
+    guest_emails?: string;
     requires_acceptance: boolean;
   }) {
     setSaving(true);
@@ -905,47 +1765,82 @@ export default function OPCCalendarPage() {
     }
   }
 
-  async function handleQuickGoogleMeet() {
+  async function handleQuickGoogleMeet(payload: {
+    calendar_id?: string;
+    title: string;
+    attendee_emails: string;
+    assigned_staff_role_ids?: string[];
+    starts_at: string;
+    ends_at: string;
+    description?: string;
+    location_address?: string;
+    reminder_minutes?: number;
+    guests_can_invite_others?: boolean;
+    guests_can_modify?: boolean;
+    guests_can_see_other_guests?: boolean;
+    visibility?: 'default' | 'public' | 'private';
+  }) {
     setSaving(true);
     setErrorMessage('');
 
     try {
-      const title = window.prompt('Titel für das Google Meet', 'Orange Pro Clean Meeting');
-      if (title === null) return;
+      const calendarId = payload.calendar_id || defaultCalendarId;
 
-      const emailsRaw = window.prompt(
-        'Teilnehmer per E-Mail einladen. Mehrere E-Mails mit Komma trennen.',
-        ''
-      );
-      if (emailsRaw === null) return;
-
-      const durationRaw = window.prompt('Dauer in Minuten', '60');
-      if (durationRaw === null) return;
-
-      const durationMinutes = Number(durationRaw || 60);
+      if (!calendarId) {
+        throw new Error('Kein aktiver Kalender gefunden.');
+      }
 
       const result = await apiFetch<{
-        google_meet_link?: string | null;
-        google_html_link?: string | null;
-        invited?: string[];
-      }>('/api/opc/calendar/quick-google-meet', {
+        event: CalendarEvent;
+        google_sync_status?: string;
+        google_sync_error?: string | null;
+      }>('/api/opc/calendar/create-event', {
         method: 'POST',
         body: JSON.stringify({
-          title: title || 'Orange Pro Clean Meeting',
-          attendee_emails: emailsRaw,
-          duration_minutes: Number.isFinite(durationMinutes) ? durationMinutes : 60,
+          calendar_id: calendarId,
+          create_google_meet: true,
+          sync_google_calendar: true,
+          event_type: 'internal',
+          status: 'confirmed',
+          title: payload.title || 'Orange Pro Clean Meeting',
+          description: payload.description || '',
+          starts_at: payload.starts_at,
+          ends_at: payload.ends_at,
+          timezone: 'Europe/Zurich',
+          location_name: 'Google Meet',
+          location_address: payload.location_address || '',
+          attendee_emails: payload.attendee_emails || '',
+          assigned_staff_role_ids: payload.assigned_staff_role_ids || [],
+          requires_acceptance: false,
+          metadata: {
+            google_meet_options: {
+              reminder_minutes: payload.reminder_minutes ?? 30,
+              guests_can_invite_others: payload.guests_can_invite_others ?? true,
+              guests_can_modify: payload.guests_can_modify ?? false,
+              guests_can_see_other_guests: payload.guests_can_see_other_guests ?? true,
+              visibility: payload.visibility || 'default',
+            },
+          },
         }),
       });
 
-      if (result.google_meet_link) {
-        window.open(result.google_meet_link, '_blank', 'noopener,noreferrer');
-      } else if (result.google_html_link) {
-        window.open(result.google_html_link, '_blank', 'noopener,noreferrer');
+      const event = result?.event;
+
+      if (result?.google_sync_error) {
+        throw new Error(result.google_sync_error);
       }
+
+      if (!event?.google_meet_link) {
+        throw new Error('Google Meet wurde erstellt, aber kein Meet-Link wurde zurückgegeben.');
+      }
+
+      setQuickMeetModalOpen(false);
+      setQuickViewEvent(event);
 
       await loadCalendarData();
     } catch (error: any) {
       setErrorMessage(error?.message || 'Google Meet konnte nicht erstellt werden.');
+      throw error;
     } finally {
       setSaving(false);
     }
@@ -1011,6 +1906,11 @@ export default function OPCCalendarPage() {
           event.attendees
             ?.map((attendee) => attendee.staff_role_id)
             .filter(Boolean) as string[],
+        attendee_emails: Array.isArray((event.metadata as any)?.guest_attendee_emails)
+          ? ((event.metadata as any).guest_attendee_emails as string[]).join(', ')
+          : '',
+        create_google_meet: Boolean(event.google_meet_link),
+        sync_google_calendar: Boolean(event.google_event_id || event.google_calendar_id || event.google_meet_link),
         requires_acceptance: event.status === 'pending_acceptance',
       });
     } catch {
@@ -1165,7 +2065,7 @@ export default function OPCCalendarPage() {
               <button
                 type="button"
                 className="opc-calendar-quick-meet-button"
-                onClick={handleQuickGoogleMeet}
+                onClick={() => setQuickMeetModalOpen(true)}
                 disabled={saving}
                 style={{
                   ...blackButtonStyle,
@@ -1262,6 +2162,7 @@ export default function OPCCalendarPage() {
                   <div className="opc-calendar-event-title">{arg.event.title}</div>
                   <div className="opc-calendar-event-meta">
                     {EVENT_TYPE_LABELS[raw.event_type] || raw.event_type} · {STATUS_LABELS[raw.status] || raw.status}
+                    {raw.google_meet_link ? ' · Google Meet' : ''}
                   </div>
                 </div>
               );
@@ -1285,6 +2186,17 @@ export default function OPCCalendarPage() {
             setModal({ mode: 'edit', event: quickViewEvent });
             setQuickViewEvent(null);
           }}
+        />
+      )}
+
+      {quickMeetModalOpen && (
+        <QuickGoogleMeetModal
+          calendars={calendars}
+          staff={staff}
+          defaultCalendarId={defaultCalendarId}
+          saving={saving}
+          onClose={() => setQuickMeetModalOpen(false)}
+          onSubmit={handleQuickGoogleMeet}
         />
       )}
 
@@ -1654,6 +2566,30 @@ export default function OPCCalendarPage() {
           }
         }
 
+
+        @media (max-width: 760px) {
+          .opc-modal-backdrop form {
+            padding: 20px !important;
+            border-radius: 22px !important;
+          }
+
+          .opc-modal-backdrop form > div {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+
+        @media (max-width: 760px) {
+          .opc-calendar-page [role="dialog"] > div {
+            max-width: calc(100vw - 24px) !important;
+          }
+
+          .opc-calendar-page [role="dialog"] a,
+          .opc-calendar-page [role="dialog"] button {
+            min-width: 0;
+          }
+        }
+
         @media (max-width: 640px) {
           .opc-requests-metrics {
             grid-template-columns: 1fr !important;
@@ -1667,6 +2603,73 @@ export default function OPCCalendarPage() {
             font-size: 17px;
           }
         }
+
+        .opc-quick-view-meet-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 14px;
+        }
+
+        .opc-quick-view-meet-primary,
+        .opc-quick-view-meet-secondary {
+          min-height: 38px;
+          border-radius: 999px;
+          padding: 0 14px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          text-decoration: none;
+          font-family: ${pageFont};
+          font-size: 12px;
+          font-weight: 820;
+          cursor: pointer;
+        }
+
+        .opc-quick-view-meet-primary {
+          background: #111111;
+          color: #FFFFFF;
+          border: 1px solid #111111;
+        }
+
+        .opc-quick-view-meet-secondary {
+          background: #FFFFFF;
+          color: #111111;
+          border: 1px solid ${BRAND.border};
+        }
+
+        .opc-quick-view-guests {
+          margin-top: 12px;
+        }
+
+        .opc-quick-view-guests-label {
+          font-size: 11px;
+          font-weight: 820;
+          color: ${BRAND.muted};
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          margin-bottom: 6px;
+        }
+
+        .opc-quick-view-guests-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .opc-quick-view-guest-pill {
+          height: 28px;
+          padding: 0 10px;
+          border-radius: 999px;
+          background: #F9FAFB;
+          border: 1px solid ${BRAND.border};
+          color: ${BRAND.text};
+          display: inline-flex;
+          align-items: center;
+          font-size: 12px;
+          font-weight: 720;
+        }
+
       `}</style>
     </div>
   );

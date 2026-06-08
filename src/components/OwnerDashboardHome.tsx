@@ -897,7 +897,6 @@ export default function OwnerDashboardHome() {
       setJobs(cached.jobs);
       setActiveTab(cached.activeTab);
       setLoading(false);
-      void loadData({ background: true });
       return;
     }
 

@@ -1,9 +1,14 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { supabase, type UserProfile, type UserRole } from '../lib/supabase';
+import { type UserProfile, type UserRole } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
 import { TranslationProvider, useTranslation } from '../lib/TranslationContext';
+import {
+  loadOpcAuthProfile,
+  readCachedOpcAuthProfile,
+  writeCachedOpcAuthProfile,
+} from '../lib/opc-auth-cache';
 
 function readCachedUserProfile(): UserProfile | null {
   if (typeof window === 'undefined') return null;
@@ -24,6 +29,8 @@ function readCachedUserProfile(): UserProfile | null {
       name: cached.username || cached.name || cached.full_name || cached.email || 'User',
       full_name: cached.name || cached.full_name || cached.username || cached.email || 'User',
       role: cachedRole,
+      created_at: cached.created_at || '',
+      updated_at: cached.updated_at || '',
     } as UserProfile;
   } catch {
     return null;
@@ -80,15 +87,24 @@ function DashboardShellContent({
     };
   }
 
-  const cachedUserProfile = readCachedUserProfile();
+  const cachedUserProfile = readCachedOpcAuthProfile() || readCachedUserProfile();
   const [loading, setLoading] = useState(!cachedUserProfile);
   const [user, setUser] = useState<UserProfile | null>(cachedUserProfile);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+
+    try {
+      return window.localStorage.getItem('miraka_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     const savedState = localStorage.getItem('miraka_sidebar_collapsed');
-    setSidebarCollapsed(savedState === 'true');
+    const nextCollapsed = savedState === 'true';
+    setSidebarCollapsed((current) => (current === nextCollapsed ? current : nextCollapsed));
 
     const handleSidebarToggle = (event: Event) => {
       const customEvent = event as CustomEvent<{ isCollapsed: boolean }>;
@@ -103,78 +119,54 @@ function DashboardShellContent({
     };
   }, []);
 
+  const isRoleAllowed = (profileRole: UserRole) => {
+    if (!requiredRole) return true;
+
+    const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+    return allowedRoles.includes(profileRole);
+  };
+
+  const handleRoleMismatch = (profileRole: UserRole) => {
+    const correctRoute = getOpcDashboardRoute(profileRole);
+    const currentBrowserPath = window.location.pathname;
+
+    if (correctRoute && correctRoute !== currentBrowserPath) {
+      window.location.href = `${baseUrl}${correctRoute}`;
+      return;
+    }
+
+    setError('Du hast keinen Zugriff auf diese Seite.');
+    setLoading(false);
+  };
+
   const checkAuth = async () => {
     try {
-      const {
-        data: { user: authUser },
-        error: authError,
-      } = await supabase.auth.getUser();
+      const cachedProfile = readCachedOpcAuthProfile();
 
-      if (authError || !authUser) {
+      if (cachedProfile) {
+        if (!isRoleAllowed(cachedProfile.role as UserRole)) {
+          handleRoleMismatch(cachedProfile.role as UserRole);
+          return;
+        }
+
+        setUser(cachedProfile);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
+      const normalizedProfile = await loadOpcAuthProfile();
+
+      if (!normalizedProfile) {
         window.location.href = `${baseUrl}${OPC_ROUTES.login}`;
         return;
       }
 
-      const { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .single();
+      writeCachedOpcAuthProfile(normalizedProfile);
 
-      if (profileError || !profile) {
-        throw new Error('Unable to fetch user profile');
-      }
-
-      const resolvedRole =
-        profile.role ||
-        profile.opc_staff_role ||
-        profile.staff_role ||
-        'client';
-
-      const normalizedProfile = {
-        ...profile,
-        full_name: profile.full_name || profile.name || authUser.email || 'User',
-        email: profile.email || authUser.email || '',
-        role: resolvedRole,
-      } as UserProfile;
-
-      localStorage.setItem(
-        'mco_auth',
-        JSON.stringify({
-          id: authUser.id,
-          email: authUser.email,
-          name: normalizedProfile.full_name,
-          username:
-            profile.name ||
-            normalizedProfile.full_name ||
-            authUser.email?.split('@')[0] ||
-            'User',
-        })
-      );
-
-      localStorage.setItem('mco_user_role', normalizedProfile.role);
-      localStorage.setItem(
-        'mco_user_data',
-        JSON.stringify({
-          id: authUser.id,
-          email: authUser.email,
-          name: normalizedProfile.full_name,
-          username:
-            profile.name ||
-            normalizedProfile.full_name ||
-            authUser.email?.split('@')[0] ||
-            'User',
-        })
-      );
-
-      if (requiredRole) {
-        const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-
-        if (!allowedRoles.includes(normalizedProfile.role as UserRole)) {
-          const correctRoute = getOpcDashboardRoute(normalizedProfile.role);
-          window.location.href = `${baseUrl}${correctRoute}`;
-          return;
-        }
+      if (!isRoleAllowed(normalizedProfile.role as UserRole)) {
+        handleRoleMismatch(normalizedProfile.role as UserRole);
+        return;
       }
 
       setUser(normalizedProfile);
@@ -331,7 +323,7 @@ function DashboardShellContent({
         .miraka-dashboard-main {
           min-height: 100vh;
           background: #FFFFFF;
-          transition: margin-left 0.25s ease, width 0.25s ease;
+          transition: none !important;\n          transform: none !important;\n          animation: none !important;
         }
 
         .miraka-dashboard-content {

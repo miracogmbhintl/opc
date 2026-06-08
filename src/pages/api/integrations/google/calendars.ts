@@ -25,6 +25,9 @@ export const GET: APIRoute = async (context) => {
         connected: false,
         calendars: [],
         selected_calendar_id: null,
+        selected_calendar_name: null,
+        selected_calendar_access_role: null,
+        selected_calendar_can_write: false,
       });
     }
 
@@ -56,31 +59,38 @@ export const GET: APIRoute = async (context) => {
 
     let selectedCalendarId = account.selected_calendar_id || null;
 
-    if (!selectedCalendarId) {
+    let selectedCalendar = selectedCalendarId
+      ? calendars.find((calendar: any) => calendar.id === selectedCalendarId) || null
+      : null;
+
+    if (!selectedCalendar || !selectedCalendar.canWrite) {
       const writablePrimary = calendars.find((calendar: any) => calendar.primary && calendar.canWrite);
       const writableFirst = calendars.find((calendar: any) => calendar.canWrite);
-      const selected = writablePrimary || writableFirst || null;
+      selectedCalendar = writablePrimary || writableFirst || selectedCalendar || null;
+      selectedCalendarId = selectedCalendar?.id || null;
+    }
 
-      if (selected) {
-        selectedCalendarId = selected.id;
-
-        await supabase
-          .from('opc_google_accounts')
-          .update({
-            selected_calendar_id: selected.id,
-            selected_calendar_name: selected.summary,
-            selected_calendar_access_role: selected.accessRole,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', account.id);
-      }
+    if (selectedCalendar) {
+      await supabase
+        .from('opc_google_accounts')
+        .update({
+          selected_calendar_id: selectedCalendar.id,
+          selected_calendar_name: selectedCalendar.summary,
+          selected_calendar_access_role: selectedCalendar.accessRole,
+          last_error: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', account.id);
     }
 
     return jsonResponse({
       success: true,
       connected: true,
       calendars,
-      selected_calendar_id: selectedCalendarId,
+      selected_calendar_id: selectedCalendar?.id || null,
+      selected_calendar_name: selectedCalendar?.summary || null,
+      selected_calendar_access_role: selectedCalendar?.accessRole || null,
+      selected_calendar_can_write: selectedCalendar ? selectedCalendar.canWrite : false,
     });
   } catch (error: any) {
     return jsonResponse(
@@ -88,6 +98,10 @@ export const GET: APIRoute = async (context) => {
         success: false,
         connected: true,
         calendars: [],
+        selected_calendar_id: null,
+        selected_calendar_name: null,
+        selected_calendar_access_role: null,
+        selected_calendar_can_write: false,
         error: error?.message || 'Google Kalender konnten nicht geladen werden.',
       },
       error?.status || 500

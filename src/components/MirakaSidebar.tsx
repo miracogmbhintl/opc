@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase, type UserProfile } from '../lib/supabase';
+import { readCachedOpcAuthProfile, clearCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES } from '../lib/opc-routes';
 import {
@@ -47,10 +48,10 @@ const OPC_LOGO =
 
 const STORAGE_KEY_COLLAPSED = 'miraka_sidebar_collapsed';
 
-const COLLAPSED_WIDTH = 72;
+const COLLAPSED_WIDTH = 70;
 const EXPANDED_WIDTH = 260;
 const RAIL_PADDING_LEFT = 12;
-const ICON_RAIL_WIDTH = 48;
+const ICON_RAIL_WIDTH = 40;
 
 const SIDEBAR_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 const SIDEBAR_WIDTH_TRANSITION = `width 420ms ${SIDEBAR_EASE}`;
@@ -236,27 +237,46 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   async function loadUserProfile() {
     try {
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
+      const cachedProfile = readCachedOpcAuthProfile();
 
-      if (!authUser) return;
+      if (cachedProfile) {
+        setUser(cachedProfile);
+        return;
+      }
 
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', authUser.id)
-        .maybeSingle();
+      if (typeof window === 'undefined') return;
 
-      if (profile) {
-        setUser(profile as UserProfile);
+      const rawUserData =
+        window.localStorage.getItem('mco_user_data') ||
+        window.localStorage.getItem('mco_auth');
+
+      const cachedRole = window.localStorage.getItem('mco_user_role');
+
+      if (rawUserData && cachedRole) {
+        const cached = JSON.parse(rawUserData);
+
+        setUser({
+          id: cached.id,
+          email: cached.email || '',
+          full_name:
+            cached.full_name ||
+            cached.name ||
+            cached.username ||
+            cached.email ||
+            'Benutzer',
+          role: cachedRole,
+          created_at: '',
+          updated_at: '',
+        } as UserProfile);
       }
     } catch (error) {
-      console.warn('Sidebar profile load failed:', error);
+      console.warn('Sidebar cached profile load failed:', error);
     }
   }
 
   async function handleLogout() {
+    clearCachedOpcAuthProfile();
+
     try {
       await supabase.auth.signOut();
     } catch (error) {
@@ -486,12 +506,8 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
     setIsMobileExpanded(!isMobileExpanded);
   }
 
-  function handleMobileNavigate(href: string) {
+  function handleMobileNavigate() {
     setIsMobileExpanded(false);
-
-    if (typeof window !== 'undefined') {
-      window.location.href = href;
-    }
   }
 
   const userDisplayName = getUserDisplayName(user);
@@ -683,7 +699,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
-            padding: `16px 12px 16px ${RAIL_PADDING_LEFT}px`,
+            padding: `0px 0px 0px ${RAIL_PADDING_LEFT}px`,
             flex: 1,
             overflowY: 'auto',
             overflowX: 'hidden',
@@ -959,10 +975,10 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                   const isPrimaryAction = item.key === 'zeiterfassung';
 
                   return (
-                    <button
-                      type="button"
+                    <a
                       key={item.key}
-                      onClick={() => handleMobileNavigate(item.href)}
+                      href={item.href}
+                      onClick={handleMobileNavigate}
                       title={item.label}
                       style={{
                         display: 'flex',
@@ -986,13 +1002,14 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                         height: '49.5px',
                         flexShrink: 0,
                         transition: 'background 0.2s ease',
+                        textDecoration: 'none',
                       }}
                     >
                       <Icon
                         size={isPrimaryAction ? 29.25 : 27}
                         strokeWidth={isPrimaryAction ? 2 : 1.5}
                       />
-                    </button>
+                    </a>
                   );
                 })}
               </>
@@ -1004,10 +1021,10 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                 const active = isActive(item);
 
                 return (
-                  <button
-                    type="button"
+                  <a
                     key={item.key}
-                    onClick={() => handleMobileNavigate(item.href)}
+                    href={item.href}
+                    onClick={handleMobileNavigate}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1023,11 +1040,12 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                       width: '100%',
                       fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
                       textAlign: 'left',
+                      textDecoration: 'none',
                     }}
                   >
                     <Icon size={24} strokeWidth={1.5} />
                     <span style={{ flex: 1 }}>{item.label}</span>
-                  </button>
+                  </a>
                 );
               })}
 
