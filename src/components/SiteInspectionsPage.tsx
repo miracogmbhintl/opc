@@ -170,7 +170,7 @@ export default function SiteInspectionsPage() {
   return (
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/besichtigungen" fullWidth hideTopBar>
       <OPCPageShell>
-        <div style={pageHeaderStyle}>
+        <div style={pageHeaderStyle} className="opc-mobile-page-header">
           <div>
             <p style={eyebrowStyle}>Sales Pipeline</p>
             <h1 style={titleStyle}>Besichtigungen</h1>
@@ -232,6 +232,7 @@ export default function SiteInspectionsPage() {
                   <a
                     key={inspection.id}
                     href={`${baseUrl}/besichtigung/${inspection.id}`}
+                    className="opc-inspections-row"
                     style={{
                       ...rowStyle,
                       borderBottom: index < filteredInspections.length - 1 ? `1px solid ${OPC_BRAND.border}` : 'none',
@@ -256,7 +257,13 @@ export default function SiteInspectionsPage() {
           )}
         </OPCListCard>
 
-        <style>{opcResponsiveStyle}</style>
+        <style>{`${opcResponsiveStyle}
+          @media (max-width: 760px) {
+            .opc-mobile-page-header { flex-direction: column !important; align-items: stretch !important; }
+            .opc-mobile-page-header a { width: 100% !important; }
+            .opc-inspections-row, .opc-quotes-row { grid-template-columns: 1fr !important; gap: 10px !important; padding: 18px !important; align-items: start !important; }
+          }
+`}</style>
       </OPCPageShell>
     </MirakaDashboardShell>
   );

@@ -605,13 +605,13 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
   return (
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={isNew ? '/besichtigung/neu' : `/besichtigung/${inspectionId}`} fullWidth hideTopBar>
       <OPCPageShell>
-        <div style={topBarStyle}>
-          <a href={`${baseUrl}/besichtigungen`} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+        <div style={topBarStyle} className="opc-mobile-topbar">
+          <a href={`${baseUrl}/besichtigungen`} className="opc-mobile-back" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
             <ArrowLeft size={16} />
             Zurück
           </a>
 
-          <div style={actionRowStyle}>
+          <div style={actionRowStyle} className="opc-mobile-action-row">
             <button type="button" disabled={saving} onClick={() => saveInspection()} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
               <Save size={16} />
               {saving ? 'Speichert...' : 'Speichern'}
@@ -626,10 +626,10 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
           </div>
         </div>
 
-        <section style={heroStyle}>
+        <section style={heroStyle} className="opc-mobile-hero">
           <div>
             <p style={eyebrowStyle}>Besichtigung</p>
-            <h1 style={titleStyle}>{isNew ? 'Neue Besichtigung' : 'Besichtigung bearbeiten'}</h1>
+            <h1 style={titleStyle} className="opc-mobile-title">{isNew ? 'Neue Besichtigung' : 'Besichtigung bearbeiten'}</h1>
             <p style={subtitleStyle}>{getClientLabel(client)} · {getSiteLabel(site)}</p>
           </div>
           <span style={statusBadgeStyle}>{getInspectionStatusLabel(form.status)}</span>
@@ -638,10 +638,10 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         {successMessage && <div style={successStyle}><Check size={16} />{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
 
-        <div style={gridStyle}>
+        <div style={gridStyle} className="opc-inspection-grid">
           <OPCListCard>
             <CardHeader title="Objekt & Leistung" />
-            <div style={fieldGridStyle}>
+            <div style={fieldGridStyle} className="opc-inspection-field-grid">
               <Field label="Leistung / Kategorie">
                 <input value={form.requested_service_category} onChange={(e) => updateField('requested_service_category', e.target.value)} style={inputStyle} placeholder="z.B. Endreinigung, Unterhaltsreinigung" />
               </Field>
@@ -675,7 +675,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
           <OPCListCard>
             <CardHeader title="Kalkulationshilfe" />
-            <div style={fieldGridStyle}>
+            <div style={fieldGridStyle} className="opc-inspection-field-grid">
               <Field label="Geschätzte Stunden">
                 <input value={form.estimated_hours} onChange={(e) => updateField('estimated_hours', e.target.value)} style={inputStyle} inputMode="decimal" />
               </Field>
@@ -708,7 +708,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         <section style={{ marginTop: 22 }}>
           <OPCListCard>
             <CardHeader title="Besichtigungsnotizen" />
-            <div style={notesGridStyle}>
+            <div style={notesGridStyle} className="opc-inspection-notes">
               <TextArea label="Zugang" value={form.access_notes} onChange={(value) => updateField('access_notes', value)} />
               <TextArea label="Parken" value={form.parking_notes} onChange={(value) => updateField('parking_notes', value)} />
               <TextArea label="Schlüssel / Zutritt" value={form.key_handover_notes} onChange={(value) => updateField('key_handover_notes', value)} />
@@ -722,7 +722,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
         <section style={{ marginTop: 22 }}>
           <OPCListCard>
-            <div style={mediaHeaderStyle}>
+            <div style={mediaHeaderStyle} className="opc-inspection-media-header">
               <CardHeader title="Bilder & Dateien" compact />
               <label style={{ ...opcBlackButtonStyle, width: 'auto', cursor: canUpload ? 'pointer' : 'not-allowed', opacity: canUpload ? 1 : 0.55 }}>
                 <UploadCloud size={16} />
@@ -736,7 +736,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
             ) : mediaPreviewRows.length === 0 ? (
               <div style={emptyStyle}>Noch keine Medien hochgeladen.</div>
             ) : (
-              <div style={mediaGridStyle}>
+              <div style={mediaGridStyle} className="opc-inspection-media-grid">
                 {mediaPreviewRows.map((media) => (
                   <div key={media.id} style={mediaCardStyle}>
                     <a href={media.preview_url || '#'} target="_blank" rel="noreferrer" style={mediaLinkStyle}>
@@ -765,7 +765,20 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         <style>{`
           ${opcResponsiveStyle}
           @media (max-width: 980px) {
-            .opc-inspection-grid, .opc-inspection-notes { grid-template-columns: 1fr !important; }
+            .opc-inspection-grid, .opc-inspection-field-grid, .opc-inspection-notes { grid-template-columns: 1fr !important; }
+          }
+
+          @media (max-width: 760px) {
+            .opc-mobile-topbar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+            .opc-mobile-action-row { display: grid !important; grid-template-columns: 1fr !important; width: 100% !important; }
+            .opc-mobile-action-row > *, .opc-mobile-back { width: 100% !important; }
+            .opc-mobile-hero { flex-direction: column !important; padding: 18px !important; border-radius: 18px !important; }
+            .opc-mobile-title { font-size: 34px !important; line-height: 0.96 !important; overflow-wrap: anywhere !important; }
+            .opc-inspection-grid, .opc-inspection-field-grid, .opc-inspection-notes { grid-template-columns: 1fr !important; gap: 14px !important; }
+            .opc-inspection-field-grid, .opc-inspection-notes { padding: 16px !important; }
+            .opc-inspection-media-header { flex-direction: column !important; align-items: stretch !important; padding: 16px !important; }
+            .opc-inspection-media-header label { width: 100% !important; }
+            .opc-inspection-media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; padding: 16px !important; gap: 10px !important; }
           }
         `}</style>
       </OPCPageShell>

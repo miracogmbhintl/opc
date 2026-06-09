@@ -322,6 +322,16 @@ export const opcResponsiveStyle = `
     display: none;
   }
 
+  .opc-requests-page,
+  .opc-requests-page * {
+    min-width: 0;
+  }
+
+  .opc-requests-page {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   @media (max-width: 1280px) {
     .opc-requests-metrics {
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
@@ -371,6 +381,30 @@ export const opcResponsiveStyle = `
 
     .opc-requests-metrics > * {
       min-width: 0 !important;
+    }
+  }
+
+  @media (max-width: 760px) {
+    html,
+    body {
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    .opc-requests-page {
+      padding-bottom: 150px !important;
+      overflow-x: hidden !important;
+    }
+
+    .opc-requests-page input,
+    .opc-requests-page select,
+    .opc-requests-page textarea {
+      font-size: 16px !important;
+    }
+
+    .opc-requests-page button,
+    .opc-requests-page a {
+      max-width: 100%;
     }
   }
 

@@ -144,7 +144,7 @@ export default function QuotesPage() {
   return (
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/offerten" fullWidth hideTopBar>
       <OPCPageShell>
-        <div style={pageHeaderStyle}>
+        <div style={pageHeaderStyle} className="opc-mobile-page-header">
           <div>
             <p style={eyebrowStyle}>Sales Pipeline</p>
             <h1 style={titleStyle}>Offerten</h1>
@@ -193,7 +193,7 @@ export default function QuotesPage() {
                 const site = quote.client_site_id ? siteMap.get(quote.client_site_id) : undefined;
 
                 return (
-                  <a key={quote.id} href={`${baseUrl}/offerte/${quote.id}`} style={{ ...rowStyle, borderBottom: index < filteredQuotes.length - 1 ? `1px solid ${OPC_BRAND.border}` : 'none' }}>
+                  <a key={quote.id} href={`${baseUrl}/offerte/${quote.id}`} className="opc-quotes-row" style={{ ...rowStyle, borderBottom: index < filteredQuotes.length - 1 ? `1px solid ${OPC_BRAND.border}` : 'none' }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={rowTitleStyle}>{quote.quote_number} · {quote.title}</div>
                       <div style={rowMetaStyle}>{getClientName(client)}{getSiteName(site) ? ` · ${getSiteName(site)}` : ''}</div>
@@ -208,7 +208,13 @@ export default function QuotesPage() {
           )}
         </OPCListCard>
 
-        <style>{opcResponsiveStyle}</style>
+        <style>{`${opcResponsiveStyle}
+          @media (max-width: 760px) {
+            .opc-mobile-page-header { flex-direction: column !important; align-items: stretch !important; }
+            .opc-mobile-page-header a { width: 100% !important; }
+            .opc-inspections-row, .opc-quotes-row { grid-template-columns: 1fr !important; gap: 10px !important; padding: 18px !important; align-items: start !important; }
+          }
+`}</style>
       </OPCPageShell>
     </MirakaDashboardShell>
   );

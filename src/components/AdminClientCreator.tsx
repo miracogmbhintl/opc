@@ -807,6 +807,15 @@ export default function AdminClientCreator() {
           .opc-create-client-grid-2 { grid-template-columns: 1fr !important; }
           .opc-create-client-address { grid-template-columns: 1fr !important; }
         }
+        @media (max-width: 760px) {
+          body { overflow-x: hidden; }
+          input, select, textarea { font-size: 16px !important; }
+          form { padding: 16px !important; }
+          form > div:first-child { gap: 10px !important; }
+          form > div:last-child { flex-direction: column !important; }
+          form > div:last-child a,
+          form > div:last-child button { width: 100% !important; }
+        }
       `}</style>
     </div>
   );

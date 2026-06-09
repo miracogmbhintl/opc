@@ -696,13 +696,13 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   return (
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={`/offerte/${quoteId}`} fullWidth hideTopBar>
       <OPCPageShell>
-        <div style={topBarStyle}>
-          <a href={`${baseUrl}/offerten`} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+        <div style={topBarStyle} className="opc-mobile-topbar">
+          <a href={`${baseUrl}/offerten`} className="opc-mobile-back" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
             <ArrowLeft size={16} />
             Zurück
           </a>
 
-          <div style={actionRowStyle}>
+          <div style={actionRowStyle} className="opc-mobile-action-row">
             <button type="button" disabled={saving} onClick={() => saveQuote()} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
               <Save size={16} />
               {saving ? 'Speichert...' : 'Speichern'}
@@ -716,14 +716,14 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           </div>
         </div>
 
-        <section style={heroStyle}>
+        <section style={heroStyle} className="opc-mobile-hero">
           <div>
             <p style={eyebrowStyle}>Offerte</p>
-            <h1 style={titleStyle}>{quote.quote_number}</h1>
+            <h1 style={titleStyle} className="opc-mobile-title">{quote.quote_number}</h1>
             <p style={subtitleStyle}>{quote.title}</p>
             {lastSavedAt && <p style={savedHintStyle}>Zuletzt gespeichert um {lastSavedAt}</p>}
           </div>
-          <div style={totalBoxStyle}>
+          <div style={totalBoxStyle} className="opc-mobile-total-box">
             <span style={totalLabelStyle}>Total inkl. MWST</span>
             <strong style={totalValueStyle}>{formatMoney(totals.total)}</strong>
             <span style={totalSubLabelStyle}>Preisangaben: {priceInputMode === 'incl' ? 'inkl. MWST' : 'exkl. MWST'}</span>
@@ -736,7 +736,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         <section style={{ marginBottom: 22 }}>
           <OPCListCard>
             <CardHeader title="Nächste Schritte" />
-            <div style={nextActionsStyle}>
+            <div style={nextActionsStyle} className="opc-mobile-next-actions">
               <button type="button" onClick={handleDownloadQuotePdf} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
                 <Download size={16} /> Offerte PDF herunterladen
               </button>
@@ -759,7 +759,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         <div style={gridStyle} className="opc-quote-grid">
           <OPCListCard>
             <CardHeader title="Offertenkopf" />
-            <div style={fieldGridStyle}>
+            <div style={fieldGridStyle} className="opc-quote-field-grid">
               <Field label="Titel"><input value={quote.title || ''} onChange={(e) => updateQuoteField('title', e.target.value)} style={inputStyle} /></Field>
               <Field label="Status">
                 <select value={quote.status || 'draft'} onChange={(e) => updateQuoteField('status', e.target.value)} style={opcSelectStyle}>
@@ -806,7 +806,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
               <button type="button" onClick={addItem} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><Plus size={16} />Position</button>
             </div>
 
-            <div style={itemsStackStyle}>
+            <div style={itemsStackStyle} className="opc-quote-items-stack">
               {items.map((item, index) => (
                 <div key={item.id || index} style={itemCardStyle}>
                   <div style={itemGridStyle} className="opc-quote-item-grid">
@@ -823,7 +823,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
                       />
                     </Field>
                     <Field label="Beschreibung"><textarea value={item.description || ''} onChange={(e) => updateItem(index, 'description', e.target.value)} style={textareaStyle} rows={3} /></Field>
-                    <div style={itemTotalStyle}>{formatMoney(item.total_chf)}</div>
+                    <div style={itemTotalStyle} className="opc-quote-item-total">{formatMoney(item.total_chf)}</div>
                     <button type="button" onClick={() => removeItem(item, index)} style={iconButtonStyle}><Trash2 size={16} /></button>
                   </div>
                   <div style={itemHintStyle}>
@@ -867,7 +867,21 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         <style>{`
           ${opcResponsiveStyle}
           @media (max-width: 980px) {
-            .opc-quote-grid, .opc-quote-item-grid, .opc-quote-text-grid { grid-template-columns: 1fr !important; }
+            .opc-quote-grid, .opc-quote-field-grid, .opc-quote-item-grid, .opc-quote-text-grid { grid-template-columns: 1fr !important; }
+          }
+
+          @media (max-width: 760px) {
+            .opc-mobile-topbar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
+            .opc-mobile-action-row { display: grid !important; grid-template-columns: 1fr !important; width: 100% !important; }
+            .opc-mobile-action-row > *, .opc-mobile-back, .opc-mobile-next-actions > * { width: 100% !important; }
+            .opc-mobile-hero { flex-direction: column !important; padding: 18px !important; border-radius: 18px !important; }
+            .opc-mobile-title { font-size: 30px !important; line-height: 0.98 !important; overflow-wrap: anywhere !important; }
+            .opc-mobile-total-box { width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; }
+            .opc-mobile-next-actions { display: grid !important; grid-template-columns: 1fr !important; padding: 16px !important; }
+            .opc-quote-grid, .opc-quote-field-grid, .opc-quote-item-grid, .opc-quote-text-grid { grid-template-columns: 1fr !important; gap: 14px !important; }
+            .opc-quote-field-grid, .opc-quote-text-grid, .opc-quote-items-stack { padding: 16px !important; }
+            .opc-quote-item-grid > * { width: 100% !important; }
+            .opc-quote-item-total { min-height: auto !important; padding: 8px 0 0 !important; }
           }
         `}</style>
       </OPCPageShell>
