@@ -5,6 +5,7 @@ import {
   Briefcase,
   Building2,
   Calendar,
+  ClipboardList,
   Check,
   Clock,
   Edit2,
@@ -322,6 +323,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
   const appBaseUrl = baseUrl || '';
   const displayClient = editMode ? editedClient : client;
   const isAdminOrOwner = userRole === 'owner' || userRole === 'admin';
+  const canManageSalesPipeline = ['owner', 'admin', 'dispatch', 'estimator', 'sales'].includes(String(userRole || '').toLowerCase());
   const hasPortalAccess = Boolean(clientUser?.can_access_client_portal);
 
   useEffect(() => {
@@ -617,6 +619,19 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     });
   }
 
+
+  function startInspection() {
+    if (!client) return;
+
+    const params = new URLSearchParams();
+    params.set('client_id', resolvedClientId);
+
+    if (client.primary_site_id) params.set('site_id', client.primary_site_id);
+    if (client.contact_id) params.set('contact_id', client.contact_id);
+
+    window.location.href = `${appBaseUrl}/besichtigung/neu?${params.toString()}`;
+  }
+
   function updateEditedClient<K extends keyof OpcClientDetail>(key: K, value: OpcClientDetail[K]) {
     setEditedClient((prev) => {
       if (!prev) return prev;
@@ -711,12 +726,21 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
 
         <div style={actionRowStyle}>
           {!editMode ? (
-            isAdminOrOwner && (
-              <button onClick={() => setEditMode(true)} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
-                <Edit2 size={16} />
-                Bearbeiten
-              </button>
-            )
+            <>
+              {canManageSalesPipeline && (
+                <button type="button" onClick={startInspection} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+                  <ClipboardList size={16} />
+                  Besichtigung starten
+                </button>
+              )}
+
+              {isAdminOrOwner && (
+                <button onClick={() => setEditMode(true)} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+                  <Edit2 size={16} />
+                  Bearbeiten
+                </button>
+              )}
+            </>
           ) : (
             <>
               <button onClick={handleCancel} disabled={saving} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>

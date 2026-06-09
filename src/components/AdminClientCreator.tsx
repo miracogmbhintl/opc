@@ -2,18 +2,18 @@ import { useEffect, useMemo, useState, type CSSProperties, type ChangeEvent, typ
 import {
   ArrowLeft,
   Building2,
-  CheckCircle2,
   FileText,
   Globe2,
   MapPin,
   Search,
-  StickyNote,
   Trash2,
   Upload,
   UserRound,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+
+type ClientMode = 'private' | 'company';
 
 type CreatedClient = {
   id: string;
@@ -29,12 +29,13 @@ type CreatedClient = {
 };
 
 type FormState = {
+  clientMode: ClientMode;
   companyName: string;
   website: string;
   industry: string;
   taxId: string;
-  clientType: string;
-  fullName: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
   preferredContact: string;
@@ -56,12 +57,13 @@ interface ApiResponse<T = any> {
 }
 
 const initialFormState: FormState = {
+  clientMode: 'private',
   companyName: '',
   website: '',
   industry: '',
   taxId: '',
-  clientType: 'geschaeftskunden',
-  fullName: '',
+  firstName: '',
+  lastName: '',
   email: '',
   phone: '',
   preferredContact: 'email',
@@ -159,6 +161,14 @@ const sectionTitleStyle: CSSProperties = {
   color: BRAND.text,
 };
 
+function clean(value: unknown) {
+  return String(value || '').trim();
+}
+
+function fullNameFrom(form: FormState) {
+  return [form.firstName, form.lastName].map(clean).filter(Boolean).join(' ').trim();
+}
+
 function formatDate(value?: string) {
   if (!value) return '-';
 
@@ -173,21 +183,10 @@ function formatDate(value?: string) {
   });
 }
 
-function Field({
-  label,
-  required,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label style={labelStyle}>
-        {label}
-        {required ? <span style={{ color: BRAND.red }}> *</span> : null}
-      </label>
+      <label style={labelStyle}>{label}</label>
       {children}
     </div>
   );
@@ -198,14 +197,12 @@ function Input({
   value,
   onChange,
   placeholder,
-  required,
   type = 'text',
 }: {
   name: keyof FormState;
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   placeholder?: string;
-  required?: boolean;
   type?: string;
 }) {
   return (
@@ -213,7 +210,6 @@ function Input({
       type={type}
       name={name}
       value={value}
-      required={required}
       placeholder={placeholder}
       onChange={onChange}
       style={inputStyle}
@@ -256,28 +252,16 @@ function Select({
   );
 }
 
-function SectionHeader({
-  icon,
-  title,
-}: {
-  icon: React.ReactNode;
-  title: string;
-}) {
+function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        marginBottom: '18px',
-      }}
-    >
-      <span
+    <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '16px' }}>
+      <div
         style={{
-          width: '32px',
-          height: '32px',
+          width: '30px',
+          height: '30px',
           borderRadius: '10px',
-          background: '#F8F8F8',
+          background: '#F9FAFB',
+          border: `1px solid ${BRAND.border}`,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -285,45 +269,116 @@ function SectionHeader({
         }}
       >
         {icon}
-      </span>
+      </div>
       <h2 style={sectionTitleStyle}>{title}</h2>
     </div>
   );
 }
 
-function StatusMessage({
-  type,
-  message,
-}: {
-  type: 'success' | 'error' | 'warning';
-  message: string;
-}) {
+function StatusMessage({ type, message }: { type: 'error' | 'success' | 'warning'; message: string }) {
   if (!message) return null;
 
-  const isSuccess = type === 'success';
-  const isWarning = type === 'warning';
+  const palette =
+    type === 'error'
+      ? { bg: BRAND.redBg, color: BRAND.red }
+      : type === 'success'
+        ? { bg: BRAND.greenBg, color: BRAND.green }
+        : { bg: BRAND.amberBg, color: BRAND.amber };
 
   return (
     <div
       style={{
-        padding: '13px 15px',
+        marginBottom: '16px',
+        padding: '12px 14px',
         borderRadius: '14px',
-        border: `1px solid ${
-          isSuccess ? '#BBF7D0' : isWarning ? '#FDE68A' : '#FCA5A5'
-        }`,
-        background: isSuccess ? BRAND.greenBg : isWarning ? BRAND.amberBg : BRAND.redBg,
-        color: isSuccess ? BRAND.green : isWarning ? BRAND.amber : BRAND.red,
+        background: palette.bg,
+        color: palette.color,
         fontSize: '14px',
-        fontWeight: 660,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        marginBottom: '18px',
+        fontWeight: 700,
       }}
     >
-      {isSuccess ? <CheckCircle2 size={17} /> : null}
       {message}
     </div>
+  );
+}
+
+function Dropdown({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: 'calc(100% + 5px)',
+        left: 0,
+        right: 0,
+        maxHeight: '220px',
+        overflowY: 'auto',
+        background: '#FFFFFF',
+        border: `1px solid ${BRAND.border}`,
+        borderRadius: '12px',
+        boxShadow: '0 12px 30px rgba(15, 17, 21, 0.10)',
+        zIndex: 50,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DropdownItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      style={{
+        width: '100%',
+        border: 'none',
+        background: 'transparent',
+        padding: '11px 14px',
+        textAlign: 'left',
+        color: BRAND.text,
+        fontSize: '14px',
+        fontWeight: 600,
+        cursor: 'pointer',
+        fontFamily: pageFont,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ModeButton({
+  active,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        minHeight: '74px',
+        borderRadius: '16px',
+        border: active ? `1px solid ${BRAND.black}` : `1px solid ${BRAND.border}`,
+        background: active ? '#111111' : '#FFFFFF',
+        color: active ? '#FFFFFF' : BRAND.text,
+        padding: '14px 16px',
+        textAlign: 'left',
+        cursor: 'pointer',
+        fontFamily: pageFont,
+      }}
+    >
+      <div style={{ fontSize: '14px', fontWeight: 820, marginBottom: '4px' }}>{title}</div>
+      <div style={{ fontSize: '12px', fontWeight: 600, opacity: active ? 0.82 : 0.66 }}>{description}</div>
+    </button>
   );
 }
 
@@ -343,17 +398,13 @@ export default function AdminClientCreator() {
 
   const filteredIndustries = useMemo(() => {
     const query = industrySearch.trim().toLowerCase();
-
     if (!query) return industries;
-
     return industries.filter((industry) => industry.toLowerCase().includes(query));
   }, [industrySearch]);
 
   const filteredCountries = useMemo(() => {
     const query = countrySearch.trim().toLowerCase();
-
     if (!query) return countries;
-
     return countries.filter((country) => country.toLowerCase().includes(query));
   }, [countrySearch]);
 
@@ -378,20 +429,13 @@ export default function AdminClientCreator() {
 
     try {
       const accessToken = await getAccessToken();
-
       const response = await fetch(`${baseUrl}/api/opc/create-client`, {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
 
       const result = (await response.json().catch(() => null)) as ApiResponse<CreatedClient> | null;
-
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || 'Kunden konnten nicht geladen werden.');
-      }
-
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Kunden konnten nicht geladen werden.');
       setClients(result.clients || []);
     } catch (err) {
       console.error('Error loading recently created clients:', err);
@@ -403,28 +447,27 @@ export default function AdminClientCreator() {
 
   function handleChange(event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
     const { name, value } = event.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  }
 
+  function setMode(mode: ClientMode) {
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      clientMode: mode,
+      industry: mode === 'private' ? 'Privathaushalt' : prev.industry,
     }));
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-
     setError('');
     setWarning('');
-
     if (!file) return;
 
     const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
     const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
     const fileName = file.name.toLowerCase();
-
-    const validType =
-      allowedTypes.includes(file.type) ||
-      allowedExtensions.some((extension) => fileName.endsWith(extension));
+    const validType = allowedTypes.includes(file.type) || allowedExtensions.some((extension) => fileName.endsWith(extension));
 
     if (!validType) {
       setError('Bitte PDF, JPG oder PNG hochladen.');
@@ -454,7 +497,6 @@ export default function AdminClientCreator() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setLoading(true);
     setError('');
     setSuccess('');
@@ -462,38 +504,25 @@ export default function AdminClientCreator() {
 
     try {
       const accessToken = await getAccessToken();
-
       const payload = new FormData();
+      const fullName = fullNameFrom(formData);
+      const clientType = formData.clientMode === 'company' ? 'geschaeftskunden' : 'privatkunden';
 
-      Object.entries(formData).forEach(([key, value]) => {
-        payload.append(key, value || '');
-      });
+      Object.entries(formData).forEach(([key, value]) => payload.append(key, value || ''));
+      payload.append('clientType', clientType);
+      payload.append('fullName', fullName);
 
-      if (businessCertificate) {
-        payload.append('businessCertificate', businessCertificate);
-      }
+      if (businessCertificate) payload.append('businessCertificate', businessCertificate);
 
       const response = await fetch(`${baseUrl}/api/opc/create-client`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
         body: payload,
       });
 
-      type CreateClientResponse = {
-        success?: boolean;
-        error?: string;
-        certificateWarning?: string;
-      };
+      const result = (await response.json().catch(() => null)) as { success?: boolean; error?: string; certificateWarning?: string } | null;
 
-      const result = (await response.json().catch(() => null)) as
-        | CreateClientResponse
-        | null;
-
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || 'Kunde konnte nicht angelegt werden.');
-      }
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Kunde konnte nicht angelegt werden.');
 
       setSuccess('Kunde wurde erfolgreich angelegt. Es wurde kein Portalzugang erstellt.');
       setWarning(result.certificateWarning || '');
@@ -507,29 +536,13 @@ export default function AdminClientCreator() {
     }
   }
 
+  const isCompany = formData.clientMode === 'company';
+  const selectedCountry = formData.country || countrySearch || 'Schweiz';
+
   return (
-    <div
-      style={{
-        width: '100%',
-        fontFamily: pageFont,
-        color: BRAND.text,
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '1280px',
-          margin: '0 auto',
-        }}
-      >
-        <div
-          style={{
-            marginBottom: '18px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '16px',
-          }}
-        >
+    <div style={{ width: '100%', fontFamily: pageFont, color: BRAND.text }}>
+      <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
+        <div style={{ marginBottom: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
           <a
             href={`${baseUrl}/kunden`}
             style={{
@@ -551,154 +564,78 @@ export default function AdminClientCreator() {
             Zurück zu Kunden
           </a>
 
-          <div
-            style={{
-              color: BRAND.muted,
-              fontSize: '13px',
-              fontWeight: 620,
-            }}
-          >
-            Interner Kunde · Kein automatischer Portalzugang
-          </div>
+          <div style={{ color: BRAND.muted, fontSize: '13px', fontWeight: 620 }}>Interner Kunde · Kein automatischer Portalzugang</div>
         </div>
 
         <StatusMessage type="error" message={error} />
         <StatusMessage type="success" message={success} />
         <StatusMessage type="warning" message={warning} />
 
-        <form
-          onSubmit={handleSubmit}
-          style={{
-            ...cardStyle,
-            padding: '28px',
-            marginBottom: '22px',
-          }}
-        >
-          <div style={{ marginBottom: '30px' }}>
-            <SectionHeader icon={<Building2 size={18} />} title="Unternehmensinformationen" />
-
-            <div className="opc-create-client-grid-2" style={grid2Style}>
-              <Field label="Firmenname" required>
-                <Input
-                  name="companyName"
-                  value={formData.companyName}
-                  onChange={handleChange}
-                  placeholder="Firmenname eingeben"
-                  required
-                />
-              </Field>
-
-              <Field label="Website">
-                <Input
-                  name="website"
-                  value={formData.website}
-                  onChange={handleChange}
-                  placeholder="https://example.com"
-                />
-              </Field>
-
-              <Field label="Branche">
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    value={formData.industry || industrySearch}
-                    placeholder="Branche suchen oder auswählen"
-                    onChange={(event) => {
-                      setIndustrySearch(event.target.value);
-                      setFormData((prev) => ({ ...prev, industry: '' }));
-                      setShowIndustryDropdown(true);
-                    }}
-                    onFocus={() => setShowIndustryDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowIndustryDropdown(false), 160)}
-                    style={{
-                      ...inputStyle,
-                      paddingLeft: '38px',
-                    }}
-                  />
-                  <Search
-                    size={15}
-                    color={BRAND.faint}
-                    style={{
-                      position: 'absolute',
-                      left: '14px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      pointerEvents: 'none',
-                    }}
-                  />
-                  {showIndustryDropdown && filteredIndustries.length > 0 && (
-                    <Dropdown>
-                      {filteredIndustries.map((industry) => (
-                        <DropdownItem
-                          key={industry}
-                          onClick={() => {
-                            setFormData((prev) => ({ ...prev, industry }));
-                            setIndustrySearch('');
-                            setShowIndustryDropdown(false);
-                          }}
-                        >
-                          {industry}
-                        </DropdownItem>
-                      ))}
-                    </Dropdown>
-                  )}
-                </div>
-              </Field>
-
-              <Field label="UID / MWST-Nummer">
-                <Input
-                  name="taxId"
-                  value={formData.taxId}
-                  onChange={handleChange}
-                  placeholder="z.B. CHE-123.456.789"
-                />
-              </Field>
-
-              <Field label="Kundentyp">
-                <Select name="clientType" value={formData.clientType} onChange={handleChange}>
-                  <option value="geschaeftskunden">Geschäftskunde</option>
-                  <option value="privatkunden">Privatkunde</option>
-                  <option value="baukunden">Baukunde</option>
-                  <option value="unknown">Unbekannt</option>
-                </Select>
-              </Field>
-            </div>
+        <form onSubmit={handleSubmit} style={{ ...cardStyle, padding: '28px', marginBottom: '22px' }}>
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '28px' }}>
+            <ModeButton active={!isCompany} title="Privatperson" description="Vorname, Nachname und private Adresse" onClick={() => setMode('private')} />
+            <ModeButton active={isCompany} title="Unternehmen" description="Firma, UID/MWST und Kontaktperson" onClick={() => setMode('company')} />
           </div>
 
+          {isCompany ? (
+            <div style={{ marginBottom: '30px' }}>
+              <SectionHeader icon={<Building2 size={18} />} title="Unternehmen" />
+              <div className="opc-create-client-grid-2" style={grid2Style}>
+                <Field label="Firmenname">
+                  <Input name="companyName" value={formData.companyName} onChange={handleChange} placeholder="Firmenname eingeben" />
+                </Field>
+                <Field label="Website">
+                  <Input name="website" value={formData.website} onChange={handleChange} placeholder="https://example.com" />
+                </Field>
+                <Field label="Branche">
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="text"
+                      value={formData.industry || industrySearch}
+                      placeholder="Branche suchen oder auswählen"
+                      onChange={(event) => {
+                        setIndustrySearch(event.target.value);
+                        setFormData((prev) => ({ ...prev, industry: '' }));
+                        setShowIndustryDropdown(true);
+                      }}
+                      onFocus={() => setShowIndustryDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowIndustryDropdown(false), 160)}
+                      style={{ ...inputStyle, paddingLeft: '38px' }}
+                    />
+                    <Search size={15} color={BRAND.faint} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                    {showIndustryDropdown && filteredIndustries.length > 0 && (
+                      <Dropdown>
+                        {filteredIndustries.map((industry) => (
+                          <DropdownItem key={industry} onClick={() => { setFormData((prev) => ({ ...prev, industry })); setIndustrySearch(''); setShowIndustryDropdown(false); }}>
+                            {industry}
+                          </DropdownItem>
+                        ))}
+                      </Dropdown>
+                    )}
+                  </div>
+                </Field>
+                <Field label="UID / MWST-Nummer">
+                  <Input name="taxId" value={formData.taxId} onChange={handleChange} placeholder="z.B. CHE-123.456.789" />
+                </Field>
+              </div>
+            </div>
+          ) : null}
+
           <div style={{ marginBottom: '30px' }}>
-            <SectionHeader icon={<UserRound size={18} />} title="Kontaktperson" />
-
+            <SectionHeader icon={<UserRound size={18} />} title={isCompany ? 'Kontaktperson' : 'Privatperson'} />
             <div className="opc-create-client-grid-2" style={grid2Style}>
-              <Field label="Vollständiger Name" required>
-                <Input
-                  name="fullName"
-                  value={formData.fullName}
-                  onChange={handleChange}
-                  placeholder="Kontaktperson eingeben"
-                  required
-                />
+              <Field label="Vorname">
+                <Input name="firstName" value={formData.firstName} onChange={handleChange} placeholder="Vorname" />
               </Field>
-
-              <Field label="E-Mail-Adresse" required>
-                <Input
-                  name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  placeholder="email@example.com"
-                  type="email"
-                  required
-                />
+              <Field label="Nachname">
+                <Input name="lastName" value={formData.lastName} onChange={handleChange} placeholder="Nachname" />
               </Field>
-
+              <Field label="E-Mail-Adresse">
+                <Input name="email" value={formData.email} onChange={handleChange} placeholder="email@example.com" type="email" />
+              </Field>
               <Field label="Telefonnummer">
-                <Input
-                  name="phone"
-                  value={formData.phone}
-                  onChange={handleChange}
-                  placeholder="+41 ..."
-                />
+                <Input name="phone" value={formData.phone} onChange={handleChange} placeholder="+41 ..." />
               </Field>
-
               <Field label="Bevorzugter Kontaktweg">
                 <Select name="preferredContact" value={formData.preferredContact} onChange={handleChange}>
                   <option value="email">E-Mail</option>
@@ -711,103 +648,44 @@ export default function AdminClientCreator() {
 
           <div style={{ marginBottom: '30px' }}>
             <SectionHeader icon={<MapPin size={18} />} title="Adresse" />
-
-            <div
-              className="opc-create-client-address"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1fr) 180px',
-                gap: '18px',
-                marginBottom: '18px',
-              }}
-            >
+            <div className="opc-create-client-address" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 180px', gap: '18px', marginBottom: '18px' }}>
               <Field label="Strasse">
-                <Input
-                  name="street"
-                  value={formData.street}
-                  onChange={handleChange}
-                  placeholder="Strasse eingeben"
-                />
+                <Input name="street" value={formData.street} onChange={handleChange} placeholder="Strasse eingeben" />
               </Field>
-
               <Field label="Nummer">
-                <Input
-                  name="streetNumber"
-                  value={formData.streetNumber}
-                  onChange={handleChange}
-                  placeholder="Nr."
-                />
+                <Input name="streetNumber" value={formData.streetNumber} onChange={handleChange} placeholder="Nr." />
               </Field>
             </div>
-
             <div className="opc-create-client-grid-2" style={grid2Style}>
-              <Field label="Stadt">
-                <Input
-                  name="city"
-                  value={formData.city}
-                  onChange={handleChange}
-                  placeholder="Stadt eingeben"
-                />
-              </Field>
-
-              <Field label="Kanton / Bundesland">
-                <Input
-                  name="state"
-                  value={formData.state}
-                  onChange={handleChange}
-                  placeholder="Kanton oder Bundesland"
-                />
-              </Field>
-
               <Field label="PLZ">
-                <Input
-                  name="zipCode"
-                  value={formData.zipCode}
-                  onChange={handleChange}
-                  placeholder="PLZ eingeben"
-                />
+                <Input name="zipCode" value={formData.zipCode} onChange={handleChange} placeholder="PLZ" />
               </Field>
-
+              <Field label="Stadt">
+                <Input name="city" value={formData.city} onChange={handleChange} placeholder="Stadt" />
+              </Field>
+              <Field label="Kanton / Bundesland">
+                <Input name="state" value={formData.state} onChange={handleChange} placeholder="Kanton oder Bundesland" />
+              </Field>
               <Field label="Land">
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text"
-                    value={formData.country || countrySearch}
-                    placeholder="Land suchen oder auswählen"
+                    value={selectedCountry}
+                    placeholder="Land"
                     onChange={(event) => {
                       setCountrySearch(event.target.value);
-                      setFormData((prev) => ({ ...prev, country: '' }));
+                      setFormData((prev) => ({ ...prev, country: event.target.value }));
                       setShowCountryDropdown(true);
                     }}
                     onFocus={() => setShowCountryDropdown(true)}
                     onBlur={() => setTimeout(() => setShowCountryDropdown(false), 160)}
-                    style={{
-                      ...inputStyle,
-                      paddingLeft: '38px',
-                    }}
+                    style={{ ...inputStyle, paddingLeft: '38px' }}
                   />
-                  <Globe2
-                    size={15}
-                    color={BRAND.faint}
-                    style={{
-                      position: 'absolute',
-                      left: '14px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      pointerEvents: 'none',
-                    }}
-                  />
+                  <Globe2 size={15} color={BRAND.faint} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
                   {showCountryDropdown && filteredCountries.length > 0 && (
                     <Dropdown>
                       {filteredCountries.map((country) => (
-                        <DropdownItem
-                          key={country}
-                          onClick={() => {
-                            setFormData((prev) => ({ ...prev, country }));
-                            setCountrySearch('');
-                            setShowCountryDropdown(false);
-                          }}
-                        >
+                        <DropdownItem key={country} onClick={() => { setFormData((prev) => ({ ...prev, country })); setCountrySearch(''); setShowCountryDropdown(false); }}>
                           {country}
                         </DropdownItem>
                       ))}
@@ -818,143 +696,52 @@ export default function AdminClientCreator() {
             </div>
           </div>
 
-          <div
-            className="opc-create-client-grid-2"
-            style={{
-              ...grid2Style,
-              alignItems: 'start',
-              marginBottom: '28px',
-            }}
-          >
-            <div>
-              <SectionHeader icon={<StickyNote size={18} />} title="Interne Notizen" />
-
-              <Field label="Notizen nur für Admins">
+          <div style={{ marginBottom: '30px' }}>
+            <div className="opc-create-client-grid-2" style={grid2Style}>
+              <Field label="Interne Notizen">
                 <textarea
                   name="internalNotes"
                   value={formData.internalNotes}
                   onChange={handleChange}
-                  rows={6}
-                  placeholder="Interne Notizen zu diesem Kunden..."
-                  style={{
-                    width: '100%',
-                    minHeight: '160px',
-                    padding: '13px',
-                    borderRadius: '12px',
-                    border: `1px solid ${BRAND.border}`,
-                    background: '#FFFFFF',
-                    color: BRAND.text,
-                    outline: 'none',
-                    fontSize: '14px',
-                    fontWeight: 560,
-                    fontFamily: pageFont,
-                    resize: 'vertical',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={(event) => {
-                    event.currentTarget.style.borderColor = BRAND.black;
-                  }}
-                  onBlur={(event) => {
-                    event.currentTarget.style.borderColor = BRAND.border;
-                  }}
+                  placeholder="Notizen nur für Admins"
+                  style={{ ...inputStyle, minHeight: '160px', paddingTop: '13px', resize: 'vertical' }}
                 />
               </Field>
-            </div>
 
-            <div>
-              <SectionHeader icon={<FileText size={18} />} title="Handelsregister / Dokument" />
-
-              <Field label="PDF, JPG oder PNG · max. 10MB">
+              <Field label={isCompany ? 'Handelsregister / Dokument' : 'Optionales Dokument'}>
                 {!businessCertificate ? (
                   <label
                     style={{
-                      width: '100%',
                       minHeight: '160px',
                       borderRadius: '14px',
-                      border: `2px dashed ${BRAND.border}`,
+                      border: `1px dashed ${BRAND.borderStrong}`,
                       background: '#FAFAFA',
                       display: 'flex',
-                      flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
+                      flexDirection: 'column',
+                      gap: '8px',
                       cursor: 'pointer',
                       color: BRAND.muted,
-                      boxSizing: 'border-box',
+                      fontSize: '13px',
+                      fontWeight: 700,
                     }}
                   >
-                    <Upload size={28} color={BRAND.faint} style={{ marginBottom: '10px' }} />
-                    <span style={{ fontSize: '14px', fontWeight: 680, marginBottom: '4px' }}>
-                      Datei hochladen
-                    </span>
-                    <span style={{ fontSize: '12px', fontWeight: 560 }}>
-                      PDF, JPG, PNG
-                    </span>
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={handleFileChange}
-                      style={{ display: 'none' }}
-                    />
+                    <Upload size={22} />
+                    Datei hochladen
+                    <span style={{ fontSize: '11px', color: BRAND.faint }}>PDF, JPG oder PNG · max. 10MB</span>
+                    <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={handleFileChange} style={{ display: 'none' }} />
                   </label>
                 ) : (
-                  <div
-                    style={{
-                      minHeight: '160px',
-                      borderRadius: '14px',
-                      border: `1px solid ${BRAND.border}`,
-                      background: '#FAFAFA',
-                      padding: '18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '16px',
-                    }}
-                  >
+                  <div style={{ minHeight: '160px', borderRadius: '14px', border: `1px solid ${BRAND.border}`, background: '#FAFAFA', padding: '18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
                       <FileText size={22} color={BRAND.black} />
                       <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            fontSize: '14px',
-                            fontWeight: 760,
-                            color: BRAND.text,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            maxWidth: '320px',
-                          }}
-                        >
-                          {businessCertificate.name}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: '12px',
-                            color: BRAND.muted,
-                            fontWeight: 560,
-                            marginTop: '4px',
-                          }}
-                        >
-                          {(businessCertificate.size / 1024 / 1024).toFixed(2)} MB
-                        </div>
+                        <div style={{ fontSize: '14px', fontWeight: 760, color: BRAND.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '320px' }}>{businessCertificate.name}</div>
+                        <div style={{ fontSize: '12px', color: BRAND.muted, fontWeight: 560, marginTop: '4px' }}>{(businessCertificate.size / 1024 / 1024).toFixed(2)} MB</div>
                       </div>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={removeFile}
-                      style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '10px',
-                        border: `1px solid ${BRAND.border}`,
-                        background: '#FFFFFF',
-                        color: BRAND.muted,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        cursor: 'pointer',
-                      }}
-                    >
+                    <button type="button" onClick={removeFile} style={{ width: '36px', height: '36px', borderRadius: '10px', border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.muted, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -963,97 +750,20 @@ export default function AdminClientCreator() {
             </div>
           </div>
 
-          <div
-            style={{
-              borderTop: `1px solid ${BRAND.border}`,
-              paddingTop: '20px',
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '12px',
-            }}
-          >
-            <a
-              href={`${baseUrl}/kunden`}
-              style={{
-                height: '44px',
-                padding: '0 18px',
-                borderRadius: '12px',
-                border: `1px solid ${BRAND.border}`,
-                background: '#FFFFFF',
-                color: BRAND.muted,
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '14px',
-                fontWeight: 720,
-              }}
-            >
+          <div style={{ borderTop: `1px solid ${BRAND.border}`, paddingTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <a href={`${baseUrl}/kunden`} style={{ height: '44px', padding: '0 18px', borderRadius: '12px', border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.muted, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 720 }}>
               Abbrechen
             </a>
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                height: '44px',
-                padding: '0 18px',
-                borderRadius: '12px',
-                border: 'none',
-                background: loading ? '#9CA3AF' : BRAND.black,
-                color: '#FFFFFF',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '14px',
-                fontWeight: 760,
-                cursor: loading ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {loading ? 'Kunde wird angelegt...' : 'Kunde anlegen'}
+            <button type="submit" disabled={loading} style={{ height: '44px', padding: '0 18px', borderRadius: '12px', border: 'none', background: loading ? '#9CA3AF' : BRAND.black, color: '#FFFFFF', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 760, cursor: loading ? 'not-allowed' : 'pointer' }}>
+              {loading ? 'Kunde wird angelegt...' : isCompany ? 'Unternehmen anlegen' : 'Privatperson anlegen'}
             </button>
           </div>
         </form>
 
-        <section
-          style={{
-            ...cardStyle,
-            overflow: 'hidden',
-          }}
-        >
-          <div
-            style={{
-              padding: '20px 24px',
-              borderBottom: `1px solid ${BRAND.border}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '16px',
-            }}
-          >
-            <h2
-              style={{
-                margin: 0,
-                fontSize: '16px',
-                fontWeight: 820,
-                color: BRAND.text,
-              }}
-            >
-              Zuletzt angelegte Kunden
-            </h2>
-
-            <button
-              type="button"
-              onClick={() => void loadRecentlyCreatedClients()}
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: BRAND.muted,
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: 720,
-              }}
-            >
+        <section style={{ ...cardStyle, overflow: 'hidden' }}>
+          <div style={{ padding: '20px 24px', borderBottom: `1px solid ${BRAND.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+            <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 820, color: BRAND.text }}>Zuletzt angelegte Kunden</h2>
+            <button type="button" onClick={() => void loadRecentlyCreatedClients()} style={{ border: 'none', background: 'transparent', color: BRAND.muted, cursor: 'pointer', fontSize: '13px', fontWeight: 720 }}>
               Aktualisieren
             </button>
           </div>
@@ -1064,55 +774,24 @@ export default function AdminClientCreator() {
             <div style={emptyStateStyle}>Noch keine Kunden angelegt.</div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
-              <table
-                style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                }}
-              >
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${BRAND.border}` }}>
-                    {['Firma', 'Kontakt', 'E-Mail', 'Telefon', 'Typ', 'Erstellt'].map((header) => (
-                      <th
-                        key={header}
-                        style={{
-                          padding: '13px 24px',
-                          textAlign: 'left',
-                          fontSize: '11px',
-                          fontWeight: 820,
-                          color: BRAND.muted,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
+                    {['Firma / Name', 'Kontakt', 'E-Mail', 'Telefon', 'Typ', 'Erstellt'].map((header) => (
+                      <th key={header} style={{ padding: '13px 24px', textAlign: 'left', fontSize: '11px', fontWeight: 820, color: BRAND.muted, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
                         {header}
                       </th>
                     ))}
                   </tr>
                 </thead>
-
                 <tbody>
                   {clients.map((client, index) => (
-                    <tr
-                      key={client.id}
-                      style={{
-                        borderBottom: index < clients.length - 1 ? `1px solid #F3F4F6` : 'none',
-                      }}
-                    >
+                    <tr key={client.id} style={{ borderBottom: index < clients.length - 1 ? `1px solid #F3F4F6` : 'none' }}>
                       <td style={tableCellStrongStyle}>{client.company_name || '-'}</td>
                       <td style={tableCellStyle}>{client.client_name || '-'}</td>
                       <td style={tableCellStyle}>{client.email || '-'}</td>
                       <td style={tableCellStyle}>{client.phone || '-'}</td>
-                      <td style={tableCellStyle}>
-                        {client.client_type === 'geschaeftskunden'
-                          ? 'Geschäftskunde'
-                          : client.client_type === 'privatkunden'
-                            ? 'Privatkunde'
-                            : client.client_type === 'baukunden'
-                              ? 'Baukunde'
-                              : 'Unbekannt'}
-                      </td>
+                      <td style={tableCellStyle}>{client.client_type === 'geschaeftskunden' ? 'Geschäftskunde' : client.client_type === 'privatkunden' ? 'Privatkunde' : client.client_type === 'baukunden' ? 'Baukunde' : 'Unbekannt'}</td>
                       <td style={tableCellStyle}>{formatDate(client.created_at)}</td>
                     </tr>
                   ))}
@@ -1125,68 +804,11 @@ export default function AdminClientCreator() {
 
       <style>{`
         @media (max-width: 980px) {
-          .opc-create-client-grid-2 {
-            grid-template-columns: 1fr !important;
-          }
-
-          .opc-create-client-address {
-            grid-template-columns: 1fr !important;
-          }
+          .opc-create-client-grid-2 { grid-template-columns: 1fr !important; }
+          .opc-create-client-address { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
-  );
-}
-
-function Dropdown({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 'calc(100% + 5px)',
-        left: 0,
-        right: 0,
-        maxHeight: '220px',
-        overflowY: 'auto',
-        background: '#FFFFFF',
-        border: `1px solid ${BRAND.border}`,
-        borderRadius: '12px',
-        boxShadow: '0 12px 30px rgba(15, 17, 21, 0.10)',
-        zIndex: 50,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function DropdownItem({
-  children,
-  onClick,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onClick}
-      style={{
-        width: '100%',
-        border: 'none',
-        background: 'transparent',
-        padding: '11px 14px',
-        textAlign: 'left',
-        color: BRAND.text,
-        fontSize: '14px',
-        fontWeight: 600,
-        cursor: 'pointer',
-        fontFamily: pageFont,
-      }}
-    >
-      {children}
-    </button>
   );
 }
 

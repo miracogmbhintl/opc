@@ -5,6 +5,13 @@ export const OPC_ROUTES = {
   inquiries: '/anfragen',
   calendar: '/kalender',
 
+  inspections: '/besichtigungen',
+  inspectionDetail: '/besichtigung',
+  quotes: '/offerten',
+  quoteDetail: '/offerte',
+  invoices: '/rechnungen',
+  invoiceDetail: '/rechnung',
+
   clients: '/kunden',
   clientDetail: '/kunde',
   createClient: '/kunde-anlegen',
@@ -48,6 +55,13 @@ export function legacyRouteToOpc(path: string): string {
 
     [/^\/anfragen$/, OPC_ROUTES.inquiries],
     [/^\/anfragen-schaeden$/, OPC_ROUTES.tickets],
+
+    [/^\/besichtigungen$/, OPC_ROUTES.inspections],
+    [/^\/besichtigung\/(.+)$/, `${OPC_ROUTES.inspectionDetail}/$1`],
+    [/^\/offerten$/, OPC_ROUTES.quotes],
+    [/^\/offerte\/(.+)$/, `${OPC_ROUTES.quoteDetail}/$1`],
+    [/^\/rechnungen$/, OPC_ROUTES.invoices],
+    [/^\/rechnung\/(.+)$/, `${OPC_ROUTES.invoiceDetail}/$1`],
 
     [/^\/kalender$/, OPC_ROUTES.calendar],
     [/^\/calendar$/, OPC_ROUTES.calendar],

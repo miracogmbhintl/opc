@@ -525,7 +525,7 @@ export async function POST({ request }: APIContext) {
           ? payload.onboardingCaseId
           : null,
         inquiry_id: isUuid(payload.inquiryId) ? payload.inquiryId : null,
-        activity_type: 'converted_from_inquiry',
+        activity_type: 'converted',
         message:
           payload.conversionMode === 'corporate'
             ? 'Anfrage wurde als Corporate-Kunde mit Portalzugang übernommen.'

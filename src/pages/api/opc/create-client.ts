@@ -257,18 +257,20 @@ async function findOrCreateContact({
   website,
   industry,
   taxId,
+  clientMode,
   createdBy,
 }: {
   supabase: any;
   companyName: string;
   fullName: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   preferredContact: string;
   internalNotes: string | null;
   website: string | null;
   industry: string | null;
   taxId: string | null;
+  clientMode: string;
   createdBy: string;
 }) {
   const { firstName, lastName } = splitName(fullName);
@@ -309,7 +311,7 @@ async function findOrCreateContact({
     full_name: fullName,
     first_name: firstName,
     last_name: lastName,
-    company_name: companyName,
+    company_name: clientMode === 'company' ? companyName : null,
     email,
     phone_raw: phone,
     phone_e164: phone,
@@ -324,6 +326,9 @@ async function findOrCreateContact({
       industry,
       tax_id: taxId,
       preferred_contact: preferredContact,
+      client_mode: clientMode,
+      first_name: firstName,
+      last_name: lastName,
       last_created_from: 'kunde-anlegen',
       last_created_by: createdBy,
     },
@@ -412,15 +417,31 @@ async function createClientRecord({
   form: FormData;
   createdBy: string;
 }) {
-  const companyName = clean(form.get('companyName'));
-  const fullName = clean(form.get('fullName'));
+  const clientMode = clean(form.get('clientMode')) || 'private';
+  const firstName = clean(form.get('firstName'));
+  const lastName = clean(form.get('lastName'));
+  const submittedFullName = clean(form.get('fullName'));
+  const submittedCompanyName = clean(form.get('companyName'));
   const email = normalizeEmail(form.get('email'));
-  const phone = clean(form.get('phone'));
+  const phonePreview = clean(form.get('phone'));
+  const fullName =
+    submittedFullName ||
+    [firstName, lastName].filter(Boolean).join(' ').trim() ||
+    submittedCompanyName ||
+    email ||
+    phonePreview ||
+    'Unbenannter Kontakt';
+  const companyName =
+    submittedCompanyName ||
+    (clientMode === 'private' ? fullName : null) ||
+    fullName ||
+    'Unbenannter Kunde';
+  const phone = phonePreview;
   const website = clean(form.get('website'));
   const industry = clean(form.get('industry'));
   const taxId = clean(form.get('taxId'));
   const preferredContact = clean(form.get('preferredContact')) || 'email';
-  const clientType = clean(form.get('clientType')) || 'geschaeftskunden';
+  const clientType = clean(form.get('clientType')) || (clientMode === 'company' ? 'geschaeftskunden' : 'privatkunden');
 
   const billingStreet = clean(form.get('billingStreet')) || clean(form.get('street'));
   const billingStreetNumber =
@@ -441,21 +462,9 @@ async function createClientRecord({
   const internalNotes = clean(form.get('internalNotes'));
   const certificate = form.get('businessCertificate') as File | null;
 
-  if (!companyName) {
-    return jsonResponse({ success: false, error: 'Company name is required.' }, 400);
-  }
-
-  if (!fullName) {
-    return jsonResponse({ success: false, error: 'Contact person is required.' }, 400);
-  }
-
-  if (!email) {
-    return jsonResponse({ success: false, error: 'Email address is required.' }, 400);
-  }
-
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-  if (!emailRegex.test(email)) {
+  if (email && !emailRegex.test(email)) {
     return jsonResponse({ success: false, error: 'Invalid email address.' }, 400);
   }
 
@@ -481,6 +490,7 @@ async function createClientRecord({
     website,
     industry,
     taxId,
+    clientMode,
     createdBy,
   });
 
@@ -500,6 +510,9 @@ async function createClientRecord({
         industry,
         tax_id: taxId,
         preferred_contact: preferredContact,
+        client_mode: clientMode,
+        first_name: firstName,
+        last_name: lastName,
         created_from: 'kunde-anlegen',
         created_by: createdBy,
         billing_address_parts: {
@@ -559,6 +572,9 @@ async function createClientRecord({
       receives_operations_updates: true,
       metadata: {
         preferred_contact: preferredContact,
+        client_mode: clientMode,
+        first_name: firstName,
+        last_name: lastName,
         created_from: 'kunde-anlegen',
       },
     });
@@ -603,8 +619,8 @@ async function createClientRecord({
     .insert({
       client_id: client.id,
       contact_id: contact.id,
-      activity_type: 'client_created',
-      message: `Kunde wurde manuell angelegt: ${companyName}`,
+      activity_type: 'created',
+      message: `Kunde wurde manuell angelegt: ${companyName || fullName}`,
       created_by: createdBy,
       metadata: {
         source: 'kunde-anlegen',
