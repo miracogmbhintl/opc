@@ -195,6 +195,11 @@ function formatTime(value?: string | null) {
 function statusLabel(status?: string | null) {
   const labels: Record<string, string> = {
     open: 'Aktiv',
+    active: 'Aktiv',
+    clocked_in: 'Aktiv',
+    started: 'Aktiv',
+    running: 'Aktiv',
+    in_progress: 'Aktiv',
     on_break: 'Pause',
     submitted: 'Eingereicht',
     approved: 'Genehmigt',
@@ -293,6 +298,35 @@ function canReviewTimeEntries(staff: StaffRole | null) {
     staff.can_manage_jobs === true ||
     staff.can_manage_time_entries === true
   );
+}
+
+function isActiveTimeEntryStatus(status?: string | null) {
+  const clean = normalizeStatus(status);
+
+  return ['open', 'on_break', 'active', 'clocked_in', 'started', 'running', 'in_progress'].includes(clean);
+}
+
+function entryMatchesStaff(entry: TimeEntry, userId?: string | null, staff?: StaffRole | null) {
+  if (userId && entry.user_id === userId) return true;
+  if (staff?.user_id && entry.user_id === staff.user_id) return true;
+  if (staff?.id && entry.staff_role_id === staff.id) return true;
+  if (staff?.employee_id && entry.employee_id === staff.employee_id) return true;
+
+  return false;
+}
+
+function buildTimeEntryOrFilter(visibleStaff: StaffRole[], fallbackUserId: string) {
+  const filters: string[] = [];
+
+  visibleStaff.forEach((member) => {
+    if (member.user_id) filters.push(`user_id.eq.${member.user_id}`);
+    if (member.id) filters.push(`staff_role_id.eq.${member.id}`);
+    if (member.employee_id) filters.push(`employee_id.eq.${member.employee_id}`);
+  });
+
+  if (fallbackUserId) filters.push(`user_id.eq.${fallbackUserId}`);
+
+  return Array.from(new Set(filters)).join(',');
 }
 
 function canViewStaffMember(viewer: StaffRole | null, target: StaffRole | TeamPresence | null) {
@@ -933,9 +967,29 @@ function EmployeeTimeTrackingContent() {
   }, [staffDirectory]);
 
   const ownEntries = useMemo(() => {
-    if (!staffRole?.user_id) return [];
-    return entries.filter((entry) => entry.user_id === staffRole.user_id);
+    if (!staffRole?.user_id && !staffRole?.id && !staffRole?.employee_id) return [];
+    return entries.filter((entry) => entryMatchesStaff(entry, staffRole?.user_id, staffRole));
   }, [entries, staffRole]);
+
+  const uiActiveEntry = useMemo(() => {
+    const activeFromState =
+      activeEntry && !activeEntry.clock_out_at && isActiveTimeEntryStatus(activeEntry.status)
+        ? activeEntry
+        : null;
+
+    if (activeFromState) return activeFromState;
+
+    return (
+      ownEntries.find((entry) => !entry.clock_out_at && isActiveTimeEntryStatus(entry.status)) ||
+      entries.find(
+        (entry) =>
+          entryMatchesStaff(entry, staffRole?.user_id, staffRole) &&
+          !entry.clock_out_at &&
+          isActiveTimeEntryStatus(entry.status)
+      ) ||
+      null
+    );
+  }, [activeEntry, ownEntries, entries, staffRole]);
 
   const visibleEntries = useMemo(() => {
     return entries.filter((entry) =>
@@ -979,14 +1033,14 @@ function EmployeeTimeTrackingContent() {
 
     const todayTotal = ownEntries
       .filter((entry) => entry.work_date === today)
-      .reduce((sum, entry) => sum + (entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0)), 0);
+      .reduce((sum, entry) => sum + (entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0)), 0);
 
     const weekTotal = ownEntries
       .filter((entry) => isCurrentWeek(entry.work_date))
-      .reduce((sum, entry) => sum + (entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0)), 0);
+      .reduce((sum, entry) => sum + (entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0)), 0);
 
     const monthTotal = ownEntries.reduce(
-      (sum, entry) => sum + (entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0)),
+      (sum, entry) => sum + (entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0)),
       0
     );
 
@@ -1005,7 +1059,7 @@ function EmployeeTimeTrackingContent() {
       monthTotal,
       saldo,
     };
-  }, [ownEntries, activeEntry, tick]);
+  }, [ownEntries, uiActiveEntry, tick]);
 
   const teamStats = useMemo(() => {
     return {
@@ -1056,9 +1110,7 @@ function EmployeeTimeTrackingContent() {
       setStaffDirectory(safeStaffDirectory);
 
       const visibleStaffForViewer = safeStaffDirectory.filter((member) => canViewStaffMember(resolvedStaff, member));
-      const allowedUserIds = Array.from(
-        new Set(visibleStaffForViewer.map((member) => member.user_id).filter(Boolean) as string[])
-      );
+      const entryVisibilityFilter = buildTimeEntryOrFilter(visibleStaffForViewer, userId);
 
       const { startDate, endDate } = monthRange(month);
 
@@ -1071,8 +1123,8 @@ function EmployeeTimeTrackingContent() {
         .order('created_at', { ascending: false });
 
       if (!isOwnerRole(resolvedStaff)) {
-        if (allowedUserIds.length > 0) {
-          entriesQuery = entriesQuery.in('user_id', allowedUserIds);
+        if (entryVisibilityFilter) {
+          entriesQuery = entriesQuery.or(entryVisibilityFilter);
         } else {
           entriesQuery = entriesQuery.eq('user_id', userId);
         }
@@ -1087,10 +1139,10 @@ function EmployeeTimeTrackingContent() {
 
       const active = safeEntries.find(
         (entry) =>
-          entry.user_id === userId &&
+          entryMatchesStaff(entry, userId, resolvedStaff) &&
           entry.work_date === todayString() &&
           !entry.clock_out_at &&
-          ['open', 'on_break'].includes(normalizeStatus(entry.status))
+          isActiveTimeEntryStatus(entry.status)
       );
 
       setActiveEntry(active || null);
@@ -1165,11 +1217,11 @@ function EmployeeTimeTrackingContent() {
   }
 
   async function startBreak() {
-    if (!activeEntry?.id) return;
+    if (!uiActiveEntry?.id) return;
 
     await runAction('break_start', async () => {
       const { error } = await supabase.rpc('opc_start_employee_break', {
-        p_time_entry_id: activeEntry.id,
+        p_time_entry_id: uiActiveEntry.id,
         p_note: null,
       });
 
@@ -1180,11 +1232,11 @@ function EmployeeTimeTrackingContent() {
   }
 
   async function endBreak() {
-    if (!activeEntry?.id) return;
+    if (!uiActiveEntry?.id) return;
 
     await runAction('break_end', async () => {
       const { error } = await supabase.rpc('opc_end_employee_break', {
-        p_time_entry_id: activeEntry.id,
+        p_time_entry_id: uiActiveEntry.id,
         p_note: null,
       });
 
@@ -1195,11 +1247,11 @@ function EmployeeTimeTrackingContent() {
   }
 
   async function clockOut() {
-    if (!activeEntry?.id) return;
+    if (!uiActiveEntry?.id) return;
 
     await runAction('clock_out', async () => {
       const { error } = await supabase.rpc('opc_clock_out_employee', {
-        p_time_entry_id: activeEntry.id,
+        p_time_entry_id: uiActiveEntry.id,
         p_employee_note: clockOutNote.trim() || null,
       });
 
@@ -1238,8 +1290,8 @@ function EmployeeTimeTrackingContent() {
     });
   }
 
-  const isActive = Boolean(activeEntry && !activeEntry.clock_out_at);
-  const isOnBreak = normalizeStatus(activeEntry?.status) === 'on_break';
+  const isActive = Boolean(uiActiveEntry && !uiActiveEntry.clock_out_at);
+  const isOnBreak = normalizeStatus(uiActiveEntry?.status) === 'on_break';
 
   if (loading) {
     return (
@@ -1347,14 +1399,14 @@ function EmployeeTimeTrackingContent() {
           <div className="opc-time-detail-cards" style={todayDetailsGridStyle}>
             <DetailStatCard
               label="Status"
-              value={isActive ? statusLabel(activeEntry?.status) : 'Nicht aktiv'}
+              value={isActive ? statusLabel(uiActiveEntry?.status) : 'Nicht aktiv'}
               icon={<Clock3 size={18} />}
             />
-            <DetailStatCard label="Start" value={formatTime(activeEntry?.clock_in_at)} icon={<LogIn size={18} />} />
-            <DetailStatCard label="Pause" value={formatMinutes(activeEntry?.break_minutes || 0)} icon={<Coffee size={18} />} />
+            <DetailStatCard label="Start" value={formatTime(uiActiveEntry?.clock_in_at)} icon={<LogIn size={18} />} />
+            <DetailStatCard label="Pause" value={formatMinutes(uiActiveEntry?.break_minutes || 0)} icon={<Coffee size={18} />} />
             <DetailStatCard
               label="Live"
-              value={isActive ? formatMinutes(liveMinutes(activeEntry)) : formatMinutes(stats.todayTotal)}
+              value={isActive ? formatMinutes(liveMinutes(uiActiveEntry)) : formatMinutes(stats.todayTotal)}
               icon={<Clock3 size={18} />}
             />
           </div>
@@ -1451,7 +1503,7 @@ function EmployeeTimeTrackingContent() {
             </section>
           </div>
 
-          <TimeEntriesList entries={ownEntries} activeEntry={activeEntry} title="Meine Einträge" />
+          <TimeEntriesList entries={ownEntries} uiActiveEntry={uiActiveEntry} title="Meine Einträge" />
         </>
       )}
 
@@ -1564,7 +1616,7 @@ function EmployeeTimeTrackingContent() {
 
           <TimeEntriesList
             entries={filteredEntries}
-            activeEntry={activeEntry}
+            uiActiveEntry={uiActiveEntry}
             title="Alle Zeiteinträge"
             showActions
             onApprove={approveEntry}
@@ -1595,7 +1647,7 @@ function StepItem({ title, text }: { title: string; text: string }) {
 
 function TimeEntriesList({
   entries,
-  activeEntry,
+  uiActiveEntry,
   title,
   showActions = false,
   onApprove,
@@ -1603,7 +1655,7 @@ function TimeEntriesList({
   actionLoading,
 }: {
   entries: TimeEntry[];
-  activeEntry: TimeEntry | null;
+  uiActiveEntry: TimeEntry | null;
   title: string;
   showActions?: boolean;
   onApprove?: (entryId: string) => void;
@@ -1629,7 +1681,7 @@ function TimeEntriesList({
         <>
           <section className="opc-requests-desktop-table" style={{ ...cardStyle, overflow: 'hidden' }}>
             {entries.map((entry, index) => {
-              const total = entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
+              const total = entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
               const isSubmitted = normalizeStatus(entry.status) === 'submitted';
 
               return (
@@ -1686,7 +1738,7 @@ function TimeEntriesList({
 
           <div className="opc-requests-mobile-cards opc-time-entry-mobile-cards">
             {entries.map((entry) => {
-              const total = entry.id === activeEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
+              const total = entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
               const isSubmitted = normalizeStatus(entry.status) === 'submitted';
 
               return (

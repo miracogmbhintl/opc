@@ -134,3 +134,10 @@ opc_relevant_code_*/
 opc_relevant_code_*/
 opc_audit_collect.sh
 opc_relevant_code_collect.sh
+
+_backups/
+_exports/
+_patches/
+docs/
+export_employee_permission_scope.sh
+*.zip

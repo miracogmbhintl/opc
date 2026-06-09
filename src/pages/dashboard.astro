@@ -1,6 +1,6 @@
 ---
 import MirakaDashboardShell from '../components/MirakaDashboardShell';
-import OwnerDashboardHome from '../components/OwnerDashboardHome';
+import DashboardHomeRouter from '../components/DashboardHomeRouter';
 import '../styles/miraka-portal.css';
 import '../styles/miraka-dashboard.css';
 import { ClientRouter } from 'astro:transitions';
@@ -81,11 +81,11 @@ import { ClientRouter } from 'astro:transitions';
   <MirakaDashboardShell
     client:only="react"
     title="Orange Pro Clean Dashboard"
-    requiredRole={['owner', 'admin', 'dispatch']}
+    requiredRole={['owner', 'admin', 'dispatch', 'employee']}
     currentPath="/dashboard"
     hideTopBar={true}
   >
-    <OwnerDashboardHome client:only="react" />
+    <DashboardHomeRouter client:only="react" />
   </MirakaDashboardShell>
 </body>
 </html>

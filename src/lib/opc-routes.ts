@@ -4,6 +4,7 @@ export const OPC_ROUTES = {
 
   inquiries: '/anfragen',
   calendar: '/kalender',
+  timeTracking: '/zeiterfassung',
 
   inspections: '/besichtigungen',
   inspectionDetail: '/besichtigung',
@@ -32,8 +33,14 @@ export const OPC_ROUTES = {
 };
 
 export function getOpcDashboardRoute(role?: string | null): string {
-  if (role === 'employee') return OPC_ROUTES.jobs;
-  // owner, admin, dispatch all get dashboard access
+  const normalizedRole = String(role || '').toLowerCase().trim();
+
+  // All internal staff roles land on /dashboard. The dashboard component decides
+  // whether to render the management dashboard or the employee dashboard.
+  if (['owner', 'admin', 'dispatch', 'dispatcher', 'disposition', 'employee', 'mitarbeiter'].includes(normalizedRole)) {
+    return OPC_ROUTES.dashboard;
+  }
+
   return OPC_ROUTES.dashboard;
 }
 

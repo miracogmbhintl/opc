@@ -536,6 +536,7 @@ export default function EinsaetzePage() {
       }
 
       if (
+        role !== 'employee' &&
         !isManagerRole(role) &&
         (staff?.can_manage_jobs === true || staff?.can_view_all_jobs === true)
       ) {

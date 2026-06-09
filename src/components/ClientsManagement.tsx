@@ -420,14 +420,14 @@ export default function ClientsManagement() {
 
   if (loading) {
     return (
-      <MirakaDashboardShell hideTopBar={true}>
+      <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch']}>
         <PortalSkeleton variant="table" />
       </MirakaDashboardShell>
     );
   }
 
   return (
-    <MirakaDashboardShell hideTopBar={true}>
+    <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch']}>
       <OPCPageShell>
         <OPCTabs
           tabs={[

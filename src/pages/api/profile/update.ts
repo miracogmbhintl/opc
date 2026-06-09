@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 
-type UserRole = 'owner' | 'admin' | 'employee' | 'client';
+type UserRole = 'owner' | 'admin' | 'dispatch' | 'employee' | 'client';
 type ProfileSourceType = 'staff' | 'client';
 
 const DEFAULT_COMPANY = 'Orange Pro Clean GmbH';
@@ -43,7 +43,8 @@ function normalizeMetadata(value: unknown): Record<string, any> {
 
 function normalizeStaffRole(role?: string | null): UserRole {
   if (role === 'owner') return 'owner';
-  if (role === 'admin' || role === 'dispatch') return 'admin';
+  if (role === 'admin') return 'admin';
+  if (role === 'dispatch') return 'dispatch';
   if (role === 'employee') return 'employee';
 
   return 'client';

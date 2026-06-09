@@ -99,7 +99,7 @@ export function getDashboardRoute(role: UserRole): string {
     case 'client':
       return '/dashboard';
     case 'employee':
-      return '/einsaetze';
+      return '/dashboard';
     default:
       return '/';
   }

@@ -4,38 +4,7 @@ import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
 import { TranslationProvider, useTranslation } from '../lib/TranslationContext';
-import {
-  loadOpcAuthProfile,
-  readCachedOpcAuthProfile,
-  writeCachedOpcAuthProfile,
-} from '../lib/opc-auth-cache';
-
-function readCachedUserProfile(): UserProfile | null {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const rawUserData = localStorage.getItem('mco_user_data') || localStorage.getItem('mco_auth');
-    const cachedRole = localStorage.getItem('mco_user_role') as UserRole | null;
-
-    if (!rawUserData || !cachedRole) return null;
-
-    const cached = JSON.parse(rawUserData);
-
-    if (!cached?.id) return null;
-
-    return {
-      id: cached.id,
-      email: cached.email || '',
-      name: cached.username || cached.name || cached.full_name || cached.email || 'User',
-      full_name: cached.name || cached.full_name || cached.username || cached.email || 'User',
-      role: cachedRole,
-      created_at: cached.created_at || '',
-      updated_at: cached.updated_at || '',
-    } as UserProfile;
-  } catch {
-    return null;
-  }
-}
+import { loadOpcAuthProfile, writeCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 
 interface DashboardShellProps {
   children: ReactNode;
@@ -44,6 +13,18 @@ interface DashboardShellProps {
   currentPath?: string;
   hideTopBar?: boolean;
   fullWidth?: boolean;
+}
+
+function normalizeRole(role?: string | null): UserRole {
+  const clean = String(role || '').toLowerCase().trim();
+
+  if (clean === 'owner') return 'owner';
+  if (clean === 'admin') return 'admin';
+  if (clean === 'dispatch' || clean === 'dispatcher' || clean === 'disposition') return 'dispatch';
+  if (clean === 'employee' || clean === 'mitarbeiter') return 'employee';
+  if (clean === 'client' || clean === 'kunde') return 'client';
+
+  return 'client';
 }
 
 export default function MirakaDashboardShell({
@@ -87,9 +68,8 @@ function DashboardShellContent({
     };
   }
 
-  const cachedUserProfile = readCachedOpcAuthProfile() || readCachedUserProfile();
-  const [loading, setLoading] = useState(!cachedUserProfile);
-  const [user, setUser] = useState<UserProfile | null>(cachedUserProfile);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -123,7 +103,7 @@ function DashboardShellContent({
     if (!requiredRole) return true;
 
     const allowedRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-    return allowedRoles.includes(profileRole);
+    return allowedRoles.map((role) => normalizeRole(role)).includes(normalizeRole(profileRole));
   };
 
   const handleRoleMismatch = (profileRole: UserRole) => {
@@ -141,20 +121,6 @@ function DashboardShellContent({
 
   const checkAuth = async () => {
     try {
-      const cachedProfile = readCachedOpcAuthProfile();
-
-      if (cachedProfile) {
-        if (!isRoleAllowed(cachedProfile.role as UserRole)) {
-          handleRoleMismatch(cachedProfile.role as UserRole);
-          return;
-        }
-
-        setUser(cachedProfile);
-        setError(null);
-        setLoading(false);
-        return;
-      }
-
       const normalizedProfile = await loadOpcAuthProfile();
 
       if (!normalizedProfile) {
@@ -164,12 +130,14 @@ function DashboardShellContent({
 
       writeCachedOpcAuthProfile(normalizedProfile);
 
-      if (!isRoleAllowed(normalizedProfile.role as UserRole)) {
-        handleRoleMismatch(normalizedProfile.role as UserRole);
+      const resolvedRole = normalizeRole(normalizedProfile.role);
+
+      if (!isRoleAllowed(resolvedRole)) {
+        handleRoleMismatch(resolvedRole);
         return;
       }
 
-      setUser(normalizedProfile);
+      setUser({ ...normalizedProfile, role: resolvedRole });
       setError(null);
       setLoading(false);
     } catch (err: any) {
@@ -323,7 +291,9 @@ function DashboardShellContent({
         .miraka-dashboard-main {
           min-height: 100vh;
           background: #FFFFFF;
-          transition: none !important;\n          transform: none !important;\n          animation: none !important;
+          transition: none !important;
+          transform: none !important;
+          animation: none !important;
         }
 
         .miraka-dashboard-content {

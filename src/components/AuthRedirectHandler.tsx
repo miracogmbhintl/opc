@@ -149,6 +149,14 @@ export default function AuthRedirectHandler() {
           targetPath = '/dashboard';
           console.log('🔵 AuthRedirectHandler: Determined role: ADMIN');
           break;
+        case 'dispatch':
+          targetPath = '/dashboard';
+          console.log('🔵 AuthRedirectHandler: Determined role: DISPATCH');
+          break;
+        case 'employee':
+          targetPath = '/dashboard';
+          console.log('🔵 AuthRedirectHandler: Determined role: EMPLOYEE');
+          break;
         case 'client':
           targetPath = '/dashboard';
           console.log('🔵 AuthRedirectHandler: Determined role: CLIENT');

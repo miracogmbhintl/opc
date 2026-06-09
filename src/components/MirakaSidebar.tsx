@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase, type UserProfile } from '../lib/supabase';
-import { readCachedOpcAuthProfile, clearCachedOpcAuthProfile } from '../lib/opc-auth-cache';
+import { loadOpcAuthProfile, readCachedOpcAuthProfile, clearCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES } from '../lib/opc-routes';
 import {
@@ -146,8 +146,6 @@ function getInitials(name: string) {
 }
 
 export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarProps) {
-  const normalizedRole = normalizeRole(role);
-
   const routes = useMemo(
     () => ({
       login: routeFor('login', '/'),
@@ -169,6 +167,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
   );
 
   const [user, setUser] = useState<UserProfile | null>(null);
+  const normalizedRole = normalizeRole((user as any)?.role || role);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
 
@@ -237,6 +236,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   async function loadUserProfile() {
     try {
+      const liveProfile = await loadOpcAuthProfile();
+
+      if (liveProfile) {
+        setUser(liveProfile);
+        return;
+      }
+
       const cachedProfile = readCachedOpcAuthProfile();
 
       if (cachedProfile) {
@@ -264,13 +270,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
             cached.username ||
             cached.email ||
             'Benutzer',
-          role: cachedRole,
+          role: normalizeRole(cachedRole),
           created_at: '',
           updated_at: '',
         } as UserProfile);
       }
     } catch (error) {
-      console.warn('Sidebar cached profile load failed:', error);
+      console.warn('Sidebar profile load failed:', error);
     }
   }
 
@@ -395,11 +401,11 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         match: [routes.dashboard, '/dashboard'],
       },
       {
-        href: buildUrl(routes.calendar),
-        label: 'Kalender',
-        icon: CalendarDays,
-        key: 'calendar',
-        match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
+        href: buildUrl(routes.timeTracking),
+        label: 'Zeiterfassung',
+        icon: Clock,
+        key: 'zeiterfassung',
+        match: [routes.timeTracking, '/zeiterfassung', '/dashboard/zeiterfassung'],
       },
       {
         href: buildUrl(routes.jobs),
@@ -409,25 +415,18 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         match: [routes.jobs, '/einsaetze', '/dashboard/jobs'],
       },
       {
-        href: buildUrl(routes.timeTracking),
-        label: 'Zeiterfassung',
-        icon: Clock,
-        key: 'zeiterfassung',
-        match: [routes.timeTracking, '/zeiterfassung', '/dashboard/zeiterfassung'],
+        href: buildUrl(routes.calendar),
+        label: 'Kalender',
+        icon: CalendarDays,
+        key: 'calendar',
+        match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
       },
       {
-        href: buildUrl(routes.tickets),
-        label: 'Tickets & Schäden',
-        icon: AlertTriangle,
-        key: 'tickets',
-        match: [routes.tickets, '/anfragen-schaeden', '/dashboard/tickets'],
-      },
-      {
-        href: buildUrl(routes.files),
-        label: 'Berichte & Dateien',
-        icon: FileText,
-        key: 'files',
-        match: [routes.files, '/berichte-dateien', '/dashboard/files'],
+        href: buildUrl(routes.settings),
+        label: 'Einstellungen',
+        icon: Settings,
+        key: 'settings',
+        match: [routes.settings, '/einstellungen', '/dashboard/settings'],
       },
     ];
 
@@ -500,7 +499,9 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
   const mobilePrimaryButtons =
     normalizedRole === 'client'
       ? ['overview', 'jobs', 'tickets', 'settings']
-      : ['overview', 'zeiterfassung', 'jobs', 'settings'];
+      : normalizedRole === 'employee'
+        ? ['overview', 'zeiterfassung', 'jobs', 'calendar', 'settings']
+        : ['overview', 'zeiterfassung', 'jobs', 'settings'];
 
   function toggleMobileNav() {
     setIsMobileExpanded(!isMobileExpanded);

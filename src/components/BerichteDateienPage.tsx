@@ -524,14 +524,14 @@ export default function BerichteDateienPage() {
 
   if (loading) {
     return (
-      <MirakaDashboardShell hideTopBar={true}>
+      <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch', 'client']}>
         <PortalSkeleton variant="dashboard" />
       </MirakaDashboardShell>
     );
   }
 
     return (
-    <MirakaDashboardShell hideTopBar={true}>
+    <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch', 'client']}>
       <div
         className="opc-reports-page"
         style={{

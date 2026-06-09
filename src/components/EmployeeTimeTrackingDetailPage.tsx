@@ -182,6 +182,12 @@ function isManagerStaff(staff: StaffRole | null) {
   );
 }
 
+function isActiveTimeEntryStatus(status?: string | null) {
+  const clean = normalize(status);
+
+  return ['open', 'on_break', 'active', 'clocked_in', 'started', 'running', 'in_progress'].includes(clean);
+}
+
 function formatMinutes(minutes?: number | null) {
   const safe = Math.max(0, Number(minutes || 0));
   const hours = Math.floor(safe / 60);
@@ -232,6 +238,11 @@ function formatDateTime(value?: string | null) {
 function statusLabel(status?: string | null) {
   const labels: Record<string, string> = {
     open: 'Aktiv',
+    active: 'Aktiv',
+    clocked_in: 'Aktiv',
+    started: 'Aktiv',
+    running: 'Aktiv',
+    in_progress: 'Aktiv',
     on_break: 'Pause',
     submitted: 'Eingereicht',
     approved: 'Genehmigt',
@@ -458,7 +469,7 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
       (entry) =>
         entry.work_date === todayString() &&
         !entry.clock_out_at &&
-        ['open', 'on_break'].includes(normalize(entry.status))
+        isActiveTimeEntryStatus(entry.status)
     ) || null;
   }, [entries]);
 

@@ -128,7 +128,10 @@ async function resolveCurrentUserContext(
     firstStaffRole?.role || firstStaffRole?.position || firstStaffRole?.staff_role
   );
 
-  const currentRole = profileRole !== 'client' ? profileRole : staffRole;
+  // OPC staff permissions are the source of truth for internal users.
+  // This prevents an old user_profiles.role value such as admin/owner from
+  // giving an employee planning rights in the calendar.
+  const currentRole = firstStaffRole ? staffRole : profileRole;
 
   return {
     currentRole,

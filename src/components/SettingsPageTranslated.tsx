@@ -28,8 +28,8 @@ import PortalSkeleton from './shared/PortalSkeleton';
 
 const SETTINGS_PAGE_CACHE_KEY = 'opc:page-cache:settings-profile';
 
-type UserRole = 'owner' | 'admin' | 'employee' | 'client';
-type TabType = 'account' | 'notifications' | 'security' | 'system';
+type UserRole = 'owner' | 'admin' | 'dispatch' | 'employee' | 'client';
+type TabType = 'account' | 'notifications' | 'security' | 'google' | 'system';
 
 interface NotificationSettings {
   projectUpdates: boolean;
@@ -179,7 +179,7 @@ function getInitials(name: string, email: string) {
 }
 
 function normalizeRole(role?: string | null): UserRole {
-  if (role === 'owner' || role === 'admin' || role === 'employee' || role === 'client') {
+  if (role === 'owner' || role === 'admin' || role === 'dispatch' || role === 'employee' || role === 'client') {
     return role;
   }
 
@@ -189,6 +189,7 @@ function normalizeRole(role?: string | null): UserRole {
 function getRoleLabel(role: UserRole) {
   if (role === 'owner') return 'Inhaber';
   if (role === 'admin') return 'Admin';
+  if (role === 'dispatch') return 'Disposition';
   if (role === 'employee') return 'Mitarbeiter';
 
   return 'Kunde';
@@ -920,6 +921,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
     }> = [
       { id: 'account', label: 'Konto', icon: User },
       { id: 'notifications', label: 'Benachrichtigungen', icon: Bell },
+      { id: 'google', label: 'Google', icon: MonitorCog },
       { id: 'security', label: 'Sicherheit', icon: Lock },
       { id: 'system', label: 'System', icon: Shield, ownerOnly: true },
     ];
@@ -1544,6 +1546,19 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         </form>
       )}
 
+      {activeTab === 'google' && (
+        <section style={{ ...cardStyle, padding: '26px' }}>
+          <div style={{ marginBottom: '24px' }}>
+            <h2 style={sectionTitleStyle}>Google Kalender</h2>
+            <p style={sectionDescriptionStyle}>
+              Jeder Benutzer verbindet sein eigenes Google Konto. Die Verbindung wird pro Benutzer gespeichert und später für Kalender-Synchronisation, Termine und Google Meet verwendet.
+            </p>
+          </div>
+
+          <GoogleCalendarSystemPanel />
+        </section>
+      )}
+
       {activeTab === 'notifications' && (
         <section style={{ ...cardStyle, padding: '26px' }}>
           <div style={{ marginBottom: '24px' }}>
@@ -1799,8 +1814,6 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
               description="Operative Alerts für neue Einsätze, Statuswechsel und Mitarbeiterantworten."
             />
           </div>
-
-          <GoogleCalendarSystemPanel />
 
           <div style={buttonRowStyle}>
             <button type="button" disabled={saving} onClick={handleSaveSystem} style={primaryButtonStyle}>
