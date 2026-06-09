@@ -141,3 +141,26 @@ _patches/
 docs/
 export_employee_permission_scope.sh
 *.zip
+
+# Local generated/debug/export folders
+_backups/
+_exports/
+_patches/
+docs/
+backup-before-*/
+opc_audit_*/
+opc_relevant_code_*/
+*.zip
+README_FIX.txt
+README_NEXT_STEPS.txt
+README_QUOTE_STEP3.txt
+README_STEP4.txt
+README_STEP5.txt
+README_STEP5B.txt
+README_STEP6.txt
+opc_audit_collect.sh
+opc_relevant_code_collect.sh
+export_employee_permission_scope.sh
+opc_calendar_create_debug_*.txt
+opc_calendar_page_current_*.txt
+opc_pages_dump_*.txt
