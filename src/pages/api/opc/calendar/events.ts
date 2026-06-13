@@ -88,6 +88,7 @@ function normalizeStaff(row: AnyRow) {
   return {
     id: row.id,
     user_id: row.user_id || row.auth_user_id || null,
+    employee_id: row.employee_id || null,
     name:
       row.display_name ||
       row.full_name ||
@@ -96,10 +97,27 @@ function normalizeStaff(row: AnyRow) {
       row.phone_raw ||
       row.phone_e164 ||
       'Teammitglied',
+    email: row.email || null,
     role,
     is_admin: isAdminRole(role),
     is_active: String(row.status || 'active').toLowerCase() === 'active',
+    can_view_all_jobs: row.can_view_all_jobs === true,
+    can_view_assigned_jobs: row.can_view_assigned_jobs === true,
+    can_submit_time_logs: row.can_submit_time_logs === true,
   };
+}
+
+function chooseEffectiveRole(staffRows: AnyRow[], profileRole: string) {
+  const activeRows = staffRows.filter(
+    (row) => String(row.status || 'active').toLowerCase() === 'active'
+  );
+
+  if (activeRows.some((row) => normalizeRole(row.role) === 'owner')) return 'owner';
+  if (activeRows.some((row) => normalizeRole(row.role) === 'admin')) return 'admin';
+  if (activeRows.some((row) => normalizeRole(row.role) === 'dispatch')) return 'dispatch';
+  if (activeRows.some((row) => normalizeRole(row.role) === 'employee')) return 'employee';
+
+  return profileRole;
 }
 
 async function resolveCurrentUserContext(
@@ -122,22 +140,103 @@ async function resolveCurrentUserContext(
     .eq('user_id', userId);
 
   const staffRoleRows = staffRoles || [];
-  const firstStaffRole = staffRoleRows[0];
-
-  const staffRole = normalizeRole(
-    firstStaffRole?.role || firstStaffRole?.position || firstStaffRole?.staff_role
+  const activeStaffRoleRows = staffRoleRows.filter(
+    (row: AnyRow) => String(row.status || 'active').toLowerCase() === 'active'
   );
 
-  // OPC staff permissions are the source of truth for internal users.
-  // This prevents an old user_profiles.role value such as admin/owner from
-  // giving an employee planning rights in the calendar.
-  const currentRole = firstStaffRole ? staffRole : profileRole;
+  const currentRole = chooseEffectiveRole(activeStaffRoleRows, profileRole);
+
+  const staffRoleIds = activeStaffRoleRows
+    .map((row: AnyRow) => row.id)
+    .filter(Boolean);
+
+  const employeeIds = activeStaffRoleRows
+    .map((row: AnyRow) => row.employee_id)
+    .filter(Boolean);
+
+  const canViewAllJobs =
+    isAdminRole(currentRole) ||
+    activeStaffRoleRows.some((row: AnyRow) => row.can_view_all_jobs === true);
+
+  const canViewAssignedJobs =
+    canViewAllJobs ||
+    activeStaffRoleRows.some((row: AnyRow) => row.can_view_assigned_jobs === true);
 
   return {
     currentRole,
     profile: profile || null,
-    staffRoleIds: staffRoleRows.map((row: AnyRow) => row.id).filter(Boolean),
+    staffRoleIds,
+    employeeIds,
+    canViewAllJobs,
+    canViewAssignedJobs,
   };
+}
+
+function isJobCalendarEvent(event: AnyRow) {
+  const eventType = String(event.event_type || '').toLowerCase();
+
+  return Boolean(
+    event.job_id ||
+      event.client_id ||
+      event.client_site_id ||
+      eventType.startsWith('job_')
+  );
+}
+
+
+async function fetchAllRows(
+  serviceSupabase: ReturnType<typeof createClient>,
+  tableName: string,
+  buildQuery: (from: number, to: number) => any,
+  pageSize = 1000
+) {
+  const rows: AnyRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + pageSize - 1;
+    const result = await buildQuery(from, to);
+
+    if (result.error) throw result.error;
+
+    const page = result.data || [];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+
+    from += pageSize;
+  }
+
+  return rows;
+}
+
+function canEmployeeSeeEvent(
+  event: AnyRow,
+  calendarById: Map<string, AnyRow>,
+  assignedJobIds: Set<string>,
+  context: Awaited<ReturnType<typeof resolveCurrentUserContext>>,
+  userId: string
+) {
+  const calendar = calendarById.get(event.calendar_id);
+
+  if (!calendar) return false;
+
+  const ownsCalendar =
+    calendar.owner_user_id === userId ||
+    (calendar.owner_staff_role_id && context.staffRoleIds.includes(calendar.owner_staff_role_id));
+
+  if (ownsCalendar) return true;
+
+  if (isJobCalendarEvent(event)) {
+    if (!event.job_id) return false;
+    return assignedJobIds.has(event.job_id);
+  }
+
+  if (calendar.calendar_type === 'team') {
+    return true;
+  }
+
+  return false;
 }
 
 export const GET: APIRoute = async ({ request }) => {
@@ -158,12 +257,9 @@ export const GET: APIRoute = async ({ request }) => {
 
     const context = await resolveCurrentUserContext(serviceSupabase, user.id);
     const currentRole = context.currentRole;
+    const normalizedCurrentRole = normalizeRole(currentRole);
 
-    const [
-      calendarsResult,
-      staffResult,
-      notificationsResult,
-    ] = await Promise.all([
+    const [calendarsResult, staffResult, notificationsResult] = await Promise.all([
       serviceSupabase
         .from('opc_calendars')
         .select('*')
@@ -197,11 +293,10 @@ export const GET: APIRoute = async ({ request }) => {
     const allCalendars = calendarsResult.data || [];
 
     const visibleCalendars = allCalendars.filter((calendar: AnyRow) => {
-      if (isAdminRole(currentRole)) return true;
+      if (context.canViewAllJobs || isAdminRole(currentRole)) return true;
 
-      if (normalizeRole(currentRole) === 'employee') {
+      if (normalizedCurrentRole === 'employee') {
         return (
-          calendar.calendar_type === 'employee' ||
           calendar.calendar_type === 'team' ||
           calendar.owner_user_id === user.id ||
           context.staffRoleIds.includes(calendar.owner_staff_role_id)
@@ -212,31 +307,69 @@ export const GET: APIRoute = async ({ request }) => {
     });
 
     const visibleCalendarIds = visibleCalendars.map((calendar: AnyRow) => calendar.id);
+    const calendarById = new Map(visibleCalendars.map((calendar: AnyRow) => [calendar.id, calendar]));
+
+    let assignedJobIds = new Set<string>();
+
+    if (
+      !context.canViewAllJobs &&
+      normalizedCurrentRole === 'employee' &&
+      context.canViewAssignedJobs &&
+      context.employeeIds.length > 0
+    ) {
+      const { data: assignedRows, error: assignedError } = await serviceSupabase
+        .from('opc_job_assignments')
+        .select('job_id')
+        .in('employee_id', context.employeeIds)
+        .not('job_id', 'is', null);
+
+      if (assignedError) throw assignedError;
+
+      assignedJobIds = new Set(
+        (assignedRows || [])
+          .map((row: AnyRow) => row.job_id)
+          .filter(Boolean)
+      );
+    }
 
     let events: AnyRow[] = [];
     let attendees: AnyRow[] = [];
 
     if (visibleCalendarIds.length > 0) {
-      const [eventsResult, attendeesResult] = await Promise.all([
-        serviceSupabase
-          .from('opc_calendar_events')
-          .select('*')
-          .in('calendar_id', visibleCalendarIds)
-          .gte('ends_at', new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString())
-          .lte('starts_at', new Date(Date.now() + 1000 * 60 * 60 * 24 * 180).toISOString())
-          .order('starts_at', { ascending: true }),
+      const timeMin = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString();
+      const timeMax = new Date(Date.now() + 1000 * 60 * 60 * 24 * 400).toISOString();
 
-        serviceSupabase
-          .from('opc_calendar_event_attendees')
-          .select('*')
-          .order('created_at', { ascending: true }),
-      ]);
+      const rawEvents = await fetchAllRows(
+        serviceSupabase,
+        'opc_calendar_events',
+        (from, to) =>
+          serviceSupabase
+            .from('opc_calendar_events')
+            .select('*')
+            .in('calendar_id', visibleCalendarIds)
+            .gte('ends_at', timeMin)
+            .lte('starts_at', timeMax)
+            .order('starts_at', { ascending: true })
+            .range(from, to)
+      );
 
-      if (eventsResult.error) throw eventsResult.error;
-      if (attendeesResult.error) throw attendeesResult.error;
+      events =
+        context.canViewAllJobs || isAdminRole(currentRole)
+          ? rawEvents
+          : rawEvents.filter((event: AnyRow) =>
+              canEmployeeSeeEvent(event, calendarById, assignedJobIds, context, user.id)
+            );
 
-      events = eventsResult.data || [];
-      attendees = attendeesResult.data || [];
+      attendees = await fetchAllRows(
+        serviceSupabase,
+        'opc_calendar_event_attendees',
+        (from, to) =>
+          serviceSupabase
+            .from('opc_calendar_event_attendees')
+            .select('*')
+            .order('created_at', { ascending: true })
+            .range(from, to)
+      );
     }
 
     const eventsWithAttendees = events.map((event: AnyRow) => ({
@@ -256,6 +389,9 @@ export const GET: APIRoute = async ({ request }) => {
         notifications: notificationsResult.error ? [] : notificationsResult.data || [],
         currentUserId: user.id,
         currentRole,
+        currentEmployeeIds: context.employeeIds,
+        canViewAllJobs: context.canViewAllJobs,
+        canViewAssignedJobs: context.canViewAssignedJobs,
       }),
       { status: 200 }
     );

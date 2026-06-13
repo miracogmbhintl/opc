@@ -77,6 +77,8 @@ interface TimeEntry {
   staff_role_id?: string | null;
   employee_id?: string | null;
   employee_name?: string | null;
+  job_id?: string | null;
+  assignment_id?: string | null;
   work_date: string;
   clock_in_at?: string | null;
   clock_out_at?: string | null;
@@ -112,6 +114,7 @@ interface TeamPresence {
   total_minutes: number | null;
   last_activity_at: string | null;
 }
+
 
 function pad(num: number) {
   return String(num).padStart(2, '0');
@@ -191,6 +194,7 @@ function formatTime(value?: string | null) {
     return '—';
   }
 }
+
 
 function statusLabel(status?: string | null) {
   const labels: Record<string, string> = {
@@ -1140,7 +1144,6 @@ function EmployeeTimeTrackingContent() {
       const active = safeEntries.find(
         (entry) =>
           entryMatchesStaff(entry, userId, resolvedStaff) &&
-          entry.work_date === todayString() &&
           !entry.clock_out_at &&
           isActiveTimeEntryStatus(entry.status)
       );
@@ -1181,6 +1184,7 @@ function EmployeeTimeTrackingContent() {
 
         setTeamPresence([...directoryCards, ...additionalPresenceCards]);
       }
+
     } catch (error: any) {
       setErrorMessage(error?.message || 'Zeiterfassung konnte nicht geladen werden.');
     } finally {

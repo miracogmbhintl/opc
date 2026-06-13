@@ -2,15 +2,21 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import {
   Activity,
   AlertTriangle,
+  ArrowLeft,
   Briefcase,
   CalendarDays,
   CheckCircle2,
   Clock3,
+  FileText,
+  Loader2,
   MapPin,
   Navigation,
   Plus,
   RefreshCw,
+  Repeat,
+  Save,
   Search,
+  UserPlus,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
@@ -19,6 +25,8 @@ import MirakaDashboardShell from './MirakaDashboardShell';
 interface RawJob {
   [key: string]: any;
 }
+
+type JsonRecord = Record<string, any>;
 
 interface Job {
   id: string;
@@ -37,9 +45,14 @@ interface Job {
   assignedBy: string;
   contactName: string;
   contactPhone: string;
+  recurringSeriesId: string;
+  recurrenceType: string;
+  occurrenceDate: string;
+  hasActiveTimeLog: boolean;
 }
 
-type JobDateFilter = 'all' | 'today' | 'week';
+type JobDateFilter = 'all' | 'today' | 'week' | 'custom';
+type JobTypeFilter = 'all' | 'recurring';
 type ViewerRole = 'owner' | 'admin' | 'dispatch' | 'employee' | 'client' | '';
 
 const BRAND = {
@@ -86,7 +99,8 @@ const statusLabels: Record<string, string> = {
   confirmed: 'Bestätigt',
   on_site: 'Vor Ort',
   onsite: 'Vor Ort',
-  in_progress: 'In Arbeit',
+  in_progress: 'In Bearbeitung',
+  active: 'Aktiv',
   started: 'Gestartet',
   running: 'Läuft',
   completed: 'Abgeschlossen',
@@ -123,6 +137,30 @@ function getFirstValue(row: RawJob, keys: string[], fallback = '') {
 
 function normalizeStatus(status?: string | null) {
   return String(status || '').trim().toLowerCase();
+}
+
+function getBooleanFlag(row: RawJob, keys: string[]) {
+  return keys.some((key) => {
+    const value = row?.[key];
+    if (value === true) return true;
+    if (typeof value === 'string') {
+      return ['true', '1', 'yes', 'ja', 'active', 'open'].includes(value.trim().toLowerCase());
+    }
+    if (typeof value === 'number') return value > 0;
+    return Boolean(value);
+  });
+}
+
+function hasOpenTimeLogInRow(row: RawJob) {
+  const rawLogs = row?.time_logs;
+  const logs = Array.isArray(rawLogs) ? rawLogs : [];
+
+  return logs.some((log: any) => {
+    const ended = log?.ended_at || log?.end_time || log?.clock_out_at || log?.finished_at;
+    const status = normalizeStatus(log?.status);
+
+    return !ended && !['submitted', 'completed', 'approved', 'rejected', 'closed'].includes(status);
+  });
 }
 
 function normalizeRole(role?: string | null): ViewerRole {
@@ -186,6 +224,18 @@ function mapJob(row: RawJob): Job {
     assignedBy: getFirstValue(row, ['assigned_by_name', 'dispatcher_name', 'created_by_name', 'assigned_by']),
     contactName: getFirstValue(row, ['site_contact_name', 'contact_name', 'person_of_contact', 'onsite_contact_name']),
     contactPhone: getFirstValue(row, ['site_contact_phone', 'contact_phone', 'phone_e164', 'phone_raw']),
+    recurringSeriesId: getFirstValue(row, ['recurring_series_id', 'series_id', 'recurrence_series_id']),
+    recurrenceType: getFirstValue(row, ['recurrence_type', 'recurring_type', 'repeat_type']),
+    occurrenceDate: getFirstValue(row, ['occurrence_date', 'service_date']),
+    hasActiveTimeLog:
+      getBooleanFlag(row, [
+        'has_active_time_log',
+        'active_time_log_id',
+        'open_time_log_id',
+        'is_clocked_in',
+        'is_active',
+        'currently_active',
+      ]) || hasOpenTimeLogInRow(row),
   };
 }
 
@@ -256,28 +306,63 @@ function isWithinWeek(value: string | null | undefined, referenceDate: Date) {
   return date >= startOfDay(referenceDate) && date <= endOfDay(addDays(referenceDate, 7));
 }
 
+function isWithinCustomDateRange(value: string | null | undefined, startValue: string, endValue: string) {
+  if (!value || (!startValue && !endValue)) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const start = startValue ? new Date(`${startValue}T00:00:00`) : null;
+  const end = endValue ? new Date(`${endValue}T23:59:59.999`) : null;
+
+  if (start && !Number.isNaN(start.getTime()) && date < start) return false;
+  if (end && !Number.isNaN(end.getTime()) && date > end) return false;
+
+  return true;
+}
+
 function isActiveJob(job: Job) {
   return !closedStatuses.has(normalizeStatus(job.status));
 }
 
-function isLiveJob(job: Job, now: Date) {
+function isLiveJob(job: Job, _now: Date) {
   if (!isActiveJob(job)) return false;
+  if (job.hasActiveTimeLog) return true;
 
   const normalizedStatus = normalizeStatus(job.status);
 
-  if (liveStatuses.has(normalizedStatus)) {
-    return true;
+  return liveStatuses.has(normalizedStatus);
+}
+
+function getOperationalStatus(job: Job) {
+  const normalizedStatus = normalizeStatus(job.status);
+
+  if (['cancelled', 'rejected', 'inactive'].includes(normalizedStatus)) {
+    return normalizedStatus;
   }
 
-  if (!job.plannedStart || !job.plannedEnd) return false;
+  if (submittedStatuses.has(normalizedStatus)) {
+    return 'completed';
+  }
 
-  const startTime = new Date(job.plannedStart).getTime();
-  const endTime = new Date(job.plannedEnd).getTime();
-  const nowTime = now.getTime();
+  if (job.hasActiveTimeLog) {
+    return 'in_progress';
+  }
 
-  if (Number.isNaN(startTime) || Number.isNaN(endTime)) return false;
+  if (liveStatuses.has(normalizedStatus)) {
+    return 'in_progress';
+  }
 
-  return startTime <= nowTime && nowTime <= endTime;
+  return 'scheduled';
+}
+
+function isCompletedJob(job: Job) {
+  return getOperationalStatus(job) === 'completed';
+}
+
+function isOpenJob(job: Job) {
+  const operationalStatus = getOperationalStatus(job);
+  return !['completed', 'cancelled', 'rejected', 'inactive'].includes(operationalStatus);
 }
 
 function getJobLocation(job: Job) {
@@ -299,7 +384,7 @@ function StatusBadge({ status }: { status: string }) {
   const style = isCancelled
     ? { bg: '#FEF2F2', text: BRAND.red, border: '#FECACA' }
     : isCompleted
-      ? { bg: '#F0FDF4', text: BRAND.green, border: '#BBF7D0' }
+      ? { bg: '#F3F4F6', text: BRAND.text, border: BRAND.border }
       : isActive
         ? { bg: '#ECFEFF', text: BRAND.blue, border: '#A5F3FC' }
         : { bg: '#F9FAFB', text: BRAND.muted, border: BRAND.border };
@@ -404,41 +489,6 @@ function MetricCard({
   );
 }
 
-function SmallFilterButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        height: '36px',
-        width: '100%',
-        borderRadius: '12px',
-        border: `1px solid ${active ? BRAND.black : BRAND.border}`,
-        background: active ? BRAND.black : '#FFFFFF',
-        color: active ? '#FFFFFF' : BRAND.muted,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '13px',
-        fontWeight: 760,
-        fontFamily: pageFont,
-        cursor: 'pointer',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
 function JobCard({ job, employeeMode }: { job: Job; employeeMode: boolean }) {
   return (
     <article className="opc-job-card" style={cardStyle}>
@@ -465,7 +515,7 @@ function JobCard({ job, employeeMode }: { job: Job; employeeMode: boolean }) {
         </div>
 
         <div className="opc-job-card-side">
-          <StatusBadge status={job.status} />
+          <StatusBadge status={getOperationalStatus(job)} />
           <span>{formatTime(job.plannedStart)} – {formatTime(job.plannedEnd)}</span>
         </div>
       </div>
@@ -484,13 +534,16 @@ function JobCard({ job, employeeMode }: { job: Job; employeeMode: boolean }) {
   );
 }
 
-export default function EinsaetzePage() {
+function EinsaetzeOverview() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState<JobDateFilter>('today');
+  const [customDateStart, setCustomDateStart] = useState('');
+  const [customDateEnd, setCustomDateEnd] = useState('');
+  const [jobTypeFilter, setJobTypeFilter] = useState<JobTypeFilter>('all');
   const [now, setNow] = useState(() => new Date());
   const [viewerRole, setViewerRole] = useState<ViewerRole>('');
 
@@ -499,8 +552,13 @@ export default function EinsaetzePage() {
 
   useEffect(() => {
     void loadViewer();
-    void loadJobs();
   }, []);
+
+  useEffect(() => {
+    if (viewerRole) {
+      void loadJobs(viewerRole);
+    }
+  }, [viewerRole]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -515,7 +573,10 @@ export default function EinsaetzePage() {
       const { data: authData } = await supabase.auth.getUser();
       const authUser = authData?.user || null;
 
-      if (!authUser) return;
+      if (!authUser) {
+        setViewerRole('client');
+        return;
+      }
 
       const { data: profile } = await supabase
         .from('user_profiles')
@@ -545,19 +606,46 @@ export default function EinsaetzePage() {
 
       setViewerRole(role || 'client');
     } catch {
-      setViewerRole('');
+      setViewerRole('client');
     }
   }
 
-  async function loadJobs() {
+  async function loadJobs(roleOverride: ViewerRole = viewerRole) {
     setLoading(true);
     setErrorMessage('');
 
     try {
-      const { data, error } = await supabase
-        .from('opc_my_portal_job_feed')
-        .select('*')
-        .limit(300);
+      const managerMode = isManagerRole(roleOverride);
+      let data: any[] | null = null;
+      let error: any = null;
+
+      if (managerMode) {
+        const detailResponse = await supabase
+          .from('opc_job_detail_view')
+          .select('*')
+          .limit(2000);
+
+        data = detailResponse.data || null;
+        error = detailResponse.error;
+
+        if (error) {
+          const fallbackResponse = await supabase
+            .from('opc_service_jobs')
+            .select('*')
+            .limit(2000);
+
+          data = fallbackResponse.data || null;
+          error = fallbackResponse.error;
+        }
+      } else {
+        const response = await supabase
+          .from('opc_my_portal_job_feed')
+          .select('*')
+          .limit(500);
+
+        data = response.data || null;
+        error = response.error;
+      }
 
       if (error) throw error;
 
@@ -591,14 +679,22 @@ export default function EinsaetzePage() {
 
     return jobs.filter((job) => {
       const matchesStatus =
-        statusFilter === 'all' || normalizeStatus(job.status) === normalizeStatus(statusFilter);
+        statusFilter === 'all' ||
+        (statusFilter === 'open_jobs' && isOpenJob(job)) ||
+        (statusFilter === 'completed_jobs' && isCompletedJob(job)) ||
+        normalizeStatus(job.status) === normalizeStatus(statusFilter);
+
+      const isRecurringJob = Boolean(job.recurringSeriesId || job.recurrenceType || job.occurrenceDate);
 
       const matchesDate =
         dateFilter === 'all' ||
         (dateFilter === 'today' && isSameLocalDay(job.plannedStart, now)) ||
-        (dateFilter === 'week' && isWithinWeek(job.plannedStart, now));
+        (dateFilter === 'week' && isWithinWeek(job.plannedStart, now)) ||
+        (dateFilter === 'custom' && isWithinCustomDateRange(job.plannedStart, customDateStart, customDateEnd));
 
-      if (!matchesStatus || !matchesDate) return false;
+      const matchesType = jobTypeFilter === 'all' || (jobTypeFilter === 'recurring' && isRecurringJob);
+
+      if (!matchesStatus || !matchesDate || !matchesType) return false;
 
       if (!query) return true;
 
@@ -609,13 +705,13 @@ export default function EinsaetzePage() {
         job.address,
         job.city,
         job.siteName,
-        formatStatus(job.status),
+        formatStatus(getOperationalStatus(job)),
       ]
         .join(' ')
         .toLowerCase()
         .includes(query);
     });
-  }, [jobs, searchQuery, statusFilter, dateFilter, now]);
+  }, [jobs, searchQuery, statusFilter, dateFilter, customDateStart, customDateEnd, jobTypeFilter, now]);
 
   const todayJobs = useMemo(() => jobs.filter((job) => isSameLocalDay(job.plannedStart, now)), [jobs, now]);
   const weekJobs = useMemo(() => jobs.filter((job) => isWithinWeek(job.plannedStart, now)), [jobs, now]);
@@ -663,17 +759,11 @@ export default function EinsaetzePage() {
       <div className="opc-jobs-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
         <div className="opc-jobs-hero" style={cardStyle}>
           <div>
-            <span>{employeeMode ? 'Mitarbeiter Einsätze' : 'Operative Einsatzplanung'}</span>
             <h1>{employeeMode ? 'Meine Aufträge' : 'Einsätze'}</h1>
-            <p>
-              {employeeMode
-                ? 'Deine Aufträge mit Standort, Zeit, Status und Navigation.'
-                : 'Geplante, laufende und abgeschlossene Einsätze im Überblick.'}
-            </p>
           </div>
 
           <div className="opc-jobs-hero-actions">
-            <button type="button" className="opc-jobs-action" onClick={() => void loadJobs()}>
+            <button type="button" className="opc-jobs-action" onClick={() => void loadJobs(viewerRole)}>
               <RefreshCw size={16} />
               Aktualisieren
             </button>
@@ -716,14 +806,60 @@ export default function EinsaetzePage() {
             />
           </div>
 
-          <div className="opc-jobs-filter-grid">
-            <SmallFilterButton active={dateFilter === 'today'} label="Heute" onClick={() => setDateFilter('today')} />
-            <SmallFilterButton active={dateFilter === 'week'} label="Woche" onClick={() => setDateFilter('week')} />
-            <SmallFilterButton active={dateFilter === 'all'} label="Alle" onClick={() => setDateFilter('all')} />
+          <div className="opc-jobs-date-buttons" aria-label="Zeitraum filtern">
+            <button
+              type="button"
+              className={dateFilter === 'today' ? 'active' : ''}
+              onClick={() => setDateFilter('today')}
+            >
+              Heute
+            </button>
+            <button
+              type="button"
+              className={dateFilter === 'week' ? 'active' : ''}
+              onClick={() => setDateFilter('week')}
+            >
+              Woche
+            </button>
+            <button
+              type="button"
+              className={dateFilter === 'all' ? 'active' : ''}
+              onClick={() => setDateFilter('all')}
+            >
+              Alle
+            </button>
           </div>
+
+          {canPlanJobs ? (
+            <div className="opc-jobs-custom-date-row" aria-label="Datum auswählen">
+              <input
+                type="date"
+                value={customDateStart}
+                onChange={(event) => {
+                  setCustomDateStart(event.target.value);
+                  setDateFilter('custom');
+                }}
+              />
+              <input
+                type="date"
+                value={customDateEnd}
+                onChange={(event) => {
+                  setCustomDateEnd(event.target.value);
+                  setDateFilter('custom');
+                }}
+              />
+            </div>
+          ) : null}
+
+          <select value={jobTypeFilter} onChange={(event) => setJobTypeFilter(event.target.value as JobTypeFilter)}>
+            <option value="all">Alle Auftragsarten</option>
+            <option value="recurring">Wiederkehrende Einsätze</option>
+          </select>
 
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="all">Alle Status</option>
+            <option value="open_jobs">Offene Einsätze</option>
+            <option value="completed_jobs">Abgeschlossene Einsätze</option>
             {availableStatuses.map((status) => (
               <option key={status} value={status}>
                 {formatStatus(status)}
@@ -763,14 +899,6 @@ export default function EinsaetzePage() {
           margin-bottom: 14px;
         }
 
-        .opc-jobs-hero span {
-          display: block;
-          color: ${BRAND.muted};
-          font-size: 12px;
-          font-weight: 780;
-          margin-bottom: 8px;
-        }
-
         .opc-jobs-hero h1 {
           margin: 0;
           color: ${BRAND.text};
@@ -780,19 +908,12 @@ export default function EinsaetzePage() {
           font-weight: 860;
         }
 
-        .opc-jobs-hero p {
-          margin: 8px 0 0;
-          color: ${BRAND.muted};
-          font-size: 14px;
-          line-height: 1.45;
-          font-weight: 620;
-        }
-
         .opc-jobs-hero-actions {
-          display: flex;
+          display: grid;
+          grid-template-columns: repeat(2, max-content);
           gap: 10px;
-          flex-wrap: wrap;
           justify-content: flex-end;
+          align-items: center;
         }
 
         .opc-jobs-action,
@@ -841,15 +962,21 @@ export default function EinsaetzePage() {
         }
 
         .opc-jobs-filter-panel {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
           padding: 16px;
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 300px 220px;
+          display: flex;
+          flex-wrap: wrap;
           gap: 12px;
           align-items: center;
           margin-bottom: 18px;
+          overflow: hidden;
         }
 
         .opc-jobs-search {
+          flex: 1 1 260px;
+          min-width: 0;
           height: 44px;
           border: 1px solid ${BRAND.border};
           border-radius: 14px;
@@ -863,6 +990,7 @@ export default function EinsaetzePage() {
 
         .opc-jobs-search input {
           width: 100%;
+          min-width: 0;
           border: 0;
           outline: 0;
           color: ${BRAND.text};
@@ -871,13 +999,50 @@ export default function EinsaetzePage() {
           font-family: ${pageFont};
         }
 
-        .opc-jobs-filter-grid {
+        .opc-jobs-date-buttons {
+          flex: 1 1 300px;
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 8px;
+          min-width: 0;
         }
 
-        .opc-jobs-filter-panel select {
+        .opc-jobs-date-buttons button {
+          height: 44px;
+          min-width: 0;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.muted};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 820;
+          font-family: ${pageFont};
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-jobs-date-buttons button.active {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-jobs-filter-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .opc-jobs-custom-date-row {
+          flex: 1 1 250px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .opc-jobs-custom-date-row input {
           height: 44px;
           border: 1px solid ${BRAND.border};
           border-radius: 14px;
@@ -888,6 +1053,24 @@ export default function EinsaetzePage() {
           font-weight: 760;
           font-family: ${pageFont};
           outline: 0;
+          width: 100%;
+          min-width: 0;
+        }
+
+        .opc-jobs-filter-panel select {
+          flex: 1 1 190px;
+          height: 44px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          outline: 0;
+          width: 100%;
+          min-width: 0;
         }
 
         .opc-jobs-list {
@@ -966,9 +1149,19 @@ export default function EinsaetzePage() {
           padding: 22px;
         }
 
-        @media (max-width: 1180px) {
+        @media (max-width: 1280px) {
           .opc-jobs-filter-panel {
-            grid-template-columns: 1fr;
+            align-items: stretch;
+          }
+
+          .opc-jobs-date-buttons,
+          .opc-jobs-custom-date-row,
+          .opc-jobs-filter-panel select {
+            flex: 1 1 100%;
+          }
+
+          .opc-jobs-date-buttons {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
           }
         }
 
@@ -978,7 +1171,7 @@ export default function EinsaetzePage() {
           }
 
           .opc-jobs-hero {
-            flex-direction: column;
+            grid-template-columns: 1fr;
             align-items: stretch;
             padding: 18px;
           }
@@ -987,12 +1180,15 @@ export default function EinsaetzePage() {
             font-size: 25px;
           }
 
-          .opc-jobs-hero-actions,
+          .opc-jobs-hero-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            width: 100%;
+          }
+
           .opc-job-card-actions {
             flex-direction: column;
           }
 
-          .opc-jobs-action,
           .opc-job-action {
             width: 100%;
           }
@@ -1017,3 +1213,1208 @@ export default function EinsaetzePage() {
     </MirakaDashboardShell>
   );
 }
+
+type RecurrenceMode = 'none' | 'daily' | 'weekdays' | 'monthly';
+type PeriodPreset = 'custom' | '3m' | '6m' | '12m';
+
+type StaffOption = {
+  id: string;
+  user_id?: string | null;
+  employee_id?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+  phone_e164?: string | null;
+  phone_raw?: string | null;
+  role?: string | null;
+  status?: string | null;
+};
+
+type ClientOption = {
+  id: string;
+  billing_name?: string | null;
+  company_name?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+};
+
+type SiteOption = {
+  id: string;
+  client_id?: string | null;
+  site_name?: string | null;
+  name?: string | null;
+  address_text?: string | null;
+  address?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+};
+
+const WEEKDAY_OPTIONS = [
+  { value: 1, label: 'Mo' },
+  { value: 2, label: 'Di' },
+  { value: 3, label: 'Mi' },
+  { value: 4, label: 'Do' },
+  { value: 5, label: 'Fr' },
+  { value: 6, label: 'Sa' },
+  { value: 0, label: 'So' },
+];
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function toInputDate(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function addMonthsToInputDate(inputDate: string, months: number) {
+  const date = inputDate ? new Date(`${inputDate}T00:00:00`) : new Date();
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMonth(date.getMonth() + months);
+  return toInputDate(date);
+}
+
+function daysInMonth(year: number, monthIndex: number) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
+
+function addHoursToTime(startTime: string, hoursValue: string | number) {
+  const [rawHour, rawMinute] = String(startTime || '08:00').split(':');
+  const hours = Number.parseInt(rawHour || '8', 10);
+  const minutes = Number.parseInt(rawMinute || '0', 10);
+  const duration = Number(String(hoursValue || '2').replace(',', '.'));
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 2;
+  const totalMinutes = hours * 60 + minutes + Math.round(safeDuration * 60);
+  const nextHour = Math.floor(totalMinutes / 60) % 24;
+  const nextMinute = totalMinutes % 60;
+  return `${pad2(nextHour)}:${pad2(nextMinute)}`;
+}
+
+function parseInputDate(inputDate: string) {
+  const date = new Date(`${inputDate}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function combineLocalDateTime(inputDate: string, inputTime: string) {
+  const date = new Date(`${inputDate}T${inputTime || '08:00'}:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function cleanNullable(value: string) {
+  const clean = String(value || '').trim();
+  return clean.length ? clean : null;
+}
+
+function cleanNumber(value: string) {
+  const number = Number(String(value || '').trim().replace(',', '.'));
+  return Number.isFinite(number) ? number : null;
+}
+
+function compactPayload(payload: JsonRecord) {
+  const copy: JsonRecord = { ...payload };
+
+  Object.keys(copy).forEach((key) => {
+    if (copy[key] === null || copy[key] === undefined || copy[key] === '') {
+      delete copy[key];
+    }
+  });
+
+  return copy;
+}
+
+function normalizeText(value?: string | null) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getClientLabel(client: ClientOption) {
+  return client.billing_name || client.company_name || client.full_name || client.email || 'Kunde';
+}
+
+function getSiteLabel(site: SiteOption) {
+  return site.site_name || site.name || site.address_text || site.address || 'Standort';
+}
+
+function buildOccurrenceDates({
+  recurrenceMode,
+  startDate,
+  endDate,
+  selectedWeekdays,
+  monthlyCount,
+}: {
+  recurrenceMode: RecurrenceMode;
+  startDate: string;
+  endDate: string;
+  selectedWeekdays: number[];
+  monthlyCount: string;
+}) {
+  const start = parseInputDate(startDate);
+  if (!start) return [];
+
+  if (recurrenceMode === 'none') return [toInputDate(start)];
+
+  const end = parseInputDate(endDate) || start;
+  const safeEnd = end < start ? start : end;
+  const dates = new Set<string>();
+
+  if (recurrenceMode === 'daily' || recurrenceMode === 'weekdays') {
+    let cursor = new Date(start);
+
+    while (cursor <= safeEnd) {
+      const weekday = cursor.getDay();
+      if (recurrenceMode === 'daily' || selectedWeekdays.includes(weekday)) {
+        dates.add(toInputDate(cursor));
+      }
+      cursor = addDays(cursor, 1);
+    }
+  }
+
+  if (recurrenceMode === 'monthly') {
+    const count = Math.min(4, Math.max(1, Number.parseInt(monthlyCount || '1', 10) || 1));
+    const anchorDay = start.getDate();
+    const stepDays = count <= 1 ? 0 : Math.max(6, Math.round(28 / count));
+    let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+
+    while (cursor <= safeEnd) {
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth();
+      const monthDays = daysInMonth(year, month);
+
+      for (let index = 0; index < count; index += 1) {
+        const day = Math.min(monthDays, anchorDay + index * stepDays);
+        const occurrence = new Date(year, month, day);
+
+        if (occurrence >= start && occurrence <= safeEnd) {
+          dates.add(toInputDate(occurrence));
+        }
+      }
+
+      cursor = new Date(year, month + 1, 1);
+    }
+  }
+
+  return Array.from(dates).sort();
+}
+
+async function tryInsertOne(table: string, variants: JsonRecord[]) {
+  let lastError: any = null;
+
+  for (const variant of variants) {
+    const payload = compactPayload(variant);
+
+    try {
+      const response = await supabase.from(table).insert(payload).select('*').limit(1);
+
+      if (!response.error) {
+        return {
+          data: Array.isArray(response.data) ? response.data[0] : null,
+          payload,
+          error: null,
+        };
+      }
+
+      lastError = response.error;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(lastError?.message || `${table}: Insert konnte nicht erstellt werden.`);
+}
+
+async function tryInsertJob(variants: JsonRecord[]) {
+  let lastError: any = null;
+
+  for (const table of ['opc_service_jobs', 'opc_jobs']) {
+    try {
+      return await tryInsertOne(table, variants);
+    } catch (error: any) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(lastError?.message || 'Einsatz konnte nicht gespeichert werden.');
+}
+
+function PlanSectionCard({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="opc-plan-card" style={cardStyle}>
+      <div className="opc-plan-card-header">
+        <div className="opc-plan-card-icon">{icon}</div>
+        <h2>{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function PlanField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="opc-plan-field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function EinsatzPlanningView() {
+  const today = useMemo(() => toInputDate(new Date()), []);
+
+  const [title, setTitle] = useState('');
+  const [serviceCategory, setServiceCategory] = useState('Unterhaltsreinigung');
+  const [serviceDescription, setServiceDescription] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [status, setStatus] = useState('scheduled');
+
+  const [clientId, setClientId] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
+  const [siteId, setSiteId] = useState('');
+  const [siteOptions, setSiteOptions] = useState<SiteOption[]>([]);
+  const [siteName, setSiteName] = useState('');
+  const [addressText, setAddressText] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [city, setCity] = useState('');
+
+  const [startDate, setStartDate] = useState(today);
+  const [startTime, setStartTime] = useState('08:00');
+  const [estimatedHours, setEstimatedHours] = useState('2');
+  const [endTime, setEndTime] = useState(() => addHoursToTime('08:00', '2'));
+  const [autoEndTime, setAutoEndTime] = useState(true);
+
+  const [recurrenceMode, setRecurrenceMode] = useState<RecurrenceMode>('none');
+  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 2, 3, 4, 5, 6]);
+  const [monthlyCount, setMonthlyCount] = useState('1');
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('3m');
+  const [seriesEndDate, setSeriesEndDate] = useState(() => addMonthsToInputDate(today, 3));
+
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
+  const [internalNotes, setInternalNotes] = useState('');
+
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const occurrenceDates = useMemo(
+    () =>
+      buildOccurrenceDates({
+        recurrenceMode,
+        startDate,
+        endDate: recurrenceMode === 'none' ? startDate : seriesEndDate,
+        selectedWeekdays,
+        monthlyCount,
+      }),
+    [monthlyCount, recurrenceMode, selectedWeekdays, seriesEndDate, startDate],
+  );
+
+  useEffect(() => {
+    if (!autoEndTime) return;
+    setEndTime(addHoursToTime(startTime, estimatedHours || '2'));
+  }, [autoEndTime, estimatedHours, startTime]);
+
+  useEffect(() => {
+    if (periodPreset === '3m') setSeriesEndDate(addMonthsToInputDate(startDate, 3));
+    if (periodPreset === '6m') setSeriesEndDate(addMonthsToInputDate(startDate, 6));
+    if (periodPreset === '12m') setSeriesEndDate(addMonthsToInputDate(startDate, 12));
+  }, [periodPreset, startDate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialOptions() {
+      const [staffResponse, clientsResponse] = await Promise.allSettled([
+        supabase
+          .from('opc_staff_roles')
+          .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,role,status')
+          .order('display_name', { ascending: true }),
+        supabase
+          .from('opc_clients')
+          .select('id,billing_name,company_name,full_name,email')
+          .order('created_at', { ascending: false })
+          .limit(200),
+      ]);
+
+      if (cancelled) return;
+
+      if (staffResponse.status === 'fulfilled' && !staffResponse.value.error && Array.isArray(staffResponse.value.data)) {
+        const rows = (staffResponse.value.data as StaffOption[]).filter((staff) => {
+          const role = normalizeText(staff.role);
+          const staffStatus = normalizeText(staff.status);
+          const isEmployee = ['employee', 'mitarbeiter', 'cleaner', 'reinigung', ''].includes(role);
+          const isActive = !staffStatus || ['active', 'aktiv', 'enabled'].includes(staffStatus);
+          return staff.id && isEmployee && isActive;
+        });
+
+        setStaffOptions(rows);
+      }
+
+      if (clientsResponse.status === 'fulfilled' && !clientsResponse.value.error && Array.isArray(clientsResponse.value.data)) {
+        setClientOptions(clientsResponse.value.data as ClientOption[]);
+      }
+    }
+
+    void loadInitialOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSites() {
+      if (!clientId) {
+        setSiteOptions([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('opc_client_sites')
+        .select('id,client_id,site_name,name,address_text,address,postal_code,city')
+        .eq('client_id', clientId)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (!cancelled && !error && Array.isArray(data)) {
+        setSiteOptions(data as SiteOption[]);
+      }
+    }
+
+    void loadSites();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  const selectedClient = useMemo(
+    () => clientOptions.find((client) => client.id === clientId) || null,
+    [clientId, clientOptions],
+  );
+
+
+  function handleClientChange(nextClientId: string) {
+    setClientId(nextClientId);
+    setSiteId('');
+
+    const client = clientOptions.find((item) => item.id === nextClientId);
+    if (client) {
+      setClientName(getClientLabel(client));
+    }
+  }
+
+  function handleSiteChange(nextSiteId: string) {
+    setSiteId(nextSiteId);
+
+    const site = siteOptions.find((item) => item.id === nextSiteId);
+    if (site) {
+      setSiteName(getSiteLabel(site));
+      setAddressText(site.address_text || site.address || '');
+      setPostalCode(site.postal_code || '');
+      setCity(site.city || '');
+    }
+  }
+
+  function setPreset(value: PeriodPreset) {
+    setPeriodPreset(value);
+
+    if (value === '3m') setSeriesEndDate(addMonthsToInputDate(startDate, 3));
+    if (value === '6m') setSeriesEndDate(addMonthsToInputDate(startDate, 6));
+    if (value === '12m') setSeriesEndDate(addMonthsToInputDate(startDate, 12));
+  }
+
+  function toggleStaff(staffId: string) {
+    setSelectedStaffIds((current) =>
+      current.includes(staffId) ? current.filter((id) => id !== staffId) : [...current, staffId],
+    );
+  }
+
+  function buildJobPayload(date: string, recurringSeriesId: string | null) {
+    const plannedStart = combineLocalDateTime(date, startTime);
+    const plannedEnd = combineLocalDateTime(date, endTime);
+    const clientLabel = clientName.trim() || (selectedClient ? getClientLabel(selectedClient) : 'Kunde');
+    const safeTitle = title.trim() || `${serviceCategory || 'Einsatz'} · ${clientLabel}`;
+    const now = new Date().toISOString();
+    const computedStatus = selectedStaffIds.length > 0 && status === 'scheduled' ? 'assigned' : status;
+
+    return {
+      title: safeTitle,
+      job_title: safeTitle,
+      service_category: cleanNullable(serviceCategory),
+      service_description: cleanNullable(serviceDescription),
+      job_type: cleanNullable(serviceCategory),
+      status: computedStatus,
+      job_status: computedStatus,
+      priority,
+      planned_start: plannedStart?.toISOString() || null,
+      planned_end: plannedEnd?.toISOString() || null,
+      start_time: plannedStart?.toISOString() || null,
+      end_time: plannedEnd?.toISOString() || null,
+      estimated_hours: cleanNumber(estimatedHours),
+      planned_hours: cleanNumber(estimatedHours),
+      client_id: clientId || null,
+      client_site_id: siteId || null,
+      site_id: siteId || null,
+      billing_name: cleanNullable(clientName),
+      client_name: cleanNullable(clientName),
+      customer_name: cleanNullable(clientName),
+      site_name: cleanNullable(siteName),
+      location_name: cleanNullable(siteName),
+      address_text: cleanNullable(addressText),
+      site_address: cleanNullable(addressText),
+      postal_code: cleanNullable(postalCode),
+      city: cleanNullable(city),
+      site_city: cleanNullable(city),
+      internal_notes: cleanNullable(internalNotes),
+      dispatcher_notes: cleanNullable(internalNotes),
+      recurrence_type: recurrenceMode !== 'none' ? recurrenceMode : null,
+      recurring_series_id: recurringSeriesId,
+      occurrence_date: date,
+      occurrence_key: recurringSeriesId ? `${recurringSeriesId}:${date}` : null,
+      series_version: recurringSeriesId ? 1 : null,
+      created_at: now,
+      updated_at: now,
+    };
+  }
+
+  function buildJobVariants(date: string, recurringSeriesId: string | null) {
+    const full = buildJobPayload(date, recurringSeriesId);
+    const minimal = {
+      title: full.title,
+      service_category: full.service_category,
+      service_description: full.service_description,
+      status: full.status,
+      priority: full.priority,
+      planned_start: full.planned_start,
+      planned_end: full.planned_end,
+      estimated_hours: full.estimated_hours,
+      client_id: full.client_id,
+      client_site_id: full.client_site_id,
+      internal_notes: full.internal_notes,
+      dispatcher_notes: full.dispatcher_notes,
+      created_at: full.created_at,
+      updated_at: full.updated_at,
+    };
+    const noRecurrence = { ...full };
+    delete noRecurrence.recurring_series_id;
+    delete noRecurrence.occurrence_date;
+    delete noRecurrence.occurrence_key;
+    delete noRecurrence.series_version;
+    delete noRecurrence.recurrence_type;
+
+    return [
+      full,
+      noRecurrence,
+      minimal,
+      {
+        title: full.title,
+        status: full.status,
+        planned_start: full.planned_start,
+        planned_end: full.planned_end,
+        created_at: full.created_at,
+        updated_at: full.updated_at,
+      },
+    ];
+  }
+
+  async function createRecurringSeries() {
+    if (recurrenceMode === 'none') return null;
+
+    const fallbackId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+    const now = new Date().toISOString();
+
+    try {
+      const inserted = await tryInsertOne('opc_recurring_job_series', [
+        {
+          title: title.trim() || serviceCategory || 'Wiederkehrender Einsatz',
+          client_id: clientId || null,
+          client_site_id: siteId || null,
+          service_category: cleanNullable(serviceCategory),
+          service_description: cleanNullable(serviceDescription),
+          priority,
+          estimated_hours: cleanNumber(estimatedHours),
+          planned_start_time: startTime,
+          planned_end_time: endTime,
+          start_date: startDate,
+          end_date: seriesEndDate,
+          recurrence_type: recurrenceMode,
+          weekdays: recurrenceMode === 'weekdays' ? selectedWeekdays : null,
+          monthly_count: recurrenceMode === 'monthly' ? Number(monthlyCount || 1) : null,
+          status: 'active',
+          internal_notes: cleanNullable(internalNotes),
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          id: fallbackId,
+          title: title.trim() || serviceCategory || 'Wiederkehrender Einsatz',
+          client_id: clientId || null,
+          start_date: startDate,
+          end_date: seriesEndDate,
+          recurrence_type: recurrenceMode,
+          status: 'active',
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+
+      return String(inserted.data?.id || fallbackId);
+    } catch {
+      return fallbackId;
+    }
+  }
+
+  async function assignStaffToJob(jobId: string) {
+    if (!jobId || selectedStaffIds.length === 0) return;
+
+    const now = new Date().toISOString();
+
+    for (const staffId of selectedStaffIds) {
+      const staff = staffOptions.find((item) => item.id === staffId);
+      if (!staff) continue;
+
+      await tryInsertOne('opc_job_assignments', [
+        {
+          job_id: jobId,
+          employee_id: staff.employee_id || staff.id,
+          staff_role_id: staff.id,
+          user_id: staff.user_id || null,
+          status: 'assigned',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          job_id: jobId,
+          employee_id: staff.employee_id || staff.id,
+          status: 'assigned',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          job_id: jobId,
+          staff_role_id: staff.id,
+          status: 'assigned',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          job_id: jobId,
+          user_id: staff.user_id || null,
+          status: 'assigned',
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+    }
+  }
+
+  async function handleSave() {
+    if (saving) return;
+
+    setSaving(true);
+    setMessage('');
+    setErrorMessage('');
+
+    try {
+      if (!startDate || !startTime || !endTime) {
+        throw new Error('Bitte Datum, Startzeit und Endzeit ausfüllen.');
+      }
+
+      if (recurrenceMode === 'weekdays' && selectedWeekdays.length === 0) {
+        throw new Error('Bitte mindestens einen Wochentag auswählen.');
+      }
+
+      if (recurrenceMode !== 'none' && occurrenceDates.length === 0) {
+        throw new Error('Für diese Wiederholung wurden keine Einsatztage gefunden.');
+      }
+
+      const recurringSeriesId = await createRecurringSeries();
+      const createdJobIds: string[] = [];
+
+      for (const date of occurrenceDates) {
+        const inserted = await tryInsertJob(buildJobVariants(date, recurringSeriesId));
+        const createdId = String(inserted.data?.id || inserted.data?.job_id || '');
+
+        if (createdId) {
+          createdJobIds.push(createdId);
+          await assignStaffToJob(createdId);
+        }
+      }
+
+      setMessage(
+        occurrenceDates.length === 1
+          ? 'Einsatz wurde gespeichert.'
+          : `${occurrenceDates.length} einzelne Einsätze wurden aus der Wiederholung erstellt.`,
+      );
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Einsatz konnte nicht gespeichert werden.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <MirakaDashboardShell
+      hideTopBar={true}
+      requiredRole={['owner', 'admin', 'dispatch']}
+      currentPath="/einsaetze"
+    >
+      <div className="opc-plan-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
+        <div className="opc-plan-hero" style={cardStyle}>
+          <div>
+            <a className="opc-back-link" href={`${baseUrl}/einsaetze`}>
+              <ArrowLeft size={15} />
+              Zurück zu Einsätze
+            </a>
+            <h1>Einsatz planen</h1>
+          </div>
+
+          <button type="button" className="opc-save-button" disabled={saving} onClick={() => void handleSave()}>
+            {saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
+            {saving ? 'Speichert...' : 'Speichern'}
+          </button>
+        </div>
+
+        {errorMessage ? <div className="opc-plan-error">{errorMessage}</div> : null}
+        {message ? <div className="opc-plan-message">{message}</div> : null}
+
+        <div className="opc-plan-grid single">
+          <div className="opc-plan-main">
+            <PlanSectionCard title="Auftragsdaten" icon={<Briefcase size={17} />}>
+              <div className="opc-form-grid">
+                <PlanField label="Titel">
+                  <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="z.B. Unterhaltsreinigung Update Fitness" />
+                </PlanField>
+
+                <PlanField label="Kunde">
+                  <select value={clientId} onChange={(event) => handleClientChange(event.target.value)}>
+                    <option value="">Kunde auswählen oder manuell eintragen</option>
+                    {clientOptions.map((client) => (
+                      <option key={client.id} value={client.id}>{getClientLabel(client)}</option>
+                    ))}
+                  </select>
+                </PlanField>
+
+                <PlanField label="Kundenname manuell">
+                  <input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Kundenname" />
+                </PlanField>
+
+                <PlanField label="Standort">
+                  <select value={siteId} onChange={(event) => handleSiteChange(event.target.value)} disabled={!clientId || siteOptions.length === 0}>
+                    <option value="">Standort auswählen oder manuell eintragen</option>
+                    {siteOptions.map((site) => (
+                      <option key={site.id} value={site.id}>{getSiteLabel(site)}</option>
+                    ))}
+                  </select>
+                </PlanField>
+
+                <PlanField label="Standortname">
+                  <input value={siteName} onChange={(event) => setSiteName(event.target.value)} placeholder="Objekt / Standort" />
+                </PlanField>
+
+                <PlanField label="Adresse">
+                  <input value={addressText} onChange={(event) => setAddressText(event.target.value)} placeholder="Strasse und Nummer" />
+                </PlanField>
+
+                <PlanField label="PLZ">
+                  <input value={postalCode} onChange={(event) => setPostalCode(event.target.value)} placeholder="PLZ" />
+                </PlanField>
+
+                <PlanField label="Ort">
+                  <input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Ort" />
+                </PlanField>
+
+                <PlanField label="Service">
+                  <input value={serviceCategory} onChange={(event) => setServiceCategory(event.target.value)} placeholder="Unterhaltsreinigung, Fensterreinigung..." />
+                </PlanField>
+
+                <PlanField label="Priorität">
+                  <select value={priority} onChange={(event) => setPriority(event.target.value)}>
+                    <option value="low">Niedrig</option>
+                    <option value="normal">Normal</option>
+                    <option value="high">Hoch</option>
+                    <option value="urgent">Dringend</option>
+                  </select>
+                </PlanField>
+              </div>
+
+              <PlanField label="Beschreibung">
+                <textarea value={serviceDescription} onChange={(event) => setServiceDescription(event.target.value)} placeholder="Kurze Beschreibung des Einsatzes." />
+              </PlanField>
+            </PlanSectionCard>
+
+            <PlanSectionCard title="Termin" icon={<CalendarDays size={17} />}>
+              <div className="opc-form-grid">
+                <PlanField label="Datum">
+                  <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value || today)} />
+                </PlanField>
+
+                <PlanField label="Startzeit">
+                  <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                </PlanField>
+
+                <PlanField label="Geschätzte Stunden">
+                  <input inputMode="decimal" value={estimatedHours} onChange={(event) => setEstimatedHours(event.target.value)} />
+                </PlanField>
+
+                <PlanField label="Endzeit">
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(event) => {
+                      setAutoEndTime(false);
+                      setEndTime(event.target.value);
+                    }}
+                  />
+                </PlanField>
+
+                <PlanField label="Status">
+                  <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                    <option value="scheduled">Geplant</option>
+                    <option value="assigned">Zugewiesen</option>
+                    <option value="confirmed">Bestätigt</option>
+                  </select>
+                </PlanField>
+              </div>
+
+              <button type="button" className="opc-soft-button" onClick={() => { setAutoEndTime(true); setEndTime(addHoursToTime(startTime, estimatedHours || '2')); }}>
+                <Clock3 size={15} />
+                Endzeit automatisch berechnen
+              </button>
+            </PlanSectionCard>
+
+            <PlanSectionCard title="Wiederholung" icon={<Repeat size={17} />}>
+              <div className="opc-form-grid">
+                <PlanField label="Wiederholung">
+                  <select value={recurrenceMode} onChange={(event) => setRecurrenceMode(event.target.value as RecurrenceMode)}>
+                    <option value="none">Keine Wiederholung</option>
+                    <option value="daily">Täglich</option>
+                    <option value="weekdays">Bestimmte Wochentage</option>
+                    <option value="monthly">Monatlich</option>
+                  </select>
+                </PlanField>
+
+                {recurrenceMode !== 'none' ? (
+                  <PlanField label="Zeitraum">
+                    <select value={periodPreset} onChange={(event) => setPreset(event.target.value as PeriodPreset)}>
+                      <option value="3m">3 Monate</option>
+                      <option value="6m">6 Monate</option>
+                      <option value="12m">12 Monate</option>
+                      <option value="custom">Eigenes Enddatum</option>
+                    </select>
+                  </PlanField>
+                ) : null}
+
+                {recurrenceMode !== 'none' ? (
+                  <PlanField label="Ende der Serie">
+                    <input
+                      type="date"
+                      value={seriesEndDate}
+                      onChange={(event) => {
+                        setPeriodPreset('custom');
+                        setSeriesEndDate(event.target.value);
+                      }}
+                    />
+                  </PlanField>
+                ) : null}
+
+                {recurrenceMode === 'monthly' ? (
+                  <PlanField label="Anzahl pro Monat">
+                    <select value={monthlyCount} onChange={(event) => setMonthlyCount(event.target.value)}>
+                      <option value="1">1x monatlich</option>
+                      <option value="2">2x monatlich</option>
+                      <option value="3">3x monatlich</option>
+                      <option value="4">4x monatlich</option>
+                    </select>
+                  </PlanField>
+                ) : null}
+              </div>
+
+              {recurrenceMode === 'weekdays' ? (
+                <div className="opc-weekday-row">
+                  {WEEKDAY_OPTIONS.map((day) => {
+                    const active = selectedWeekdays.includes(day.value);
+                    return (
+                      <button
+                        type="button"
+                        key={day.value}
+                        className={active ? 'active' : ''}
+                        onClick={() => {
+                          setSelectedWeekdays((current) =>
+                            current.includes(day.value)
+                              ? current.filter((item) => item !== day.value)
+                              : [...current, day.value].sort(),
+                          );
+                        }}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </PlanSectionCard>
+
+            <PlanSectionCard title="Mitarbeiter zuweisen" icon={<UserPlus size={17} />}>
+              <div className="opc-staff-select-list">
+                {staffOptions.length === 0 ? (
+                  <div className="opc-empty-box">Keine Mitarbeiter gefunden.</div>
+                ) : (
+                  staffOptions.map((staff) => {
+                    const active = selectedStaffIds.includes(staff.id);
+                    return (
+                      <button
+                        type="button"
+                        key={staff.id}
+                        className={active ? 'active' : ''}
+                        onClick={() => toggleStaff(staff.id)}
+                      >
+                        <strong>{staff.display_name || staff.email || 'Mitarbeiter'}</strong>
+                        <span>{staff.email || staff.phone_e164 || staff.phone_raw || 'Kontakt nicht hinterlegt'}</span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </PlanSectionCard>
+
+            <PlanSectionCard title="Interne Hinweise" icon={<FileText size={17} />}>
+              <textarea
+                value={internalNotes}
+                onChange={(event) => setInternalNotes(event.target.value)}
+                placeholder="Interne Hinweise für Disposition, Admin oder Team. Diese Hinweise sind nicht für Kunden gedacht."
+              />
+            </PlanSectionCard>
+
+            <div className="opc-plan-bottom-save" style={cardStyle}>
+              <button type="button" className="opc-save-button full" disabled={saving} onClick={() => void handleSave()}>
+                {saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
+                {saving ? 'Speichert...' : 'Speichern'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        .opc-plan-page {
+          padding: 0 0 140px;
+        }
+
+        .opc-plan-page * {
+          box-sizing: border-box;
+        }
+
+        .opc-plan-hero {
+          padding: 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 18px;
+          margin-bottom: 14px;
+        }
+
+        .opc-back-link {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          height: 34px;
+          padding: 0 12px;
+          margin-bottom: 12px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 999px;
+          color: ${BRAND.text};
+          text-decoration: none;
+          font-size: 12px;
+          font-weight: 760;
+          background: #FFFFFF;
+        }
+
+        .opc-plan-hero h1 {
+          margin: 0;
+          color: ${BRAND.text};
+          font-size: 31px;
+          line-height: 1.05;
+          letter-spacing: -0.045em;
+          font-weight: 860;
+        }
+
+        .opc-save-button,
+        .opc-soft-button {
+          min-height: 44px;
+          border-radius: 14px;
+          border: 1px solid ${BRAND.black};
+          background: ${BRAND.black};
+          color: #FFFFFF;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 0 16px;
+          font-size: 13px;
+          font-weight: 800;
+          font-family: ${pageFont};
+          cursor: pointer;
+          white-space: nowrap;
+          text-decoration: none;
+        }
+
+        .opc-save-button.full {
+          width: 100%;
+        }
+
+        .opc-save-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .opc-soft-button {
+          margin-top: 12px;
+          border-color: ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+        }
+
+        .opc-plan-error,
+        .opc-plan-message {
+          border-radius: 16px;
+          padding: 14px 16px;
+          font-size: 13px;
+          font-weight: 720;
+          margin-bottom: 14px;
+        }
+
+        .opc-plan-error {
+          border: 1px solid #FECACA;
+          background: #FEF2F2;
+          color: ${BRAND.red};
+        }
+
+        .opc-plan-message {
+          border: 1px solid #BBF7D0;
+          background: #F0FDF4;
+          color: ${BRAND.green};
+        }
+
+        .opc-plan-grid.single {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 14px;
+          align-items: start;
+        }
+
+        .opc-plan-main {
+          display: grid;
+          gap: 14px;
+        }
+
+        .opc-plan-card,
+        .opc-plan-bottom-save {
+          padding: 18px;
+        }
+
+        .opc-plan-card-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 14px;
+        }
+
+        .opc-plan-card-header h2 {
+          margin: 0;
+          color: ${BRAND.text};
+          font-size: 18px;
+          line-height: 1.15;
+          letter-spacing: -0.035em;
+          font-weight: 860;
+        }
+
+        .opc-plan-card-icon {
+          width: 36px;
+          height: 36px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 13px;
+          background: #FAFAFA;
+          color: ${BRAND.black};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex: 0 0 auto;
+        }
+
+        .opc-form-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .opc-plan-field {
+          display: grid;
+          gap: 7px;
+          font-size: 12px;
+          font-weight: 820;
+          color: #374151;
+        }
+
+        .opc-plan-field span {
+          display: block;
+        }
+
+        .opc-plan-field input,
+        .opc-plan-field select,
+        .opc-plan-field textarea,
+        .opc-plan-card textarea {
+          width: 100%;
+          min-height: 44px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 10px 12px;
+          font-size: 14px;
+          font-weight: 650;
+          font-family: ${pageFont};
+          outline: none;
+        }
+
+        .opc-plan-field textarea,
+        .opc-plan-card textarea {
+          min-height: 110px;
+          resize: vertical;
+          margin-top: 12px;
+        }
+
+        .opc-weekday-row {
+          display: grid;
+          grid-template-columns: repeat(7, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .opc-weekday-row button,
+        .opc-staff-select-list button {
+          min-height: 42px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 13px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          font-size: 13px;
+          font-weight: 780;
+          font-family: ${pageFont};
+          cursor: pointer;
+        }
+
+        .opc-weekday-row button.active,
+        .opc-staff-select-list button.active {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-staff-select-list {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .opc-staff-select-list button {
+          min-height: 74px;
+          padding: 12px;
+          text-align: left;
+          display: grid;
+          align-content: center;
+          gap: 4px;
+        }
+
+        .opc-staff-select-list strong,
+        .opc-staff-select-list span {
+          display: block;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
+
+        .opc-staff-select-list strong {
+          font-size: 13px;
+          font-weight: 840;
+        }
+
+        .opc-staff-select-list span {
+          font-size: 12px;
+          font-weight: 640;
+          color: inherit;
+          opacity: 0.72;
+        }
+
+        .opc-empty-box {
+          grid-column: 1 / -1;
+          min-height: 52px;
+          border: 1px solid #F3F4F6;
+          border-radius: 14px;
+          padding: 13px;
+          background: #FAFAFA;
+          color: ${BRAND.muted};
+          font-size: 13px;
+          font-weight: 650;
+        }
+
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 740px) {
+          .opc-plan-page {
+            padding: 0 8px 110px;
+          }
+
+          .opc-plan-hero {
+            padding: 16px;
+            display: grid;
+            gap: 12px;
+          }
+
+          .opc-plan-hero h1 {
+            font-size: 25px;
+          }
+
+          .opc-save-button {
+            width: 100%;
+          }
+
+          .opc-form-grid,
+          .opc-staff-select-list {
+            grid-template-columns: 1fr;
+          }
+
+          .opc-weekday-row {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+
+          .opc-plan-card,
+          .opc-plan-bottom-save {
+            padding: 14px;
+            border-radius: 18px !important;
+          }
+        }
+      `}</style>
+    </MirakaDashboardShell>
+  );
+}
+
+export default function EinsaetzePage() {
+  const isPlanningPath =
+    typeof window !== 'undefined' &&
+    /\/einsatz-planen\/?$/i.test(window.location.pathname || '');
+
+  if (isPlanningPath) {
+    return <EinsatzPlanningView />;
+  }
+
+  return <EinsaetzeOverview />;
+}
+

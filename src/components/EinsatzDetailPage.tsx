@@ -201,14 +201,14 @@ const statusStyles: Record<string, { background: string; color: string; border: 
   'in-progress': { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
   started: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
   running: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
-  completed: { background: '#ECFDF5', color: '#065F46', border: '#A7F3D0' },
+  completed: { background: '#F3F4F6', color: '#111827', border: '#D1D5DB' },
   report_pending: { background: '#FFFBEB', color: '#92400E', border: '#FDE68A' },
-  report_approved: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
+  report_approved: { background: '#F3F4F6', color: '#111827', border: '#D1D5DB' },
   cancelled: { background: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
   draft: { background: '#F3F4F6', color: '#374151', border: '#E5E7EB' },
-  approved: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
-  sent_to_client: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
-  submitted: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
+  approved: { background: '#F3F4F6', color: '#111827', border: '#D1D5DB' },
+  sent_to_client: { background: '#F3F4F6', color: '#111827', border: '#D1D5DB' },
+  submitted: { background: '#F3F4F6', color: '#111827', border: '#D1D5DB' },
   active: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
   open: { background: '#ECFDF5', color: '#047857', border: '#A7F3D0' },
   on_break: { background: '#ECFEFF', color: '#155E75', border: '#A5F3FC' },
@@ -475,12 +475,17 @@ async function tryUpdateOne(table: string, idColumn: string, idValue: string, va
         .select('*')
         .limit(1);
 
-      if (!response.error) {
+      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
         return {
-          data: Array.isArray(response.data) ? response.data[0] : null,
+          data: response.data[0],
           payload,
           error: null,
         };
+      }
+
+      if (!response.error) {
+        lastError = new Error(`${table}: Keine Zeile wurde aktualisiert (${idColumn}=${idValue}).`);
+        continue;
       }
 
       lastError = response.error;
@@ -508,6 +513,7 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
   ];
 
   let lastError: any = null;
+  let sawWritableTable = false;
 
   for (const attempt of attempts) {
     try {
@@ -515,10 +521,18 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
         .from(attempt.table)
         .update(clean)
         .eq(attempt.column, jobId)
-        .select(attempt.column)
+        .select('id')
         .limit(1);
 
-      if (!response.error) return;
+      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
+        return response.data[0];
+      }
+
+      if (!response.error) {
+        sawWritableTable = true;
+        lastError = new Error(`${attempt.table}: Keine Zeile mit ${attempt.column}=${jobId} aktualisiert.`);
+        continue;
+      }
 
       lastError = response.error;
     } catch (error) {
@@ -526,9 +540,13 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
     }
   }
 
-  if (lastError) {
-    throw new Error(lastError?.message || 'Einsatz konnte nicht aktualisiert werden.');
+  if (sawWritableTable) {
+    throw new Error(
+      `Einsatz konnte nicht aktualisiert werden. Es wurde keine passende Zeile für diese Einsatz-ID gefunden: ${jobId}.`,
+    );
   }
+
+  throw new Error(lastError?.message || 'Einsatz konnte nicht aktualisiert werden.');
 }
 
 function getAssignmentEmployeeId(assignment: JsonRecord) {
@@ -743,10 +761,10 @@ function getJobVisualState(job: JobDetail | null, activeTimeLog: JsonRecord | nu
   if (['completed', 'approved', 'report_approved', 'sent_to_client', 'submitted'].includes(status)) {
     return {
       key: 'finished',
-      label: 'Fertig',
-      color: '#16A34A',
-      background: '#DCFCE7',
-      border: '#86EFAC',
+      label: 'Abgeschlossen',
+      color: '#111827',
+      background: '#F3F4F6',
+      border: '#D1D5DB',
     };
   }
 
@@ -778,6 +796,31 @@ function getJobVisualState(job: JobDetail | null, activeTimeLog: JsonRecord | nu
     border: '#FECACA',
   };
 }
+
+function canCompleteJob(job: JobDetail | null, activeTimeLog: JsonRecord | null) {
+  if (!job) return false;
+
+  const status = normalize(job.status);
+
+  if (['completed', 'approved', 'report_approved', 'sent_to_client', 'cancelled', 'rejected'].includes(status)) {
+    return false;
+  }
+
+  if (!job.planned_end) {
+    return Boolean(activeTimeLog);
+  }
+
+  const end = new Date(job.planned_end).getTime();
+
+  if (Number.isNaN(end)) {
+    return Boolean(activeTimeLog);
+  }
+
+  const twentyMinutesBeforeEnd = end - 20 * 60 * 1000;
+
+  return Date.now() >= twentyMinutesBeforeEnd;
+}
+
 
 function buildAssignmentPayloadVariants({
   jobId,
@@ -1251,6 +1294,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const ownAssignment = useMemo(() => (job ? getPrimaryAssignee(job, access) : null), [job, access]);
   const ownAssignmentId = ownAssignment?.id || ownAssignment?.assignment_id || null;
   const isJobOnBreak = Boolean(getBreakStartedAt(activeTimeLog));
+  const showCompleteButton = canCompleteJob(job, activeTimeLog);
   const heroState = getJobVisualState(job, activeTimeLog);
 
   const allNotes = useMemo<NoteRow[]>(() => {
@@ -1663,6 +1707,16 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     try {
       await updateJobRecord(payload);
 
+      setJob((current) =>
+        current
+          ? {
+              ...current,
+              ...payload,
+              planned_start: payload.planned_start ?? current.planned_start,
+              planned_end: payload.planned_end ?? current.planned_end,
+            }
+          : current,
+      );
       setEditMode(false);
       await loadJob(false);
       setActionMessage('Einsatz wurde gespeichert.');
@@ -1943,6 +1997,86 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
       setActionNoteDraft('');
       setActionMessage('Ausgestempelt und eingereicht.');
+    });
+  };
+
+  const handleCompleteJob = async () => {
+    if (!job) {
+      setActionError('Einsatz konnte nicht geladen werden.');
+      return;
+    }
+
+    if (!canCompleteJob(job, activeTimeLog)) {
+      setActionError('Dieser Auftrag kann frühestens 20 Minuten vor der geplanten Endzeit abgeschlossen werden.');
+      return;
+    }
+
+    await runJobAction('complete_job', async () => {
+      const now = new Date().toISOString();
+
+      if (activeTimeLog) {
+        const logId = activeTimeLog.id || activeTimeLog.time_log_id;
+        const metadata = safeMetadata(activeTimeLog.metadata);
+        const noteText = actionNoteDraft.trim() || null;
+        const nextNotes = appendManualNote(activeTimeLog.notes, noteText);
+
+        await tryUpdateOne('opc_job_time_logs', 'id', String(logId), [
+          {
+            ended_at: now,
+            duration_minutes: liveMinutesFromLog(activeTimeLog),
+            status: 'completed',
+            notes: nextNotes,
+            metadata: {
+              ...metadata,
+              break_started_at: null,
+              last_action: 'complete_job',
+              completed_at: now,
+              completed_by: access.userId,
+              submitted_at: now,
+              submitted_by: access.userId,
+              timeline: [
+                ...asArray(metadata.timeline),
+                {
+                  action: 'complete_job',
+                  at: now,
+                  by: access.userId,
+                },
+              ],
+            },
+            updated_at: now,
+          },
+        ]);
+      }
+
+      await updateJobRecord({
+        status: 'completed',
+        actual_end: now,
+      });
+
+      setJob((current) =>
+        current
+          ? {
+              ...current,
+              status: 'completed',
+              actual_end: now,
+            }
+          : current,
+      );
+
+      try {
+        await supabase
+          .from('opc_job_assignments')
+          .update({
+            status: 'completed',
+            confirmed_at: now,
+            updated_at: now,
+          })
+          .eq('job_id', job.job_id);
+      } catch {
+        // Assignment status update is best effort.
+      }
+      setActionNoteDraft('');
+      setActionMessage('Auftrag wurde abgeschlossen.');
     });
   };
 
@@ -2286,7 +2420,19 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
               </button>
             ) : null}
 
-            {activeTimeLog ? (
+            {showCompleteButton ? (
+              <button
+                type="button"
+                onClick={() => void handleCompleteJob()}
+                disabled={Boolean(actionLoading)}
+                className="opc-time-complete-button"
+              >
+                {actionLoading === 'complete_job' ? <Loader2 size={17} className="spin" /> : <CheckCircle2 size={17} />}
+                Auftrag abgeschlossen
+              </button>
+            ) : null}
+
+            {activeTimeLog && !showCompleteButton ? (
               <button
                 type="button"
                 onClick={() => void handleClockOut()}
@@ -3337,9 +3483,12 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
         .opc-main-grid {
           display: grid;
-          grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
           gap: 14px;
           align-items: start;
+          width: 100%;
+          max-width: 100%;
+          overflow-x: hidden;
         }
 
         .opc-left-col,
@@ -3348,11 +3497,24 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         .opc-time-module-block {
           display: grid;
           gap: 14px;
+          min-width: 0;
+          width: 100%;
+          max-width: 100%;
+        }
+
+        .opc-right-col > *,
+        .opc-left-col > * {
+          min-width: 0;
+          max-width: 100%;
         }
 
         .opc-section-card,
         .opc-edit-panel {
           padding: 16px;
+          min-width: 0;
+          width: 100%;
+          max-width: 100%;
+          overflow: hidden;
         }
 
         .opc-split-header,
@@ -3499,7 +3661,8 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         .opc-btn:disabled,
         .opc-time-black-button:disabled,
         .opc-time-secondary-button:disabled,
-        .opc-time-danger-button:disabled {
+        .opc-time-danger-button:disabled,
+        .opc-time-complete-button:disabled {
           opacity: 0.55;
           cursor: not-allowed;
         }
@@ -3608,7 +3771,8 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
         .opc-time-black-button,
         .opc-time-secondary-button,
-        .opc-time-danger-button {
+        .opc-time-danger-button,
+        .opc-time-complete-button {
           height: 48px;
           min-width: 176px;
           padding: 0 16px;
@@ -3640,6 +3804,12 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           border: 1px solid #FCA5A5;
           background: #FEF2F2;
           color: ${BRAND.red};
+        }
+
+        .opc-time-complete-button {
+          border: 1px solid ${BRAND.black};
+          background: ${BRAND.black};
+          color: #FFFFFF;
         }
 
         .opc-time-table {
@@ -4265,7 +4435,8 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           .opc-btn,
           .opc-time-black-button,
           .opc-time-secondary-button,
-          .opc-time-danger-button {
+          .opc-time-danger-button,
+          .opc-time-complete-button {
             width: 100%;
             height: 42px;
             min-width: 0;
