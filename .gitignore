@@ -164,3 +164,15 @@ export_employee_permission_scope.sh
 opc_calendar_create_debug_*.txt
 opc_calendar_page_current_*.txt
 opc_pages_dump_*.txt
+
+*.zip
+sql/
+_export_*/
+_google_calendar_export_discovery_*/
+_incoming_*/
+einsatz_planen_discovery_*/
+pdf_*_export_*/
+pdf_*_audit_*/
+pdf_*_migration_*/
+*_backup*/
+_code_backups/
