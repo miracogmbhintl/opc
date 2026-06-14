@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { sendDocumentEmail } from '../lib/opc-document-email';
 import { buildDocumentEmailHtml, downloadPdf, generateQuotePdfDocument, getClientEmail, pdfToBase64, OPC_DEFAULT_CLOSING } from '../lib/opc-document-pdf';
+import { buildQuoteHtml, downloadBase64Pdf, renderHtmlToPdfBase64 } from '../lib/opc-document-html';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import {
   OPCPageShell,
@@ -425,10 +424,10 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
     }
   }
 
-  async function generateQuotePdf(documentType: 'quote' | 'order_confirmation' = 'quote') {
+  function buildQuotePdfInput(documentType: 'quote' | 'order_confirmation' = 'quote') {
     if (!quote) return null;
 
-    return await generateQuotePdfDocument({
+    return {
       quote,
       items,
       totals: {
@@ -439,14 +438,44 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         total: roundMoney(totals.total),
       },
       documentType,
-    });
+    };
+  }
+
+  async function generateQuotePdf(documentType: 'quote' | 'order_confirmation' = 'quote') {
+    const input = buildQuotePdfInput(documentType);
+    if (!input) return null;
+    return await generateQuotePdfDocument(input);
+  }
+
+  async function generateQuotePdfBase64(filename: string, documentType: 'quote' | 'order_confirmation' = 'quote') {
+    const input = buildQuotePdfInput(documentType);
+    if (!input) return null;
+
+    const html = buildQuoteHtml(input);
+    const rendered = await renderHtmlToPdfBase64(html, filename);
+    if (rendered?.base64) return rendered.base64;
+
+    const fallbackDoc = await generateQuotePdfDocument(input);
+    return pdfToBase64(fallbackDoc);
   }
 
   async function handleDownloadQuotePdf() {
     try {
       await saveQuote(undefined, { silent: true });
-      const doc = await generateQuotePdf('quote');
-      if (doc) downloadPdf(doc, buildQuoteFileName(quote!, 'Offerte'));
+      const filename = buildQuoteFileName(quote!, 'Offerte');
+      const input = buildQuotePdfInput('quote');
+
+      if (input) {
+        const html = buildQuoteHtml(input);
+        const rendered = await renderHtmlToPdfBase64(html, filename);
+
+        if (rendered?.base64) {
+          downloadBase64Pdf(rendered.base64, filename);
+        } else {
+          const doc = await generateQuotePdf('quote');
+          if (doc) downloadPdf(doc, filename);
+        }
+      }
       setSuccessMessage('PDF wurde erstellt.');
     } catch {
       // error already shown
@@ -456,8 +485,20 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   async function handleDownloadOrderConfirmation() {
     try {
       await saveQuote('accepted', { silent: true });
-      const doc = await generateQuotePdf('order_confirmation');
-      if (doc) downloadPdf(doc, buildQuoteFileName(quote!, 'Auftragsbestaetigung'));
+      const filename = buildQuoteFileName(quote!, 'Auftragsbestaetigung');
+      const input = buildQuotePdfInput('order_confirmation');
+
+      if (input) {
+        const html = buildQuoteHtml(input);
+        const rendered = await renderHtmlToPdfBase64(html, filename);
+
+        if (rendered?.base64) {
+          downloadBase64Pdf(rendered.base64, filename);
+        } else {
+          const doc = await generateQuotePdf('order_confirmation');
+          if (doc) downloadPdf(doc, filename);
+        }
+      }
       setSuccessMessage('Auftragsbestätigung wurde erstellt.');
     } catch {
       // error already shown
@@ -643,10 +684,9 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
       const recipientEmail = await resolveQuoteRecipientEmail();
       if (!recipientEmail) throw new Error('Für diesen Kunden ist keine E-Mail-Adresse hinterlegt. Bitte zuerst beim Kunden eine Rechnungs- oder Kontakt-E-Mail eintragen.');
 
-      const doc = await generateQuotePdf('quote');
-      if (!doc) throw new Error('PDF konnte nicht erstellt werden.');
-
       const filename = buildQuoteFileName(quote, 'Offerte');
+      const pdfBase64 = await generateQuotePdfBase64(filename, 'quote');
+      if (!pdfBase64) throw new Error('PDF konnte nicht erstellt werden.');
       const html = buildDocumentEmailHtml({
         title: 'Ihre Offerte',
         headline: 'Ihre Offerte',
@@ -658,7 +698,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         to: recipientEmail,
         subject: `Ihre Offerte ${quote.quote_number} – Orange Pro Clean GmbH`,
         html,
-        attachments: [{ filename, contentBase64: pdfToBase64(doc), contentType: 'application/pdf' }],
+        attachments: [{ filename, contentBase64: pdfBase64, contentType: 'application/pdf' }],
         metadata: { quote_id: quote.id, document_type: 'quote' },
       });
       await supabase.from('opc_quote_events').insert({

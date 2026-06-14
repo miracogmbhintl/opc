@@ -14,7 +14,6 @@ import interactionPlugin, { DateClickArg } from '@fullcalendar/interaction';
 import { EventClickArg, EventDropArg } from '@fullcalendar/core';
 import {
   CalendarDays,
-  CheckCircle2,
   Clock3,
   Loader2,
   MapPin,
@@ -22,7 +21,6 @@ import {
   Plus,
   RefreshCcw,
   Search,
-  Users,
   Video,
   X,
 } from 'lucide-react';
@@ -387,6 +385,20 @@ function formatTimeRange(start?: string | null, end?: string | null) {
   } catch {
     return '—';
   }
+}
+
+function isSameLocalDay(value?: string | null, referenceDate = new Date()) {
+  if (!value) return false;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return false;
+
+  return (
+    date.getFullYear() === referenceDate.getFullYear() &&
+    date.getMonth() === referenceDate.getMonth() &&
+    date.getDate() === referenceDate.getDate()
+  );
 }
 
 function getFocusLabel(event: CalendarEvent) {
@@ -1655,12 +1667,10 @@ export default function OPCCalendarPage() {
 
   const metrics = useMemo(() => {
     return {
-      active: events.filter((event) => normalizeStatus(event.status) === 'open').length,
-      pending: events.filter((event) => event.status === 'pending_acceptance').length,
-      confirmed: events.filter((event) => event.status === 'confirmed' || event.status === 'in_progress').length,
-      employees: staff.filter((person) => person.is_active).length,
+      today: events.filter((event) => isSameLocalDay(event.starts_at)).length,
+      pending: pendingInvites.length,
     };
-  }, [events, staff]);
+  }, [events, pendingInvites]);
 
   const defaultCalendarId = useMemo(() => {
     const ownCalendar = calendars.find((calendar) => calendar.owner_user_id === currentUserId);
@@ -1958,30 +1968,28 @@ export default function OPCCalendarPage() {
         className="opc-requests-metrics"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           gap: '14px',
           marginBottom: '18px',
         }}
       >
-        <MetricCard value={metrics.active} label="Offene Einträge" icon={<CalendarDays size={17} />} />
+        <MetricCard value={metrics.today} label="Heutige Einträge" icon={<CalendarDays size={17} />} />
         <MetricCard value={metrics.pending} label="Offene Einladungen" icon={<Clock3 size={17} />} tone="warning" />
-        <MetricCard value={metrics.confirmed} label="Bestätigt" icon={<CheckCircle2 size={17} />} tone="success" />
-        <MetricCard value={metrics.employees} label="Mitarbeiter" icon={<Users size={17} />} />
       </div>
 
       <section style={{ ...cardStyle, padding: '16px', marginBottom: '16px' }}>
         <div
-          className="opc-requests-controls"
+          className={`opc-requests-controls ${isAdmin ? 'is-admin' : 'is-basic'}`}
           style={{
             display: 'grid',
             gridTemplateColumns: isAdmin
-              ? 'minmax(0, 1fr) 150px 150px 170px 150px minmax(320px, 360px)'
-              : 'minmax(0, 1fr) 150px 150px 170px 150px',
+              ? 'minmax(260px, 1.6fr) repeat(6, minmax(130px, 1fr))'
+              : 'minmax(260px, 1.6fr) repeat(4, minmax(130px, 1fr))',
             gap: '10px',
             alignItems: 'center',
           }}
         >
-          <div style={{ position: 'relative', minWidth: 0 }}>
+          <div className="opc-calendar-search-control" style={{ position: 'relative', minWidth: 0 }}>
             <Search size={17} style={searchIconStyle} />
             <input
               type="text"
@@ -1997,6 +2005,70 @@ export default function OPCCalendarPage() {
               }}
             />
           </div>
+
+          {isAdmin && (
+            <button
+              type="button"
+              className="opc-calendar-new-entry-button"
+              disabled={!defaultCalendarId}
+              onClick={() =>
+                setModal({
+                  mode: 'create',
+                  startsAt: new Date().toISOString(),
+                  endsAt: addOneHourIso(new Date().toISOString()),
+                })
+              }
+              style={{
+                ...blackButtonStyle,
+                opacity: defaultCalendarId ? 1 : 0.5,
+                cursor: defaultCalendarId ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <Plus size={17} />
+              Neuer Eintrag
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              type="button"
+              className="opc-calendar-quick-meet-button"
+              onClick={() => setQuickMeetModalOpen(true)}
+              disabled={saving}
+              style={{
+                ...blackButtonStyle,
+                opacity: saving ? 0.72 : 1,
+                cursor: saving ? 'wait' : 'pointer',
+              }}
+            >
+              <Video size={17} />
+              Google Meet
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="opc-calendar-refresh-button"
+            disabled={isRefreshing}
+            onClick={() => void loadCalendarData()}
+            style={{
+              ...secondaryButtonStyle,
+              opacity: isRefreshing ? 0.72 : 1,
+              cursor: isRefreshing ? 'wait' : 'pointer',
+            }}
+          >
+            {isRefreshing ? <Loader2 size={17} className="spin" /> : <RefreshCcw size={17} />}
+            {isRefreshing ? 'Lädt' : 'Neu laden'}
+          </button>
+
+          <select value={staffFilter} onChange={(event) => setStaffFilter(event.target.value)} style={selectStyle}>
+            <option value="all">Alle Mitarbeiter</option>
+            {staff.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+              </option>
+            ))}
+          </select>
 
           <select
             value={activeTab}
@@ -2015,69 +2087,6 @@ export default function OPCCalendarPage() {
             <option value="in_progress">In Bearbeitung</option>
             <option value="done">Erledigt</option>
           </select>
-
-          <select value={staffFilter} onChange={(event) => setStaffFilter(event.target.value)} style={selectStyle}>
-            <option value="all">Alle Mitarbeiter</option>
-            {staff.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            disabled={isRefreshing}
-            onClick={() => void loadCalendarData()}
-            style={{
-              ...secondaryButtonStyle,
-              opacity: isRefreshing ? 0.72 : 1,
-              cursor: isRefreshing ? 'wait' : 'pointer',
-            }}
-          >
-            {isRefreshing ? <Loader2 size={17} className="spin" /> : <RefreshCcw size={17} />}
-            {isRefreshing ? 'Lädt' : 'Neu laden'}
-          </button>
-
-          {isAdmin && (
-            <div className="opc-calendar-actions-row">
-              <button
-                type="button"
-                className="opc-calendar-new-entry-button"
-                disabled={!defaultCalendarId}
-                onClick={() =>
-                  setModal({
-                    mode: 'create',
-                    startsAt: new Date().toISOString(),
-                    endsAt: addOneHourIso(new Date().toISOString()),
-                  })
-                }
-                style={{
-                  ...blackButtonStyle,
-                  opacity: defaultCalendarId ? 1 : 0.5,
-                  cursor: defaultCalendarId ? 'pointer' : 'not-allowed',
-                }}
-              >
-                <Plus size={17} />
-                Neuer Eintrag
-              </button>
-
-              <button
-                type="button"
-                className="opc-calendar-quick-meet-button"
-                onClick={() => setQuickMeetModalOpen(true)}
-                disabled={saving}
-                style={{
-                  ...blackButtonStyle,
-                  opacity: saving ? 0.72 : 1,
-                  cursor: saving ? 'wait' : 'pointer',
-                }}
-              >
-                <Video size={17} />
-                Google Meet
-              </button>
-            </div>
-          )}
         </div>
       </section>
 
@@ -2234,7 +2243,8 @@ export default function OPCCalendarPage() {
         }
 
         .opc-calendar-new-entry-button,
-        .opc-calendar-quick-meet-button {
+        .opc-calendar-quick-meet-button,
+        .opc-calendar-refresh-button {
           width: 100% !important;
           min-width: 0 !important;
           max-width: none !important;
@@ -2245,6 +2255,7 @@ export default function OPCCalendarPage() {
 
         .opc-calendar-new-entry-button:hover,
         .opc-calendar-quick-meet-button:hover,
+        .opc-calendar-refresh-button:hover,
         .opc-requests-controls button:hover,
         .opc-calendar-custom-controls button:hover {
           transform: translateY(-1px);
@@ -2253,6 +2264,7 @@ export default function OPCCalendarPage() {
 
         .opc-calendar-new-entry-button:active,
         .opc-calendar-quick-meet-button:active,
+        .opc-calendar-refresh-button:active,
         .opc-requests-controls button:active,
         .opc-calendar-custom-controls button:active {
           transform: translateY(0);
@@ -2464,8 +2476,12 @@ export default function OPCCalendarPage() {
         }
 
         @media (max-width: 1500px) {
-          .opc-requests-controls {
-            grid-template-columns: minmax(0, 1fr) 140px 140px 155px 145px minmax(300px, 330px) !important;
+          .opc-requests-controls.is-admin {
+            grid-template-columns: minmax(240px, 1.4fr) repeat(6, minmax(118px, 1fr)) !important;
+          }
+
+          .opc-requests-controls.is-basic {
+            grid-template-columns: minmax(240px, 1.4fr) repeat(4, minmax(118px, 1fr)) !important;
           }
 
           .opc-calendar-view-group button {
@@ -2478,12 +2494,13 @@ export default function OPCCalendarPage() {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
 
-          .opc-requests-controls {
-            grid-template-columns: minmax(0, 1fr) 150px 150px !important;
+          .opc-requests-controls.is-admin,
+          .opc-requests-controls.is-basic {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
 
-          .opc-calendar-actions-row {
-            grid-column: span 3;
+          .opc-calendar-search-control {
+            grid-column: 1 / -1;
           }
 
           .opc-calendar-custom-controls {
@@ -2514,24 +2531,26 @@ export default function OPCCalendarPage() {
         }
 
         @media (max-width: 980px) {
-          .opc-requests-controls {
-            grid-template-columns: 1fr !important;
+          .opc-requests-controls.is-admin,
+          .opc-requests-controls.is-basic {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
 
-          .opc-calendar-actions-row {
-            grid-column: auto;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+          .opc-calendar-search-control {
+            grid-column: 1 / -1;
           }
 
           .opc-calendar-new-entry-button,
-          .opc-calendar-quick-meet-button {
+          .opc-calendar-quick-meet-button,
+          .opc-calendar-refresh-button {
             height: 54px !important;
             font-size: 13px !important;
             padding: 0 8px !important;
           }
 
           .opc-calendar-new-entry-button svg,
-          .opc-calendar-quick-meet-button svg {
+          .opc-calendar-quick-meet-button svg,
+          .opc-calendar-refresh-button svg {
             width: 16px;
             height: 16px;
           }
@@ -2592,7 +2611,16 @@ export default function OPCCalendarPage() {
 
         @media (max-width: 640px) {
           .opc-requests-metrics {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .opc-requests-controls.is-admin,
+          .opc-requests-controls.is-basic {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .opc-calendar-search-control {
+            grid-column: 1 / -1;
           }
 
           .opc-calendar-custom-controls {

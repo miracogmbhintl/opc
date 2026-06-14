@@ -35,6 +35,22 @@ interface SiteOption {
   metadata?: Record<string, unknown> | null;
 }
 
+interface EmployeeOption {
+  id: string;
+  user_id?: string | null;
+  employee_id?: string | null;
+  display_name?: string | null;
+  email?: string | null;
+  phone_e164?: string | null;
+  phone_raw?: string | null;
+  whatsapp_wa_id?: string | null;
+  role?: string | null;
+  status?: string | null;
+}
+
+type RecurrenceType = 'none' | 'daily' | 'weekdays' | 'monthly_count';
+type PeriodPreset = '3_months' | '6_months' | '12_months' | 'custom';
+
 interface FormState {
   clientId: string;
   clientSiteId: string;
@@ -47,27 +63,18 @@ interface FormState {
   priority: string;
   estimatedHours: string;
   dispatcherNotes: string;
+  internalNotes: string;
   clientNotes: string;
   serviceDescription: string;
   reportRequired: boolean;
+  recurrenceType: RecurrenceType;
+  recurrenceWeekdays: number[];
+  monthlyCount: string;
+  periodPreset: PeriodPreset;
+  customEndDate: string;
+  assignedEmployeeIds: string[];
+  assignmentNote: string;
 }
-
-const initialFormState: FormState = {
-  clientId: '',
-  clientSiteId: '',
-  serviceCategory: 'Allgemeine Reinigung',
-  customServiceCategory: '',
-  plannedDate: '',
-  startTime: '08:00',
-  endTime: '10:00',
-  status: 'scheduled',
-  priority: 'normal',
-  estimatedHours: '2',
-  dispatcherNotes: '',
-  clientNotes: '',
-  serviceDescription: '',
-  reportRequired: true,
-};
 
 const serviceOptions = [
   'Allgemeine Reinigung',
@@ -91,9 +98,95 @@ const priorityOptions = [
   { value: 'high', label: 'Hoch' },
 ];
 
+const weekdayOptions = [
+  { value: 1, label: 'Mo' },
+  { value: 2, label: 'Di' },
+  { value: 3, label: 'Mi' },
+  { value: 4, label: 'Do' },
+  { value: 5, label: 'Fr' },
+  { value: 6, label: 'Sa' },
+  { value: 7, label: 'So' },
+];
+
+const periodOptions: { value: PeriodPreset; label: string }[] = [
+  { value: '3_months', label: '3 Monate' },
+  { value: '6_months', label: '6 Monate' },
+  { value: '12_months', label: '12 Monate' },
+  { value: 'custom', label: 'Eigenes Enddatum' },
+];
+
+const pageFont =
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+
+function todayInputValue() {
+  const today = new Date();
+  const offset = today.getTimezoneOffset();
+  const local = new Date(today.getTime() - offset * 60 * 1000);
+  return local.toISOString().slice(0, 10);
+}
+
+function createInitialFormState(): FormState {
+  return {
+    clientId: '',
+    clientSiteId: '',
+    serviceCategory: 'Allgemeine Reinigung',
+    customServiceCategory: '',
+    plannedDate: todayInputValue(),
+    startTime: '08:00',
+    endTime: '10:00',
+    status: 'scheduled',
+    priority: 'normal',
+    estimatedHours: '2',
+    dispatcherNotes: '',
+    internalNotes: '',
+    clientNotes: '',
+    serviceDescription: '',
+    reportRequired: true,
+    recurrenceType: 'none',
+    recurrenceWeekdays: [1, 2, 3, 4, 5],
+    monthlyCount: '1',
+    periodPreset: '3_months',
+    customEndDate: '',
+    assignedEmployeeIds: [],
+    assignmentNote: '',
+  };
+}
+
 function toDateTime(date: string, time: string) {
   if (!date || !time) return null;
   return new Date(`${date}T${time}:00`).toISOString();
+}
+
+function addMinutesToTime(time: string, minutes: number) {
+  if (!time || !Number.isFinite(minutes)) return time;
+
+  const [hourRaw, minuteRaw] = time.split(':');
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return time;
+
+  const date = new Date(2000, 0, 1, hour, minute, 0, 0);
+  date.setMinutes(date.getMinutes() + minutes);
+
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getPeriodEndDate(startDate: string, preset: PeriodPreset, customEndDate: string) {
+  if (!startDate) return '';
+  if (preset === 'custom') return customEndDate;
+
+  const months = preset === '3_months' ? 3 : preset === '6_months' ? 6 : 12;
+  const date = new Date(`${startDate}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) return '';
+
+  date.setMonth(date.getMonth() + months);
+  date.setDate(date.getDate() - 1);
+
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60 * 1000);
+  return local.toISOString().slice(0, 10);
 }
 
 function getClientName(client?: ClientOption | null) {
@@ -138,6 +231,15 @@ function getFallbackPrimarySite(client?: ClientOption | null): SiteOption | null
   };
 }
 
+function normalize(value?: string | null) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getEmployeeName(employee?: EmployeeOption | null) {
+  if (!employee) return 'Mitarbeiter';
+  return employee.display_name || employee.email || employee.phone_e164 || employee.phone_raw || 'Mitarbeiter';
+}
+
 function FieldLabel({ children, required = false }: { children: ReactNode; required?: boolean }) {
   return (
     <label
@@ -152,6 +254,35 @@ function FieldLabel({ children, required = false }: { children: ReactNode; requi
       {children}
       {required && <span style={{ color: '#D97706' }}> *</span>}
     </label>
+  );
+}
+
+function Card({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div
+      style={{
+        background: '#FFFFFF',
+        border: '1px solid #E5E7EB',
+        borderRadius: '22px',
+        padding: '26px',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+        marginBottom: '22px',
+      }}
+    >
+      <h2
+        style={{
+          margin: '0 0 20px',
+          fontSize: '17px',
+          fontWeight: 760,
+          color: '#111111',
+          letterSpacing: '-0.02em',
+        }}
+      >
+        {title}
+      </h2>
+
+      {children}
+    </div>
   );
 }
 
@@ -186,17 +317,22 @@ const textareaStyle: CSSProperties = {
 };
 
 export default function CreateProjectForm() {
-  const [form, setForm] = useState<FormState>(initialFormState);
+  const [form, setForm] = useState<FormState>(() => createInitialFormState());
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
   const [loadingSites, setLoadingSites] = useState(false);
+  const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
+  const [successCount, setSuccessCount] = useState<number>(0);
+  const [endTimeTouched, setEndTimeTouched] = useState(false);
 
   useEffect(() => {
     void loadClients();
+    void loadEmployees();
   }, []);
 
   useEffect(() => {
@@ -209,6 +345,16 @@ export default function CreateProjectForm() {
     void loadClientSites(form.clientId);
   }, [form.clientId]);
 
+  useEffect(() => {
+    if (endTimeTouched) return;
+
+    const hours = Number(String(form.estimatedHours || '').replace(',', '.'));
+    if (!Number.isFinite(hours) || hours <= 0) return;
+
+    const nextEndTime = addMinutesToTime(form.startTime, Math.round(hours * 60));
+    setForm((current) => ({ ...current, endTime: nextEndTime }));
+  }, [endTimeTouched, form.estimatedHours, form.startTime]);
+
   const selectedClient = useMemo(() => {
     return clients.find((client) => client.client_id === form.clientId) || null;
   }, [clients, form.clientId]);
@@ -217,10 +363,22 @@ export default function CreateProjectForm() {
     return sites.find((site) => site.id === form.clientSiteId) || null;
   }, [sites, form.clientSiteId]);
 
+  const selectedEmployees = useMemo(() => {
+    const ids = new Set(form.assignedEmployeeIds);
+    return employees.filter((employee) => ids.has(employee.id));
+  }, [employees, form.assignedEmployeeIds]);
+
   const finalServiceCategory =
     form.serviceCategory === 'Andere'
       ? form.customServiceCategory.trim()
       : form.serviceCategory;
+
+  const computedEndDate = useMemo(
+    () => getPeriodEndDate(form.plannedDate, form.periodPreset, form.customEndDate),
+    [form.customEndDate, form.periodPreset, form.plannedDate],
+  );
+
+  const isRecurring = form.recurrenceType !== 'none';
 
   async function loadClients() {
     setLoadingClients(true);
@@ -262,6 +420,40 @@ export default function CreateProjectForm() {
       setClients([]);
     } finally {
       setLoadingClients(false);
+    }
+  }
+
+  async function loadEmployees() {
+    setLoadingEmployees(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('opc_staff_roles')
+        .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,whatsapp_wa_id,role,status')
+        .order('display_name', { ascending: true });
+
+      if (error) throw new Error(error.message);
+
+      const rows = ((data || []) as EmployeeOption[]).filter((employee) => {
+        const role = normalize(employee.role);
+        const status = normalize(employee.status);
+        const isEmployee =
+          role === 'employee' ||
+          role === 'mitarbeiter' ||
+          role === 'cleaner' ||
+          role === 'reinigung' ||
+          role === '';
+        const isActive =
+          !status || status === 'active' || status === 'aktiv' || status === 'enabled';
+
+        return employee.id && isEmployee && isActive;
+      });
+
+      setEmployees(rows);
+    } catch {
+      setEmployees([]);
+    } finally {
+      setLoadingEmployees(false);
     }
   }
 
@@ -326,6 +518,32 @@ export default function CreateProjectForm() {
     }));
   }
 
+  function toggleWeekday(day: number) {
+    setForm((current) => {
+      const exists = current.recurrenceWeekdays.includes(day);
+      const next = exists
+        ? current.recurrenceWeekdays.filter((item) => item !== day)
+        : [...current.recurrenceWeekdays, day].sort((a, b) => a - b);
+
+      return { ...current, recurrenceWeekdays: next };
+    });
+  }
+
+  function toggleEmployee(employeeId: string) {
+    setForm((current) => {
+      const exists = current.assignedEmployeeIds.includes(employeeId);
+      const next = exists
+        ? current.assignedEmployeeIds.filter((id) => id !== employeeId)
+        : [...current.assignedEmployeeIds, employeeId];
+
+      return {
+        ...current,
+        assignedEmployeeIds: next,
+        status: next.length > 0 && current.status === 'scheduled' ? 'assigned' : current.status,
+      };
+    });
+  }
+
   function validateForm() {
     if (!form.clientId) return 'Bitte wählen Sie einen Kunden aus.';
     if (!form.clientSiteId) return 'Bitte wählen Sie einen Standort aus.';
@@ -345,6 +563,28 @@ export default function CreateProjectForm() {
       return 'Die Endzeit muss nach der Startzeit liegen.';
     }
 
+    if (isRecurring) {
+      if (!computedEndDate) return 'Bitte erfassen Sie ein Enddatum für den wiederkehrenden Einsatz.';
+
+      const start = new Date(`${form.plannedDate}T00:00:00`).getTime();
+      const end = new Date(`${computedEndDate}T00:00:00`).getTime();
+
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+        return 'Das Enddatum der Wiederholung muss nach dem Startdatum liegen.';
+      }
+
+      if (form.recurrenceType === 'weekdays' && form.recurrenceWeekdays.length === 0) {
+        return 'Bitte wählen Sie mindestens einen Wochentag aus.';
+      }
+
+      if (form.recurrenceType === 'monthly_count') {
+        const count = Number(form.monthlyCount);
+        if (!Number.isFinite(count) || count < 1 || count > 4) {
+          return 'Die monatliche Anzahl muss zwischen 1 und 4 liegen.';
+        }
+      }
+    }
+
     return null;
   }
 
@@ -352,6 +592,7 @@ export default function CreateProjectForm() {
     event.preventDefault();
     setDatabaseError(null);
     setSuccessJobId(null);
+    setSuccessCount(0);
 
     const validationError = validateForm();
 
@@ -397,23 +638,40 @@ export default function CreateProjectForm() {
         client_site_id: selectedSite.id,
         contact_id: selectedSite.contact_id || selectedClient.contact_id || null,
         title,
-        job_type: 'one_time',
-        status: form.status,
+        job_type: isRecurring ? 'recurring' : 'one_time',
+        status: form.assignedEmployeeIds.length > 0 ? 'assigned' : form.status,
         priority: form.priority,
+        planned_date: form.plannedDate,
+        start_time: form.startTime,
+        end_time: form.endTime,
         planned_start: plannedStart,
         planned_end: plannedEnd,
         service_category: finalServiceCategory,
         service_description: form.serviceDescription || null,
         estimated_hours: Number(form.estimatedHours || 0),
         dispatcher_notes: form.dispatcherNotes || null,
+        internal_notes: form.internalNotes || null,
         client_notes: form.clientNotes || null,
         report_required: form.reportRequired,
+        assigned_employee_ids: form.assignedEmployeeIds,
+        assignment_note: form.assignmentNote || null,
+        recurrence: {
+          enabled: isRecurring,
+          type: form.recurrenceType,
+          start_date: form.plannedDate,
+          end_date: isRecurring ? computedEndDate : form.plannedDate,
+          weekdays: form.recurrenceWeekdays,
+          monthly_count: Number(form.monthlyCount || 1),
+          period_preset: form.periodPreset,
+        },
         metadata: {
           source: 'portal_einsatz_planen',
           created_from: 'CreateProjectForm',
           selected_site_id: selectedSite.id,
           selected_site_label: getSiteLabel(selectedSite),
           selected_site_address: getSiteAddress(selectedSite),
+          recurrence_enabled: isRecurring,
+          recurrence_type: form.recurrenceType,
         },
       };
 
@@ -430,21 +688,25 @@ export default function CreateProjectForm() {
         success?: boolean;
         error?: string;
         job_id?: string;
+        job_ids?: string[];
+        created_count?: number;
       };
 
       if (!response.ok) {
         throw new Error(result.error || 'Der Einsatz konnte nicht erstellt werden.');
       }
 
-      const jobId = result.job_id;
+      const jobId = result.job_id || result.job_ids?.[0] || null;
 
       if (!jobId) {
         throw new Error('Der Einsatz wurde erstellt, aber keine Einsatz-ID wurde zurückgegeben.');
       }
 
       setSuccessJobId(jobId);
-      setForm(initialFormState);
+      setSuccessCount(result.created_count || result.job_ids?.length || 1);
+      setForm(createInitialFormState());
       setSites([]);
+      setEndTimeTouched(false);
     } catch (error) {
       const message =
         error instanceof Error
@@ -465,7 +727,7 @@ export default function CreateProjectForm() {
       hideTopBar={false}
       fullWidth={false}
     >
-      <div style={{ maxWidth: '1080px', margin: '0 auto' }}>
+      <div style={{ maxWidth: '1080px', margin: '0 auto', fontFamily: pageFont }}>
         <div style={{ marginBottom: '28px' }}>
           <a
             href={`${baseUrl}/einsaetze`}
@@ -543,7 +805,11 @@ export default function CreateProjectForm() {
               flexWrap: 'wrap',
             }}
           >
-            <span>Der Einsatz wurde erstellt.</span>
+            <span>
+              {successCount > 1
+                ? `${successCount} Einsätze wurden erstellt.`
+                : 'Der Einsatz wurde erstellt.'}
+            </span>
             <a
               href={`${baseUrl}/einsatz/${successJobId}`}
               style={{
@@ -552,34 +818,13 @@ export default function CreateProjectForm() {
                 textDecoration: 'underline',
               }}
             >
-              Einsatz öffnen
+              Ersten Einsatz öffnen
             </a>
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
-          <div
-            style={{
-              background: '#FFFFFF',
-              border: '1px solid #E5E7EB',
-              borderRadius: '22px',
-              padding: '26px',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-              marginBottom: '22px',
-            }}
-          >
-            <h2
-              style={{
-                margin: '0 0 20px',
-                fontSize: '17px',
-                fontWeight: 760,
-                color: '#111111',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Kunde und Standort
-            </h2>
-
+          <Card title="Kunde und Standort">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '18px' }}>
               <div>
                 <FieldLabel required>Kunde</FieldLabel>
@@ -665,63 +910,22 @@ export default function CreateProjectForm() {
                 </div>
 
                 {selectedSite?.access_notes && (
-                  <div
-                    style={{
-                      marginTop: '10px',
-                      fontSize: '13px',
-                      color: '#6B7280',
-                      lineHeight: 1.5,
-                    }}
-                  >
+                  <div style={{ marginTop: '10px', fontSize: '13px', color: '#6B7280', lineHeight: 1.5 }}>
                     Zugang: {selectedSite.access_notes}
                   </div>
                 )}
 
                 {selectedSite?.cleaning_notes && (
-                  <div
-                    style={{
-                      marginTop: '6px',
-                      fontSize: '13px',
-                      color: '#6B7280',
-                      lineHeight: 1.5,
-                    }}
-                  >
+                  <div style={{ marginTop: '6px', fontSize: '13px', color: '#6B7280', lineHeight: 1.5 }}>
                     Reinigung: {selectedSite.cleaning_notes}
                   </div>
                 )}
               </div>
             </div>
-          </div>
+          </Card>
 
-          <div
-            style={{
-              background: '#FFFFFF',
-              border: '1px solid #E5E7EB',
-              borderRadius: '22px',
-              padding: '26px',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-              marginBottom: '22px',
-            }}
-          >
-            <h2
-              style={{
-                margin: '0 0 20px',
-                fontSize: '17px',
-                fontWeight: 760,
-                color: '#111111',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Einsatzdaten
-            </h2>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                gap: '18px',
-              }}
-            >
+          <Card title="Einsatzdaten">
+            <div className="opc-form-grid-two">
               <div>
                 <FieldLabel required>Dienstleistung</FieldLabel>
                 <select
@@ -764,7 +968,15 @@ export default function CreateProjectForm() {
                 <input
                   type="time"
                   value={form.startTime}
-                  onChange={(event) => updateField('startTime', event.target.value)}
+                  onChange={(event) => {
+                    updateField('startTime', event.target.value);
+                    if (!endTimeTouched) {
+                      const hours = Number(String(form.estimatedHours || '').replace(',', '.'));
+                      if (Number.isFinite(hours) && hours > 0) {
+                        updateField('endTime', addMinutesToTime(event.target.value, Math.round(hours * 60)));
+                      }
+                    }
+                  }}
                   style={inputStyle}
                 />
               </div>
@@ -774,7 +986,10 @@ export default function CreateProjectForm() {
                 <input
                   type="time"
                   value={form.endTime}
-                  onChange={(event) => updateField('endTime', event.target.value)}
+                  onChange={(event) => {
+                    setEndTimeTouched(true);
+                    updateField('endTime', event.target.value);
+                  }}
                   style={inputStyle}
                 />
               </div>
@@ -786,18 +1001,22 @@ export default function CreateProjectForm() {
                   min="0"
                   step="0.25"
                   value={form.estimatedHours}
-                  onChange={(event) => updateField('estimatedHours', event.target.value)}
+                  onChange={(event) => {
+                    updateField('estimatedHours', event.target.value);
+                    if (!endTimeTouched) {
+                      const hours = Number(String(event.target.value || '').replace(',', '.'));
+                      if (Number.isFinite(hours) && hours > 0) {
+                        updateField('endTime', addMinutesToTime(form.startTime, Math.round(hours * 60)));
+                      }
+                    }
+                  }}
                   style={inputStyle}
                 />
               </div>
 
               <div>
                 <FieldLabel>Status</FieldLabel>
-                <select
-                  value={form.status}
-                  onChange={(event) => updateField('status', event.target.value)}
-                  style={inputStyle}
-                >
+                <select value={form.status} onChange={(event) => updateField('status', event.target.value)} style={inputStyle}>
                   {statusOptions.map((status) => (
                     <option key={status.value} value={status.value}>
                       {status.label}
@@ -808,11 +1027,7 @@ export default function CreateProjectForm() {
 
               <div>
                 <FieldLabel>Priorität</FieldLabel>
-                <select
-                  value={form.priority}
-                  onChange={(event) => updateField('priority', event.target.value)}
-                  style={inputStyle}
-                >
+                <select value={form.priority} onChange={(event) => updateField('priority', event.target.value)} style={inputStyle}>
                   {priorityOptions.map((priority) => (
                     <option key={priority.value} value={priority.value}>
                       {priority.label}
@@ -831,37 +1046,178 @@ export default function CreateProjectForm() {
                 style={textareaStyle}
               />
             </div>
-          </div>
+          </Card>
 
-          <div
-            style={{
-              background: '#FFFFFF',
-              border: '1px solid #E5E7EB',
-              borderRadius: '22px',
-              padding: '26px',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-              marginBottom: '22px',
-            }}
-          >
-            <h2
-              style={{
-                margin: '0 0 20px',
-                fontSize: '17px',
-                fontWeight: 760,
-                color: '#111111',
-                letterSpacing: '-0.02em',
-              }}
-            >
-              Hinweise
-            </h2>
+          <Card title="Wiederholung">
+            <div className="opc-form-grid-two">
+              <div>
+                <FieldLabel>Wiederholung</FieldLabel>
+                <select
+                  value={form.recurrenceType}
+                  onChange={(event) => updateField('recurrenceType', event.target.value as RecurrenceType)}
+                  style={inputStyle}
+                >
+                  <option value="none">Keine Wiederholung</option>
+                  <option value="daily">Täglich</option>
+                  <option value="weekdays">Bestimmte Wochentage</option>
+                  <option value="monthly_count">Monatlich nach Anzahl</option>
+                </select>
+              </div>
 
+              {isRecurring && (
+                <>
+                  <div>
+                    <FieldLabel>Zeitraum</FieldLabel>
+                    <select
+                      value={form.periodPreset}
+                      onChange={(event) => updateField('periodPreset', event.target.value as PeriodPreset)}
+                      style={inputStyle}
+                    >
+                      {periodOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {form.periodPreset === 'custom' ? (
+                    <div>
+                      <FieldLabel required>Enddatum</FieldLabel>
+                      <input
+                        type="date"
+                        value={form.customEndDate}
+                        onChange={(event) => updateField('customEndDate', event.target.value)}
+                        style={inputStyle}
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <FieldLabel>Enddatum</FieldLabel>
+                      <input value={computedEndDate || '-'} readOnly style={{ ...inputStyle, background: '#FAFAFA' }} />
+                    </div>
+                  )}
+
+                  {form.recurrenceType === 'monthly_count' && (
+                    <div>
+                      <FieldLabel>Häufigkeit pro Monat</FieldLabel>
+                      <select
+                        value={form.monthlyCount}
+                        onChange={(event) => updateField('monthlyCount', event.target.value)}
+                        style={inputStyle}
+                      >
+                        <option value="1">1x monatlich</option>
+                        <option value="2">2x monatlich</option>
+                        <option value="3">3x monatlich</option>
+                        <option value="4">4x monatlich</option>
+                      </select>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {isRecurring && form.recurrenceType === 'weekdays' && (
+              <div style={{ marginTop: '18px' }}>
+                <FieldLabel required>Wochentage</FieldLabel>
+                <div className="opc-weekday-row">
+                  {weekdayOptions.map((day) => {
+                    const active = form.recurrenceWeekdays.includes(day.value);
+
+                    return (
+                      <button
+                        key={day.value}
+                        type="button"
+                        onClick={() => toggleWeekday(day.value)}
+                        className={active ? 'opc-choice-pill active' : 'opc-choice-pill'}
+                      >
+                        {day.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {isRecurring && (
+              <div
+                style={{
+                  marginTop: '18px',
+                  border: '1px solid #F3F4F6',
+                  background: '#FAFAFA',
+                  borderRadius: '16px',
+                  padding: '14px',
+                  fontSize: '13px',
+                  color: '#6B7280',
+                  lineHeight: 1.5,
+                  fontWeight: 650,
+                }}
+              >
+                Jeder generierte Termin wird als eigener Einsatz gespeichert. Dadurch bleiben Fotos, Zeiten, Notizen und Berichte pro Tag getrennt.
+              </div>
+            )}
+          </Card>
+
+          <Card title="Mitarbeiter zuweisen">
+            {loadingEmployees ? (
+              <div style={{ color: '#6B7280', fontSize: '14px', fontWeight: 650 }}>Mitarbeiter werden geladen...</div>
+            ) : employees.length === 0 ? (
+              <div style={{ color: '#6B7280', fontSize: '14px', fontWeight: 650 }}>Keine aktiven Mitarbeiter gefunden.</div>
+            ) : (
+              <div className="opc-employee-grid">
+                {employees.map((employee) => {
+                  const active = form.assignedEmployeeIds.includes(employee.id);
+
+                  return (
+                    <button
+                      key={employee.id}
+                      type="button"
+                      onClick={() => toggleEmployee(employee.id)}
+                      className={active ? 'opc-employee-card active' : 'opc-employee-card'}
+                    >
+                      <span className="opc-employee-avatar">{getEmployeeName(employee).slice(0, 1).toUpperCase()}</span>
+                      <span className="opc-employee-copy">
+                        <strong>{getEmployeeName(employee)}</strong>
+                        <span>{employee.email || employee.phone_e164 || employee.phone_raw || 'Kontakt nicht hinterlegt'}</span>
+                      </span>
+                      <span className="opc-employee-check">{active ? 'Ausgewählt' : 'Zuweisen'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {selectedEmployees.length > 0 && (
+              <div style={{ marginTop: '18px' }}>
+                <FieldLabel>Zuweisungsnotiz</FieldLabel>
+                <textarea
+                  value={form.assignmentNote}
+                  onChange={(event) => updateField('assignmentNote', event.target.value)}
+                  placeholder="Optionale Notiz für die zugewiesenen Mitarbeiter."
+                  style={{ ...textareaStyle, minHeight: '86px' }}
+                />
+              </div>
+            )}
+          </Card>
+
+          <Card title="Interne Hinweise">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '18px' }}>
               <div>
-                <FieldLabel>Interne Notizen für Disposition</FieldLabel>
+                <FieldLabel>Dispo-Notizen</FieldLabel>
                 <textarea
                   value={form.dispatcherNotes}
                   onChange={(event) => updateField('dispatcherNotes', event.target.value)}
                   placeholder="z.B. Zugang prüfen, Schlüssel bei Empfang abholen, regelmässigen Einsatz abklären."
+                  style={textareaStyle}
+                />
+              </div>
+
+              <div>
+                <FieldLabel>Interne Notizen</FieldLabel>
+                <textarea
+                  value={form.internalNotes}
+                  onChange={(event) => updateField('internalNotes', event.target.value)}
+                  placeholder="Interne Hinweise für Admin, Disposition oder spätere Bearbeitung."
                   style={textareaStyle}
                 />
               </div>
@@ -896,7 +1252,7 @@ export default function CreateProjectForm() {
                 Bericht für diesen Einsatz vorbereiten
               </label>
             </div>
-          </div>
+          </Card>
 
           <div
             style={{
@@ -945,15 +1301,137 @@ export default function CreateProjectForm() {
                 fontFamily: 'inherit',
               }}
             >
-              {submitting ? 'Wird erstellt...' : 'Einsatz erstellen'}
+              {submitting
+                ? isRecurring
+                  ? 'Einsätze werden erstellt...'
+                  : 'Wird erstellt...'
+                : isRecurring
+                  ? 'Wiederkehrende Einsätze erstellen'
+                  : 'Einsatz erstellen'}
             </button>
           </div>
         </form>
       </div>
 
       <style>{`
+        .opc-form-grid-two {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 18px;
+        }
+
+        .opc-weekday-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .opc-choice-pill {
+          height: 40px;
+          min-width: 52px;
+          padding: 0 14px;
+          border-radius: 999px;
+          border: 1px solid #E5E7EB;
+          background: #FFFFFF;
+          color: #111111;
+          font-size: 13px;
+          font-weight: 750;
+          cursor: pointer;
+          font-family: inherit;
+        }
+
+        .opc-choice-pill.active {
+          background: #111111;
+          color: #FFFFFF;
+          border-color: #111111;
+        }
+
+        .opc-employee-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .opc-employee-card {
+          width: 100%;
+          display: grid;
+          grid-template-columns: 42px minmax(0, 1fr) auto;
+          gap: 11px;
+          align-items: center;
+          border: 1px solid #E5E7EB;
+          border-radius: 16px;
+          padding: 11px;
+          background: #FFFFFF;
+          color: #111111;
+          text-align: left;
+          cursor: pointer;
+          font-family: inherit;
+        }
+
+        .opc-employee-card.active {
+          border-color: #111111;
+          background: #FAFAFA;
+        }
+
+        .opc-employee-avatar {
+          width: 42px;
+          height: 42px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          background: #111111;
+          color: #FFFFFF;
+          font-size: 14px;
+          font-weight: 860;
+        }
+
+        .opc-employee-copy {
+          display: grid;
+          gap: 3px;
+          min-width: 0;
+        }
+
+        .opc-employee-copy strong {
+          font-size: 14px;
+          font-weight: 780;
+          color: #111111;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
+
+        .opc-employee-copy span {
+          font-size: 12px;
+          font-weight: 650;
+          color: #6B7280;
+          overflow: hidden;
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
+
+        .opc-employee-check {
+          min-height: 32px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 0 11px;
+          border-radius: 999px;
+          background: #F3F4F6;
+          color: #6B7280;
+          font-size: 12px;
+          font-weight: 760;
+          white-space: nowrap;
+        }
+
+        .opc-employee-card.active .opc-employee-check {
+          background: #111111;
+          color: #FFFFFF;
+        }
+
         @media (max-width: 900px) {
-          div[style*="grid-template-columns: repeat(2, minmax(0, 1fr))"] {
+          .opc-form-grid-two,
+          .opc-employee-grid {
             grid-template-columns: 1fr !important;
           }
 
@@ -964,6 +1442,20 @@ export default function CreateProjectForm() {
           form > div:last-child a,
           form > div:last-child button {
             width: 100% !important;
+          }
+
+          .opc-employee-card {
+            grid-template-columns: 38px minmax(0, 1fr);
+          }
+
+          .opc-employee-avatar {
+            width: 38px;
+            height: 38px;
+          }
+
+          .opc-employee-check {
+            grid-column: 1 / -1;
+            width: 100%;
           }
         }
       `}</style>

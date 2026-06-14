@@ -1,0 +1,92 @@
+---
+import BerichtDateiDetailPage from '../../../components/BerichtDateiDetailPage';
+import '../../../styles/miraka-portal.css';
+import { ClientRouter } from 'astro:transitions';
+
+const { jobId } = Astro.params;
+---
+
+<!DOCTYPE html>
+<html transition:name="root" transition:animate="none" lang="de">
+<head>
+  <script is:inline>
+    (() => {
+      if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
+
+      window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
+
+      const noMotionTransition = (callback) => {
+        let callbackResult;
+
+        try {
+          callbackResult = typeof callback === 'function' ? callback() : undefined;
+        } catch (error) {
+          const rejected = Promise.reject(error);
+
+          return {
+            ready: rejected,
+            updateCallbackDone: rejected,
+            finished: rejected,
+            skipTransition() {},
+          };
+        }
+
+        const done = Promise.resolve(callbackResult);
+
+        return {
+          ready: done,
+          updateCallbackDone: done,
+          finished: done,
+          skipTransition() {},
+        };
+      };
+
+      try {
+        Object.defineProperty(document, 'startViewTransition', {
+          configurable: true,
+          writable: true,
+          value: noMotionTransition,
+        });
+      } catch {
+        document.startViewTransition = noMotionTransition;
+      }
+    })();
+  </script>
+
+  <ClientRouter fallback="swap" />
+
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+  <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+  <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
+
+  <meta name="theme-color" content="#ff6a00" />
+  <meta name="application-name" content="Orange Pro Clean" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Berichtdetails | Orange Pro Clean</title>
+</head>
+
+<body>
+  <BerichtDateiDetailPage jobId={jobId || ''} client:only="react" />
+</body>
+</html>
+
+<style>
+  :global(html),
+  :global(body) {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    font-family: Inter, Helvetica, Arial, sans-serif;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+</style>

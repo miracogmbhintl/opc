@@ -18,13 +18,12 @@ import {
   X,
 } from 'lucide-react';
 
-const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests';
+const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v9-clean-popup-message-only';
 
 type ActiveTab = 'inquiries' | 'damages';
 type ItemType = 'inquiry' | 'damage' | 'job_damage';
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'done';
 type TypeFilter = 'all' | ItemType;
-type InquiryViewFilter = 'customer' | 'applications' | 'all';
 type ConversionMode = 'private' | 'corporate';
 
 interface RawRow {
@@ -60,6 +59,15 @@ interface PortalItem {
   isApplication?: boolean;
   inquiryCategory?: string;
   sourceFormName?: string;
+  clientTypeLabel?: string;
+  reasonLabel?: string;
+  objectTypeLabel?: string;
+  roomCount?: string;
+  surfaceLabel?: string;
+  floorLabel?: string;
+  elevatorLabel?: string;
+  formMessage?: string;
+  detailDescription?: string;
 }
 
 interface JobFeedRow {
@@ -355,40 +363,8 @@ async function readList<T>(table: string, limit = 300): Promise<T[]> {
 
   const rows = ((data || []) as RawRow[]).map((row) => ({ ...row }));
 
-  const cleanLocalValue = (value: unknown): string => {
-    if (value === null || value === undefined) return '';
-
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (!trimmed) return '';
-
-      const lower = trimmed.toLowerCase();
-      if (
-        lower === 'null' ||
-        lower === 'undefined' ||
-        lower === 'n/a' ||
-        lower === 'none' ||
-        lower === '-'
-      ) {
-        return '';
-      }
-
-      return trimmed;
-    }
-
-    if (typeof value === 'number' || typeof value === 'boolean') {
-      return String(value).trim();
-    }
-
-    return '';
-  };
-
   const contactIds = Array.from(
-    new Set(
-      rows
-        .map((row) => cleanLocalValue(row.contact_id))
-        .filter(Boolean)
-    )
+    new Set(rows.map((row) => cleanValue(row.contact_id)).filter(Boolean))
   );
 
   if (contactIds.length === 0) {
@@ -408,84 +384,565 @@ async function readList<T>(table: string, limit = 300): Promise<T[]> {
   const contactMap = new Map<string, RawRow>();
 
   ((contacts || []) as RawRow[]).forEach((contact) => {
-    const id = cleanLocalValue(contact.id);
+    const id = cleanValue(contact.id);
     if (id) contactMap.set(id, contact);
   });
 
-  const enrichedRows = rows.map((row) => {
-    const contactId = cleanLocalValue(row.contact_id);
-    const contact = contactMap.get(contactId);
+  return rows.map((row) => {
+    const contact = contactMap.get(cleanValue(row.contact_id));
 
     if (!contact) return row;
 
-    const firstName = cleanLocalValue(contact.first_name);
-    const lastName = cleanLocalValue(contact.last_name);
-    const fullName =
-      cleanLocalValue(contact.full_name) ||
-      [firstName, lastName].filter(Boolean).join(' ').trim();
-
-    const companyName = cleanLocalValue(contact.company_name);
-    const email = cleanLocalValue(contact.email);
-    const phoneRaw = cleanLocalValue(contact.phone_raw);
-    const phoneE164 = cleanLocalValue(contact.phone_e164);
-
-    const existingMetadata =
-      row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
-        ? row.metadata
-        : {};
-
     return {
       ...row,
-
       contact,
       opc_contacts: contact,
-
-      full_name: cleanLocalValue(row.full_name) || fullName,
-      contact_full_name: cleanLocalValue(row.contact_full_name) || fullName,
-      contact_name: cleanLocalValue(row.contact_name) || fullName,
-      applicant_name: cleanLocalValue(row.applicant_name) || fullName,
-      name: cleanLocalValue(row.name) || fullName,
-
-      first_name: cleanLocalValue(row.first_name) || firstName,
-      contact_first_name: cleanLocalValue(row.contact_first_name) || firstName,
-      last_name: cleanLocalValue(row.last_name) || lastName,
-      contact_last_name: cleanLocalValue(row.contact_last_name) || lastName,
-
-      company_name: cleanLocalValue(row.company_name) || companyName,
-      contact_company_name: cleanLocalValue(row.contact_company_name) || companyName,
-      business_name: cleanLocalValue(row.business_name) || companyName,
-
-      email: cleanLocalValue(row.email) || email,
-      contact_email: cleanLocalValue(row.contact_email) || email,
-
-      phone_raw: cleanLocalValue(row.phone_raw) || phoneRaw,
-      phone: cleanLocalValue(row.phone) || phoneRaw,
-      contact_phone: cleanLocalValue(row.contact_phone) || phoneRaw,
-
-      phone_e164: cleanLocalValue(row.phone_e164) || phoneE164,
-
-      metadata: {
-        ...existingMetadata,
-        contact: {
-          ...(typeof existingMetadata.contact === 'object' && existingMetadata.contact !== null
-            ? existingMetadata.contact
-            : {}),
-          id: contactId,
-          full_name: fullName,
-          first_name: firstName,
-          last_name: lastName,
-          company_name: companyName,
-          email,
-          phone_raw: phoneRaw,
-          phone_e164: phoneE164,
-        },
-      },
     };
-  });
-
-  return enrichedRows as T[];
+  }) as T[];
 }
 
+function cleanValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    const lower = trimmed.toLowerCase();
+
+    if (
+      lower === 'null' ||
+      lower === 'undefined' ||
+      lower === 'n/a' ||
+      lower === 'none' ||
+      lower === '-' ||
+      lower === 'unknown'
+    ) {
+      return '';
+    }
+
+    const withoutTrailingComma = trimmed.replace(/[,\s]+$/g, '').trim();
+    return withoutTrailingComma;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).trim();
+  }
+
+  return '';
+}
+
+function cleanDisplayValue(value: unknown): string {
+  const cleaned = cleanValue(value);
+  if (!cleaned) return '';
+
+  const lower = cleaned.toLowerCase();
+
+  const blocked = new Set([
+    'unbekannte anfrage',
+    'ohne kunde',
+    'neuer kunde',
+    'anfrage',
+    'keine',
+    'kein',
+    'privat',
+    'private',
+    'es',
+    'unknown',
+  ]);
+
+  if (blocked.has(lower)) return '';
+
+  return cleaned;
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function getPathValue(source: unknown, path: string): string {
+  if (!isPlainObject(source)) return '';
+
+  const parts = path.split('.');
+  let current: any = source;
+
+  for (const part of parts) {
+    if (!isPlainObject(current) && !Array.isArray(current)) return '';
+    current = current?.[part];
+  }
+
+  return cleanValue(current);
+}
+
+function getAnyValue(row: RawRow | undefined, paths: string[], fallback = ''): string {
+  if (!row) return fallback;
+
+  for (const path of paths) {
+    const value = path.includes('.') ? getPathValue(row, path) : cleanValue(row?.[path]);
+    if (value) return value;
+  }
+
+  return fallback;
+}
+
+function getAnyDisplayValue(row: RawRow | undefined, paths: string[], fallback = ''): string {
+  if (!row) return fallback;
+
+  for (const path of paths) {
+    const rawValue = path.includes('.') ? getPathValue(row, path) : cleanValue(row?.[path]);
+    const value = cleanDisplayValue(rawValue);
+    if (value) return value;
+  }
+
+  return fallback;
+}
+
+function parseKeyValueMessage(value: unknown): Record<string, string> {
+  const text = cleanValue(value);
+  if (!text) return {};
+
+  return text.split(/\r?\n/).reduce<Record<string, string>>((acc, line) => {
+    const separatorIndex = line.indexOf(':');
+    if (separatorIndex === -1) return acc;
+
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (key) acc[key] = value;
+    return acc;
+  }, {});
+}
+
+function getMessageField(row: RawRow, keys: string[]): string {
+  const original = parseKeyValueMessage(row.original_message);
+  const summary = parseKeyValueMessage(row.message_summary);
+
+  for (const key of keys) {
+    const value = cleanValue(original[key]) || cleanValue(summary[key]);
+    if (value) return value;
+  }
+
+  return '';
+}
+
+function normalizeLabelValue(value: string): string {
+  const normalized = cleanValue(value);
+  const key = normalized.toLowerCase();
+
+  const map: Record<string, string> = {
+    webflow: 'Website',
+    website: 'Website',
+    whatsapp: 'WhatsApp',
+    portal: 'Portal',
+    other: 'Import',
+    privatkunden: 'Privatkunde',
+    privatkunde: 'Privatkunde',
+    private: 'Privatkunde',
+    geschaeftskunden: 'Geschäftskunde',
+    geschäftskunden: 'Geschäftskunde',
+    commercial: 'Geschäftskunde',
+    allgemeine_fragen: 'Allgemeine Frage',
+    allgemeine_frage: 'Allgemeine Frage',
+    kontakt: 'Allgemeine Frage',
+    kontaktformular: 'Allgemeine Frage',
+    haus: 'Haus',
+    house: 'Haus',
+    wohnung: 'Wohnung',
+    apartment: 'Wohnung',
+    flat: 'Wohnung',
+    yes_elevator: 'Lift vorhanden',
+    no_elevator: 'Kein Lift',
+    yes: 'Ja',
+    no: 'Nein',
+    true: 'Ja',
+    false: 'Nein',
+  };
+
+  return map[key] || normalized;
+}
+
+function buildFullName(firstName: string, lastName: string): string {
+  return [cleanDisplayValue(firstName), cleanDisplayValue(lastName)].filter(Boolean).join(' ').trim();
+}
+
+function getSourceLabel(row: RawRow): string {
+  const sourceChannel = getAnyValue(row, ['source_channel']).toLowerCase();
+  const sourceFormName = getAnyValue(row, ['source_form_name', 'onboarding_data.source_form_name']);
+  const sourcePageUrl = getAnyValue(row, ['source_page_url']);
+  const sourceExternalId = getAnyValue(row, ['source_external_id']);
+
+  if (
+    sourceChannel === 'webflow' ||
+    sourceExternalId.toLowerCase().includes('webflow') ||
+    sourceFormName.toLowerCase().includes('formular') ||
+    sourcePageUrl.includes('orangeproclean.ch')
+  ) {
+    return 'Website';
+  }
+
+  if (sourceChannel === 'whatsapp') return 'WhatsApp';
+  if (sourceChannel === 'portal') return 'Portal';
+  if (sourceChannel === 'other') return 'Import';
+
+  return sourceChannel ? normalizeLabelValue(sourceChannel) : 'Anfrage';
+}
+
+function getCategoryLabel(row: RawRow): string {
+  const inquiryType = getAnyValue(row, ['inquiry_type', 'client_type', 'metadata.inquiry_type']);
+  const sourceFormName = getAnyValue(row, ['source_form_name', 'onboarding_data.source_form_name']);
+  const pageUrl = getAnyValue(row, ['source_page_url']);
+
+  const normalizedType = inquiryType.toLowerCase();
+  const normalizedForm = sourceFormName.toLowerCase();
+  const normalizedUrl = pageUrl.toLowerCase();
+
+  if (
+    normalizedType === 'geschaeftskunden' ||
+    normalizedType === 'geschäftskunden' ||
+    normalizedForm.includes('geschäft') ||
+    normalizedForm.includes('geschaeft') ||
+    normalizedUrl.includes('geschaeft') ||
+    normalizedUrl.includes('business')
+  ) {
+    return 'Geschäftskunde';
+  }
+
+  if (
+    normalizedType === 'privatkunden' ||
+    normalizedType === 'privatkunde' ||
+    normalizedForm.includes('privatkunden') ||
+    normalizedForm.includes('privatkunde') ||
+    normalizedUrl.includes('privatkunden')
+  ) {
+    return 'Privatkunde';
+  }
+
+  if (
+    normalizedType === 'allgemeine_fragen' ||
+    normalizedType === 'allgemeine_frage' ||
+    normalizedForm.includes('kontaktformular') ||
+    normalizedForm.includes('kontakt')
+  ) {
+    return 'Allgemeine Frage';
+  }
+
+  return normalizeLabelValue(inquiryType) || 'Anfrage';
+}
+
+function getPersonName(row: RawRow): string {
+  const rawFirstName = getAnyDisplayValue(row, [
+    'raw_first_name',
+    'raw_form_data.first_name',
+    'inquiry_metadata.raw_form_data.first_name',
+    'metadata.raw_form_data.first_name',
+    'metadata.raw_payload.first_name',
+    'contact.first_name',
+    'opc_contacts.first_name',
+  ]) || getMessageField(row, ['first_name', 'Vorname', 'Name']);
+
+  const rawLastName = getAnyDisplayValue(row, [
+    'raw_last_name',
+    'raw_form_data.last_name',
+    'inquiry_metadata.raw_form_data.last_name',
+    'metadata.raw_form_data.last_name',
+    'metadata.raw_payload.last_name',
+    'contact.last_name',
+    'opc_contacts.last_name',
+  ]) || getMessageField(row, ['last_name', 'Nachname']);
+
+  const builtName = buildFullName(rawFirstName, rawLastName);
+
+  return (
+    getAnyDisplayValue(row, [
+      'raw_full_name',
+      'enriched_client_display_name',
+      'client_display_name',
+    ]) ||
+    builtName ||
+    getAnyDisplayValue(row, [
+      'contact.full_name',
+      'opc_contacts.full_name',
+      'full_name',
+      'contact_full_name',
+      'contact_name',
+      'applicant_name',
+      'name',
+    ])
+  );
+}
+
+function getCompanyName(row: RawRow): string {
+  return getAnyDisplayValue(row, [
+    'raw_form_data.company',
+    'inquiry_metadata.raw_form_data.company',
+    'metadata.raw_form_data.company',
+    'company_name',
+    'contact.company_name',
+    'opc_contacts.company_name',
+    'business_name',
+    'billing_name',
+  ]);
+}
+
+function getEmailValue(row: RawRow): string {
+  return (
+    getAnyValue(row, [
+      'raw_email',
+      'raw_form_data.email',
+      'inquiry_metadata.raw_form_data.email',
+      'metadata.raw_form_data.email',
+      'metadata.raw_payload.email',
+      'email',
+      'contact_email',
+      'billing_email',
+      'contact.email',
+      'opc_contacts.email',
+      'inquiry_metadata.email_method_result.raw_value',
+      'inquiry_metadata.email_method_result.normalized_value',
+      'metadata.email_method_result.raw_value',
+      'metadata.email_method_result.normalized_value',
+    ]) ||
+    getMessageField(row, ['email', 'E-Mail'])
+  );
+}
+
+function getPhoneRawValue(row: RawRow): string {
+  return (
+    getAnyValue(row, [
+      'raw_phone',
+      'raw_form_data.phone',
+      'inquiry_metadata.raw_form_data.phone',
+      'metadata.raw_form_data.phone',
+      'metadata.raw_payload.phone',
+      'phone_raw',
+      'phone',
+      'contact_phone',
+      'billing_phone',
+      'contact.phone_raw',
+      'opc_contacts.phone_raw',
+      'inquiry_metadata.phone_method_result.raw_value',
+      'metadata.phone_method_result.raw_value',
+    ]) ||
+    getMessageField(row, ['phone', 'Telefon'])
+  );
+}
+
+function getPhoneE164Value(row: RawRow): string {
+  return getAnyValue(row, [
+    'phone_e164',
+    'billing_phone_e164',
+    'contact.phone_e164',
+    'opc_contacts.phone_e164',
+    'inquiry_metadata.phone_method_result.normalized_value',
+    'metadata.phone_method_result.normalized_value',
+  ]);
+}
+
+function getInquiryReason(row: RawRow): string {
+  const service = getAnyDisplayValue(row, [
+    'raw_reinigungsart',
+    'enriched_service_category',
+    'service_category',
+    'service_requested',
+    'requested_service',
+    'service_type',
+    'raw_form_data.Reinigungsart',
+    'raw_form_data.reinigungsart',
+    'inquiry_metadata.raw_form_data.Reinigungsart',
+    'inquiry_metadata.raw_form_data.reinigungsart',
+    'metadata.raw_form_data.Reinigungsart',
+    'metadata.raw_payload.Reinigungsart',
+  ]) || getMessageField(row, ['Reinigungsart', 'service_category', 'service_type']);
+
+  if (service) return normalizeLabelValue(service);
+
+  const category = getCategoryLabel(row);
+
+  if (category === 'Allgemeine Frage') return 'Anfrage';
+
+  return 'Anfrage';
+}
+
+function getObjectType(row: RawRow): string {
+  return normalizeLabelValue(
+    getAnyDisplayValue(row, [
+      'raw_living_space_type',
+      'living_space_type',
+      'object_type',
+      'raw_form_data.living_space_type',
+      'inquiry_metadata.raw_form_data.living_space_type',
+      'metadata.raw_form_data.living_space_type',
+      'metadata.raw_payload.living_space_type',
+    ]) || getMessageField(row, ['living_space_type', 'Objektart'])
+  );
+}
+
+function getRoomCount(row: RawRow): string {
+  return getAnyDisplayValue(row, [
+    'raw_room_count',
+    'room_count',
+    'rooms',
+    'raw_form_data.room_count',
+    'inquiry_metadata.raw_form_data.room_count',
+    'metadata.raw_form_data.room_count',
+    'metadata.raw_payload.room_count',
+  ]) || getMessageField(row, ['room_count', 'Zimmer']);
+}
+
+function getFloorLabel(row: RawRow): string {
+  return getAnyDisplayValue(row, [
+    'raw_flat_count',
+    'flat_count',
+    'floor',
+    'raw_form_data.flat_count',
+    'inquiry_metadata.raw_form_data.flat_count',
+    'metadata.raw_form_data.flat_count',
+    'metadata.raw_payload.flat_count',
+  ]) || getMessageField(row, ['flat_count', 'Etage']);
+}
+
+function getSurface(row: RawRow): string {
+  return getAnyDisplayValue(row, [
+    'raw_quadratmeter_surface',
+    'quadratmeter_surface',
+    'surface',
+    'square_meters',
+    'raw_form_data.quadratmeter_surface',
+    'inquiry_metadata.raw_form_data.quadratmeter_surface',
+    'metadata.raw_form_data.quadratmeter_surface',
+    'metadata.raw_payload.quadratmeter_surface',
+  ]) || getMessageField(row, ['quadratmeter_surface', 'Fläche']);
+}
+
+function getElevatorLabel(row: RawRow): string {
+  return normalizeLabelValue(
+    getAnyDisplayValue(row, [
+      'raw_elevator_status',
+      'elevator_status',
+      'raw_form_data.elevator_status',
+      'inquiry_metadata.raw_form_data.elevator_status',
+      'metadata.raw_form_data.elevator_status',
+      'metadata.raw_payload.elevator_status',
+    ]) || getMessageField(row, ['elevator_status', 'Lift'])
+  );
+}
+
+function getAddressTextValue(row: RawRow): string {
+  return (
+    getAnyDisplayValue(row, [
+      'raw_street',
+      'enriched_address_text',
+      'address_text',
+      'address',
+      'site_address',
+      'billing_address',
+      'raw_form_data.street_adress_client',
+      'raw_form_data.street_address_client',
+      'inquiry_metadata.raw_form_data.street_adress_client',
+      'inquiry_metadata.raw_form_data.street_address_client',
+      'metadata.raw_form_data.street_adress_client',
+      'metadata.raw_payload.street_adress_client',
+    ]) ||
+    getMessageField(row, ['street_adress_client', 'street_address_client', 'Adresse'])
+  );
+}
+
+function getPostalCodeValue(row: RawRow): string {
+  return (
+    getAnyDisplayValue(row, [
+      'raw_zip',
+      'enriched_postal_code',
+      'postal_code',
+      'postcode',
+      'zip',
+      'raw_form_data.zipcode_adress_client',
+      'raw_form_data.zipcode_address_client',
+      'inquiry_metadata.raw_form_data.zipcode_adress_client',
+      'inquiry_metadata.raw_form_data.zipcode_address_client',
+      'metadata.raw_form_data.zipcode_adress_client',
+      'metadata.raw_payload.zipcode_adress_client',
+    ]) ||
+    getMessageField(row, ['zipcode_adress_client', 'zipcode_address_client', 'PLZ'])
+  );
+}
+
+function getCityValue(row: RawRow): string {
+  return (
+    getAnyDisplayValue(row, [
+      'raw_city',
+      'enriched_city',
+      'city',
+      'site_city',
+      'raw_form_data.city_adress_client',
+      'raw_form_data.city_address_client',
+      'inquiry_metadata.raw_form_data.city_adress_client',
+      'inquiry_metadata.raw_form_data.city_address_client',
+      'metadata.raw_form_data.city_adress_client',
+      'metadata.raw_payload.city_adress_client',
+      'raw_form_data.location',
+      'inquiry_metadata.raw_form_data.location',
+      'metadata.raw_form_data.location',
+      'metadata.raw_payload.location',
+    ]) ||
+    getMessageField(row, ['city_adress_client', 'city_address_client', 'location', 'Ort'])
+  );
+}
+
+function getFormMessage(row: RawRow): string {
+  return (
+    getAnyDisplayValue(row, [
+      'raw_message',
+      'raw_form_data.message',
+      'inquiry_metadata.raw_form_data.message',
+      'metadata.raw_form_data.message',
+      'metadata.raw_payload.message',
+      'message',
+      'original_message',
+      'message_summary',
+    ]) ||
+    getMessageField(row, ['message', 'Nachricht'])
+  );
+}
+
+function buildContactLine(email: string, phoneRaw: string, phoneE164: string): string {
+  return [email, phoneE164 || phoneRaw].filter(Boolean).join(' · ');
+}
+
+function buildLocationLine(row: RawRow): string {
+  const objectType = getObjectType(row);
+  const addressText = getAddressTextValue(row);
+  const postalCode = getPostalCodeValue(row);
+  const city = getCityValue(row);
+  const zipCity = [postalCode, city].filter(Boolean).join(' ').trim();
+
+  if (addressText && zipCity) {
+    return [objectType, `${addressText}, ${zipCity}`].filter(Boolean).join(' · ');
+  }
+
+  if (addressText || city) {
+    return [objectType, addressText, city].filter(Boolean).join(' · ');
+  }
+
+  return objectType;
+}
+
+function buildInquiryDescription(row: RawRow): string {
+  const message =
+    getFormMessage(row) ||
+    getMessageField(row, ['message', 'Nachricht', 'notes', 'Notiz']) ||
+    getAnyDisplayValue(row, [
+      'raw_message',
+      'raw_form_data.message',
+      'inquiry_metadata.raw_form_data.message',
+      'metadata.raw_form_data.message',
+      'metadata.raw_payload.message',
+      'message',
+      'original_message',
+      'message_summary',
+    ]);
+
+  return message || '';
+}
 
 function mapInquiry(row: RawRow): PortalItem | null {
   const onboardingCaseId = getFirstValue(row, ['onboarding_case_id', 'case_id', 'id']);
@@ -500,33 +957,60 @@ function mapInquiry(row: RawRow): PortalItem | null {
     'new'
   );
 
-  const companyName = getFirstValue(row, ['company_name', 'billing_name', 'business_name']);
-  const fullName = getFirstValue(row, ['full_name', 'contact_name', 'applicant_name', 'name']);
-  const clientName = companyName || fullName || 'Unbekannte Anfrage';
+  const sourceLabel = getSourceLabel(row);
+  const categoryLabel = getCategoryLabel(row);
+  const reasonLabel = getInquiryReason(row);
+  const objectTypeLabel = getObjectType(row);
+  const roomCount = getRoomCount(row);
+  const surfaceLabel = getSurface(row);
+  const floorLabel = getFloorLabel(row);
+  const elevatorLabel = getElevatorLabel(row);
+  const formMessage = getFormMessage(row);
 
-  const service = getFirstValue(row, [
-    'service_requested',
-    'service_category',
-    'requested_service',
-    'service_type',
-  ]);
+  const personName = getPersonName(row);
+  const companyName = getCompanyName(row);
+  const email = getEmailValue(row);
+  const phoneRaw = getPhoneRawValue(row);
+  const phoneE164 = getPhoneE164Value(row);
+  const phoneDisplay = phoneE164 || phoneRaw;
+
+  const isCorporate = categoryLabel === 'Geschäftskunde';
+  const clientName = (isCorporate ? companyName || personName : personName || companyName) || email || phoneDisplay || 'Unbekannte Anfrage';
+  const contactName = personName || email || phoneDisplay || clientName;
+
+  const addressText = getAddressTextValue(row);
+  const postalCode = getPostalCodeValue(row);
+  const city = getCityValue(row);
+  const siteName = objectTypeLabel;
+  const contactLine = buildContactLine(email, phoneRaw, phoneE164);
+  const locationLine = buildLocationLine(row);
+
+  const descriptionParts = [
+    sourceLabel,
+    categoryLabel,
+    reasonLabel && reasonLabel !== 'Anfrage' ? reasonLabel : '',
+  ].filter(Boolean);
+
+  const listDescription = descriptionParts.join(' · ') || 'Anfrage';
+  const detailDescription = buildInquiryDescription(row);
 
   return {
     id: onboardingCaseId || inquiryId,
     type: 'inquiry',
-    title: getFirstValue(row, ['title', 'case_title', 'inquiry_title', 'subject'], service || clientName),
-    description: getFirstValue(row, ['message', 'notes', 'summary', 'description', 'request_summary']),
+    title: clientName,
+    description: listDescription,
+    detailDescription,
     status,
     statusGroup: getStatusGroup(status),
     clientName,
-    contactName: fullName || clientName,
-    email: getFirstValue(row, ['email', 'contact_email', 'billing_email']),
-    phoneRaw: getFirstValue(row, ['phone_raw', 'phone', 'contact_phone', 'billing_phone']),
-    phoneE164: getFirstValue(row, ['phone_e164', 'billing_phone_e164']),
-    siteName: getFirstValue(row, ['site_name', 'location_name']),
-    addressText: getFirstValue(row, ['address_text', 'address', 'site_address', 'billing_address']),
-    postalCode: getFirstValue(row, ['postal_code', 'postcode', 'zip']),
-    city: getFirstValue(row, ['city', 'site_city']),
+    contactName,
+    email,
+    phoneRaw,
+    phoneE164,
+    siteName,
+    addressText,
+    postalCode,
+    city,
     country: getFirstValue(row, ['country'], 'CH'),
     clientId: getFirstValue(row, ['client_id', 'converted_client_id']) || undefined,
     contactId: contactId || undefined,
@@ -539,6 +1023,18 @@ function mapInquiry(row: RawRow): PortalItem | null {
     isApplication: isApplicationInquiry(row),
     inquiryCategory: getInquiryCategory(row),
     sourceFormName: getFirstValue(row, ['source_form_name']),
+    sourceLabel,
+    categoryLabel,
+    clientTypeLabel: categoryLabel,
+    reasonLabel,
+    contactLine,
+    locationLine,
+    objectTypeLabel,
+    roomCount,
+    surfaceLabel,
+    floorLabel,
+    elevatorLabel,
+    formMessage,
   };
 }
 
@@ -1081,8 +1577,13 @@ function ConversionModal({
               <input
                 value={form.phoneRaw}
                 onChange={(event) => {
-                  update('phoneRaw', event.target.value);
-                  update('phoneE164', event.target.value);
+                  const nextPhone = event.target.value;
+
+                  setForm({
+                    ...form,
+                    phoneRaw: nextPhone,
+                    phoneE164: nextPhone,
+                  });
                 }}
                 style={inputStyle}
               />
@@ -1344,7 +1845,7 @@ function InquiryPreviewModal({
                 lineHeight: 1.5,
               }}
             >
-              {item.clientName || 'Unbekannte Anfrage'} · {formatDate(item.updatedAt || item.createdAt)}
+              {item.description || 'Anfrage'} · {formatDate(item.updatedAt || item.createdAt)}
             </p>
           </div>
 
@@ -1399,14 +1900,24 @@ function InquiryPreviewModal({
             </div>
 
             <div style={previewBoxStyle}>
+              <span style={previewLabelStyle}>Typ</span>
+              <strong style={previewValueStyle}>{item.clientTypeLabel || '—'}</strong>
+            </div>
+
+            <div style={previewBoxStyle}>
+              <span style={previewLabelStyle}>Reinigungsart</span>
+              <strong style={previewValueStyle}>{item.reasonLabel || item.description || '—'}</strong>
+            </div>
+
+            <div style={previewBoxStyle}>
               <span style={previewLabelStyle}>Standort</span>
-              <strong style={previewValueStyle}>{item.siteName || '—'}</strong>
+              <strong style={previewValueStyle}>{[item.objectTypeLabel || item.siteName, item.surfaceLabel ? `${item.surfaceLabel} m²` : '', item.roomCount ? `${item.roomCount} Zimmer` : '', item.floorLabel ? `Etage ${item.floorLabel}` : '', item.elevatorLabel].filter(Boolean).join(' · ') || item.city || '—'}</strong>
             </div>
 
             <div style={previewBoxStyle}>
               <span style={previewLabelStyle}>Adresse</span>
               <strong style={previewValueStyle}>
-                {[item.addressText, item.postalCode, item.city].filter(Boolean).join(', ') || '—'}
+                {item.addressText ? [item.addressText, [item.postalCode, item.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '—'}
               </strong>
             </div>
           </div>
@@ -1431,7 +1942,7 @@ function InquiryPreviewModal({
                 whiteSpace: 'pre-wrap',
               }}
             >
-              {item.description || 'Keine zusätzliche Beschreibung vorhanden.'}
+              {item.detailDescription || item.formMessage || 'Keine zusätzliche Nachricht vorhanden.'}
             </p>
           </div>
 
@@ -1521,6 +2032,14 @@ const previewValueStyle: CSSProperties = {
   wordBreak: 'break-word',
 };
 
+const requestsDesktopListStyle: CSSProperties = {
+  width: '100%',
+  display: 'grid',
+  gap: '14px',
+  margin: 0,
+  padding: 0,
+};
+
 export default function TicketsPageTranslated() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('inquiries');
   const [items, setItems] = useState<PortalItem[]>([]);
@@ -1530,7 +2049,6 @@ export default function TicketsPageTranslated() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [inquiryViewFilter, setInquiryViewFilter] = useState<InquiryViewFilter>('customer');
 
   const [selectedInquiry, setSelectedInquiry] = useState<PortalItem | null>(null);
   const [conversionForm, setConversionForm] = useState<ConversionForm | null>(null);
@@ -1618,17 +2136,12 @@ export default function TicketsPageTranslated() {
   const tabItems = useMemo(() => {
     return items.filter((item) => {
       if (activeTab === 'inquiries') {
-        if (item.type !== 'inquiry') return false;
-
-        if (inquiryViewFilter === 'customer') return !item.isApplication;
-        if (inquiryViewFilter === 'applications') return Boolean(item.isApplication);
-
-        return true;
+        return item.type === 'inquiry' && !item.isApplication;
       }
 
       return item.type === 'damage' || item.type === 'job_damage';
     });
-  }, [activeTab, items, inquiryViewFilter]);
+  }, [activeTab, items]);
 
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -1775,10 +2288,7 @@ export default function TicketsPageTranslated() {
   };
 
   const hasFilters = Boolean(
-    searchQuery ||
-      statusFilter !== 'all' ||
-      typeFilter !== 'all' ||
-      (activeTab === 'inquiries' && inquiryViewFilter !== 'customer')
+    searchQuery || statusFilter !== 'all' || typeFilter !== 'all'
   );
 
   if (loading) {
@@ -1808,7 +2318,6 @@ export default function TicketsPageTranslated() {
           onClick={() => {
             setActiveTab('inquiries');
             setTypeFilter('all');
-            setInquiryViewFilter('customer');
           }}
           style={{
             height: '48px',
@@ -1895,7 +2404,7 @@ export default function TicketsPageTranslated() {
           className="opc-requests-controls"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 180px 190px 190px 190px',
+            gridTemplateColumns: 'minmax(0, 1fr) 180px 190px 190px',
             gap: '12px',
             alignItems: 'center',
           }}
@@ -1972,20 +2481,6 @@ export default function TicketsPageTranslated() {
             )}
           </select>
 
-          {activeTab === 'inquiries' ? (
-            <select
-              value={inquiryViewFilter}
-              onChange={(event) => setInquiryViewFilter(event.target.value as InquiryViewFilter)}
-              style={selectStyle}
-            >
-              <option value="customer">Nur Kundenanfragen</option>
-              <option value="applications">Nur Bewerbungen</option>
-              <option value="all">Alle Anfragen</option>
-            </select>
-          ) : (
-            <div aria-hidden="true" />
-          )}
-
           <a
             href={activeTab === 'inquiries' ? `${baseUrl}/kunden` : `${baseUrl}/einsaetze`}
             style={{
@@ -2048,17 +2543,22 @@ export default function TicketsPageTranslated() {
       )}
 
       <section
+        className="opc-requests-standalone-list"
         style={{
-          ...cardStyle,
-          overflow: 'hidden',
+          width: '100%',
+          margin: 0,
+          padding: 0,
+          background: 'transparent',
+          border: 0,
+          boxShadow: 'none',
         }}
       >
         {filteredItems.length === 0 ? (
           <EmptyState activeTab={activeTab} hasFilters={hasFilters} />
         ) : (
           <>
-            <div className="opc-requests-desktop-table">
-              {filteredItems.map((item, index) => (
+            <div className="opc-requests-desktop-table" style={requestsDesktopListStyle}>
+              {filteredItems.map((item) => (
                 <button
                   key={`${item.type}-${item.id}`}
                   type="button"
@@ -2073,9 +2573,10 @@ export default function TicketsPageTranslated() {
                     alignItems: 'center',
                     gap: '20px',
                     padding: '20px 22px',
-                    border: 'none',
-                    borderBottom: index < filteredItems.length - 1 ? `1px solid #F3F4F6` : 'none',
+                    border: `1px solid ${BRAND.border}`,
+                    borderRadius: '18px',
                     background: '#FFFFFF',
+                    boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
                     textAlign: 'left',
                     cursor: item.type === 'inquiry' || item.jobId || item.clientId ? 'pointer' : 'default',
                     fontFamily: pageFont,
@@ -2132,7 +2633,7 @@ export default function TicketsPageTranslated() {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {item.clientName || 'Ohne Kunde'}
+                      {item.contactLine || item.clientName || '—'}
                     </div>
 
                     <div
@@ -2145,7 +2646,7 @@ export default function TicketsPageTranslated() {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {[item.siteName, item.addressText, item.city].filter(Boolean).join(', ') || '-'}
+                      {item.locationLine || [item.siteName, item.addressText, item.city].filter(Boolean).join(', ') || '-'}
                     </div>
                   </div>
 
@@ -2219,12 +2720,14 @@ export default function TicketsPageTranslated() {
                   key={`${item.type}-${item.id}`}
                   style={{
                     width: '100%',
+                    boxSizing: 'border-box',
                     border: `1px solid ${BRAND.border}`,
                     borderRadius: '18px',
                     background: '#FFFFFF',
                     padding: '16px',
                     textAlign: 'left',
                     fontFamily: pageFont,
+                    boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
                   }}
                 >
                   <div
@@ -2274,7 +2777,8 @@ export default function TicketsPageTranslated() {
                       marginBottom: '12px',
                     }}
                   >
-                    <div>{[item.siteName, item.addressText, item.city].filter(Boolean).join(', ') || '-'}</div>
+                    <div>{item.contactLine || '-'}</div>
+                    <div>{item.locationLine || [item.siteName, item.addressText, item.city].filter(Boolean).join(', ') || '-'}</div>
                     <div>{item.description || typeLabels[item.type]}</div>
                     <div>{formatDate(item.updatedAt || item.createdAt)}</div>
                   </div>
@@ -2358,13 +2862,33 @@ export default function TicketsPageTranslated() {
           display: none;
         }
 
+        .opc-requests-standalone-list,
+        .opc-requests-desktop-table,
+        .opc-requests-mobile-cards {
+          width: 100% !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          box-sizing: border-box !important;
+          background: transparent !important;
+          border: 0 !important;
+          box-shadow: none !important;
+        }
+
+        .opc-requests-mobile-cards > *,
+        .opc-requests-desktop-table > * {
+          width: 100% !important;
+          box-sizing: border-box !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+        }
+
         @media (max-width: 1280px) {
           .opc-requests-metrics {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
 
           .opc-requests-controls {
-            grid-template-columns: minmax(0, 1fr) 170px 180px 180px !important;
+            grid-template-columns: minmax(0, 1fr) 170px 180px !important;
           }
 
           .opc-requests-controls a {
@@ -2374,15 +2898,25 @@ export default function TicketsPageTranslated() {
 
         @media (max-width: 980px) {
           .opc-requests-tabs {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
 
           .opc-requests-controls {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .opc-requests-controls > div:first-child {
+            grid-column: 1 / -1 !important;
+          }
+
+          .opc-requests-controls select {
+            width: 100% !important;
+            min-width: 0 !important;
           }
 
           .opc-requests-controls a {
-            grid-column: auto;
+            grid-column: 1 / -1 !important;
+            width: 100% !important;
           }
 
           .opc-requests-desktop-table {
@@ -2390,16 +2924,15 @@ export default function TicketsPageTranslated() {
           }
 
           .opc-requests-mobile-cards {
-            display: flex !important;
-            flex-direction: column;
-            gap: 14px;
-            padding: 14px;
+            display: grid !important;
+            gap: 14px !important;
+            padding: 0 !important;
           }
         }
 
         @media (max-width: 640px) {
           .opc-requests-metrics {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
         }
       `}</style>

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { sendDocumentEmail } from '../lib/opc-document-email';
 import { buildDocumentEmailHtml, downloadPdf, generateInvoicePdfDocument, getClientEmail, pdfToBase64, OPC_DEFAULT_CLOSING } from '../lib/opc-document-pdf';
+import { buildInvoiceHtml, downloadBase64Pdf, renderHtmlToPdfBase64 } from '../lib/opc-document-html';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import {
   OPCPageShell,
@@ -298,10 +297,10 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
     }
   }
 
-  async function generateInvoicePdf() {
+  function buildInvoicePdfInput() {
     if (!invoice) return null;
 
-    return await generateInvoicePdfDocument({
+    return {
       invoice,
       items,
       totals: {
@@ -312,7 +311,25 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         total: roundMoney(totals.total),
         balance: roundMoney(totals.balance),
       },
-    });
+    };
+  }
+
+  async function generateInvoicePdf() {
+    const input = buildInvoicePdfInput();
+    if (!input) return null;
+    return await generateInvoicePdfDocument(input);
+  }
+
+  async function generateInvoicePdfBase64(filename: string) {
+    const input = buildInvoicePdfInput();
+    if (!input) return null;
+
+    const html = buildInvoiceHtml(input);
+    const rendered = await renderHtmlToPdfBase64(html, filename);
+    if (rendered?.base64) return rendered.base64;
+
+    const fallbackDoc = await generateInvoicePdfDocument(input);
+    return pdfToBase64(fallbackDoc);
   }
 
   async function handleSendInvoiceEmail() {
@@ -326,10 +343,9 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
       const recipientEmail = getClientEmail(invoice.client_snapshot) || clean((invoice.client_snapshot || {}).email);
       if (!recipientEmail) throw new Error('Für diesen Kunden ist keine E-Mail-Adresse hinterlegt. Bitte zuerst beim Kunden eine Rechnungs- oder Kontakt-E-Mail eintragen.');
 
-      const doc = await generateInvoicePdf();
-      if (!doc) throw new Error('PDF konnte nicht erstellt werden.');
-
       const filename = buildInvoiceFileName(invoice);
+      const pdfBase64 = await generateInvoicePdfBase64(filename);
+      if (!pdfBase64) throw new Error('PDF konnte nicht erstellt werden.');
       const html = buildDocumentEmailHtml({
         title: 'Ihre Rechnung',
         headline: 'Ihre Rechnung',
@@ -341,7 +357,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         to: recipientEmail,
         subject: `Ihre Rechnung ${invoice.invoice_number} – Orange Pro Clean GmbH`,
         html,
-        attachments: [{ filename, contentBase64: pdfToBase64(doc), contentType: 'application/pdf' }],
+        attachments: [{ filename, contentBase64: pdfBase64, contentType: 'application/pdf' }],
         metadata: { invoice_id: invoice.id, document_type: 'invoice' },
       });
       setSuccessMessage(`Rechnung wurde per E-Mail an ${recipientEmail} gesendet.`);
@@ -353,8 +369,20 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
   async function handleDownloadInvoicePdf() {
     await saveInvoice(undefined, { silent: true });
-    const doc = await generateInvoicePdf();
-    if (doc) downloadPdf(doc, buildInvoiceFileName(invoice!));
+    const filename = buildInvoiceFileName(invoice!);
+    const input = buildInvoicePdfInput();
+
+    if (input) {
+      const html = buildInvoiceHtml(input);
+      const rendered = await renderHtmlToPdfBase64(html, filename);
+
+      if (rendered?.base64) {
+        downloadBase64Pdf(rendered.base64, filename);
+      } else {
+        const doc = await generateInvoicePdf();
+        if (doc) downloadPdf(doc, filename);
+      }
+    }
     setSuccessMessage('PDF wurde erstellt.');
   }
 

@@ -20,8 +20,6 @@ import {
   OPCTabs,
   OPCMetricsGrid,
   OPCMetricCard,
-  OPCToolbar,
-  OPCListCard,
   OPC_BRAND,
   OPC_PAGE_FONT,
   opcBlackButtonStyle,
@@ -52,8 +50,9 @@ interface Client {
 type RawOpcClient = Record<string, any>;
 type ActiveTab = 'all' | 'internal' | 'portal';
 type ClientTypeFilter = 'all' | 'privatkunden' | 'geschaeftskunden' | 'baukunden' | 'unknown';
+type SortOrder = 'name_asc' | 'name_desc' | 'oldest' | 'newest';
 
-const CLIENTS_PAGE_CACHE_KEY = 'opc:page-cache:clients-management';
+const CLIENTS_PAGE_CACHE_KEY = 'opc:page-cache:clients-management:v6-toolbar-tabs-fixed';
 
 const clientTypeLabels: Record<string, string> = {
   privatkunden: 'Privatkunde',
@@ -83,20 +82,6 @@ function normalizeText(value?: string | null) {
 function formatClientType(type?: string | null) {
   const normalized = normalizeText(type) || 'unknown';
   return clientTypeLabels[normalized] || normalized;
-}
-
-function formatDate(dateString: string) {
-  if (!dateString) return '-';
-
-  const date = new Date(dateString);
-
-  if (Number.isNaN(date.getTime())) return '-';
-
-  return date.toLocaleDateString('de-CH', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
 }
 
 function isCorporateType(type?: string | null) {
@@ -184,20 +169,22 @@ function StatusBadge({ status }: { status: string }) {
         };
 
   return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '30px',
-      padding: '0 12px',
-      borderRadius: '999px',
-      border: `1px solid ${style.border}`,
-      background: style.bg,
-      color: style.text,
-      fontSize: '12px',
-      fontWeight: 760,
-      whiteSpace: 'nowrap',
-    }}>
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '30px',
+        padding: '0 12px',
+        borderRadius: '999px',
+        border: `1px solid ${style.border}`,
+        background: style.bg,
+        color: style.text,
+        fontSize: '12px',
+        fontWeight: 760,
+        whiteSpace: 'nowrap',
+      }}
+    >
       {style.label}
     </span>
   );
@@ -261,6 +248,7 @@ export default function ClientsManagement() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
   const [clientTypeFilter, setClientTypeFilter] = useState<ClientTypeFilter>('all');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [grantingClientId, setGrantingClientId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -383,7 +371,7 @@ export default function ClientsManagement() {
   const filteredClients = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    return clients.filter((client) => {
+    const filtered = clients.filter((client) => {
       const matchesTab =
         activeTab === 'all' ||
         (activeTab === 'portal' && client.can_access_portal) ||
@@ -412,7 +400,29 @@ export default function ClientsManagement() {
         .toLowerCase()
         .includes(query);
     });
-  }, [clients, searchQuery, activeTab, clientTypeFilter]);
+
+    return [...filtered].sort((a, b) => {
+      const aName = (a.company_name || a.client_name || '').trim();
+      const bName = (b.company_name || b.client_name || '').trim();
+
+      if (sortOrder === 'name_asc') {
+        return aName.localeCompare(bName, 'de-CH', { sensitivity: 'base' });
+      }
+
+      if (sortOrder === 'name_desc') {
+        return bName.localeCompare(aName, 'de-CH', { sensitivity: 'base' });
+      }
+
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
+
+      if (sortOrder === 'oldest') {
+        return aTime - bTime;
+      }
+
+      return bTime - aTime;
+    });
+  }, [clients, searchQuery, activeTab, clientTypeFilter, sortOrder]);
 
   function handleClientClick(clientId: string) {
     window.location.href = `${baseUrl}/kunde/${clientId}`;
@@ -429,77 +439,101 @@ export default function ClientsManagement() {
   return (
     <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch']}>
       <OPCPageShell>
-        <OPCTabs
-          tabs={[
-            {
-              key: 'all',
-              label: 'Alle Kunden',
-              active: activeTab === 'all',
-              onClick: () => setActiveTab('all'),
-            },
-            {
-              key: 'internal',
-              label: 'Interne Kunden',
-              active: activeTab === 'internal',
-              onClick: () => setActiveTab('internal'),
-            },
-            {
-              key: 'portal',
-              label: 'Portal-Kunden',
-              active: activeTab === 'portal',
-              onClick: () => setActiveTab('portal'),
-            },
-          ]}
-        />
+        <div className="opc-clients-tabs-horizontal">
+          <OPCTabs
+            tabs={[
+              {
+                key: 'all',
+                label: 'Alle Kunden',
+                active: activeTab === 'all',
+                onClick: () => setActiveTab('all'),
+              },
+              {
+                key: 'internal',
+                label: 'Kontakte',
+                active: activeTab === 'internal',
+                onClick: () => setActiveTab('internal'),
+              },
+              {
+                key: 'portal',
+                label: 'Portal',
+                active: activeTab === 'portal',
+                onClick: () => setActiveTab('portal'),
+              },
+            ]}
+          />
+        </div>
 
-        <OPCMetricsGrid>
-          <OPCMetricCard value={metrics.total} label="Alle Kunden" icon={<Users size={18} />} />
-          <OPCMetricCard value={metrics.internal} label="Interne Kunden" icon={<UserRound size={18} />} />
-          <OPCMetricCard value={metrics.portal} label="Portal-Kunden" icon={<LockKeyhole size={18} />} />
-          <OPCMetricCard value={metrics.corporate} label="Geschäftskunden" icon={<Building2 size={18} />} />
-        </OPCMetricsGrid>
+        <div className="opc-clients-metrics-2x2">
+          <OPCMetricsGrid>
+            <OPCMetricCard value={metrics.total} label="Alle Kunden" icon={<Users size={18} />} />
+            <OPCMetricCard value={metrics.internal} label="Kontakte" icon={<UserRound size={18} />} />
+            <OPCMetricCard value={metrics.portal} label="Portal-Kunden" icon={<LockKeyhole size={18} />} />
+            <OPCMetricCard value={metrics.corporate} label="Geschäftskunden" icon={<Building2 size={18} />} />
+          </OPCMetricsGrid>
+        </div>
 
-        <OPCToolbar columns="minmax(0, 1fr) 220px 190px">
-          <div style={{ position: 'relative', minWidth: 0 }}>
-            <Search size={17} style={opcSearchIconStyle} />
+        <div style={clientsToolbarCardStyle}>
+          <div className="opc-clients-toolbar-grid" style={clientsToolbarGridStyle}>
+            <div className="opc-clients-toolbar-search" style={{ position: 'relative', minWidth: 0 }}>
+              <Search size={17} style={opcSearchIconStyle} />
 
-            <input
-              type="text"
-              placeholder="Suche nach Kunde, Kontakt, E-Mail, Telefon oder Standort"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              style={opcInputWithIconStyle}
-            />
+              <input
+                type="text"
+                placeholder="Suche nach Kunde, Kontakt, E-Mail, Telefon oder Standort"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                style={opcInputWithIconStyle}
+              />
+            </div>
+
+            <select
+              value={clientTypeFilter}
+              onChange={(event) => setClientTypeFilter(event.target.value as ClientTypeFilter)}
+              style={opcSelectStyle}
+            >
+              <option value="all">Alle Kundentypen</option>
+              <option value="geschaeftskunden">Geschäftskunden</option>
+              <option value="privatkunden">Privatkunden</option>
+              <option value="baukunden">Baukunden</option>
+              <option value="unknown">Unbekannt</option>
+            </select>
+
+            <select
+              value={sortOrder}
+              onChange={(event) => setSortOrder(event.target.value as SortOrder)}
+              style={opcSelectStyle}
+            >
+              <option value="name_asc">Name A bis Z</option>
+              <option value="name_desc">Name Z bis A</option>
+              <option value="oldest">Älteste zuerst</option>
+              <option value="newest">Neueste zuerst</option>
+            </select>
+
+            <a
+              className="opc-clients-toolbar-action"
+              href={`${baseUrl}/kunde-anlegen`}
+              style={{
+                ...opcBlackButtonStyle,
+                width: '100%',
+              }}
+            >
+              <Plus size={17} />
+              Kunde anlegen
+            </a>
           </div>
-
-          <select
-            value={clientTypeFilter}
-            onChange={(event) => setClientTypeFilter(event.target.value as ClientTypeFilter)}
-            style={opcSelectStyle}
-          >
-            <option value="all">Alle Kundentypen</option>
-            <option value="geschaeftskunden">Geschäftskunden</option>
-            <option value="privatkunden">Privatkunden</option>
-            <option value="baukunden">Baukunden</option>
-            <option value="unknown">Unbekannt</option>
-          </select>
-
-          <a href={`${baseUrl}/kunde-anlegen`} data-opc-wide="true" style={opcBlackButtonStyle}>
-            <Plus size={17} />
-            Kunde anlegen
-          </a>
-        </OPCToolbar>
+        </div>
 
         {successMessage && <div style={successStyle}>{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
 
-        <OPCListCard>
+        <div className="opc-clients-standalone-list" style={clientsListStyle}>
           {filteredClients.length === 0 ? (
             <EmptyState searchQuery={searchQuery} activeTab={activeTab} />
           ) : (
             <>
-              <div className="opc-requests-desktop-table">
-                {filteredClients.map((client, index) => (
+              <div className="opc-requests-desktop-table opc-clients-desktop-list" style={desktopListStyle}>
+                {filteredClients.map((client) => (
                   <div
                     key={client.id}
                     role="button"
@@ -508,11 +542,7 @@ export default function ClientsManagement() {
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') handleClientClick(client.id);
                     }}
-                    style={{
-                      ...desktopRowStyle,
-                      borderBottom:
-                        index < filteredClients.length - 1 ? '1px solid #F3F4F6' : 'none',
-                    }}
+                    style={desktopRowStyle}
                   >
                     <div style={{ minWidth: 0 }}>
                       <div style={rowTitleStyle}>{client.company_name || client.client_name}</div>
@@ -579,7 +609,7 @@ export default function ClientsManagement() {
                 ))}
               </div>
 
-              <div className="opc-requests-mobile-cards">
+              <div className="opc-requests-mobile-cards opc-clients-mobile-list" style={mobileCardsListStyle}>
                 {filteredClients.map((client) => (
                   <article key={client.id} style={mobileCardStyle}>
                     <div style={mobileTopStyle}>
@@ -630,7 +660,7 @@ export default function ClientsManagement() {
               </div>
             </>
           )}
-        </OPCListCard>
+        </div>
 
         {filteredClients.length > 0 && (
           <div style={countStyle}>
@@ -638,21 +668,30 @@ export default function ClientsManagement() {
           </div>
         )}
 
-        <style>{opcResponsiveStyle}</style>
+        <style>{`${opcResponsiveStyle}${clientsResponsiveStyle}`}</style>
       </OPCPageShell>
     </MirakaDashboardShell>
   );
 }
 
-const loadingStyle: CSSProperties = {
-  minHeight: '60vh',
-  display: 'flex',
+const clientsToolbarCardStyle: CSSProperties = {
+  width: '100%',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: '22px',
+  background: '#FFFFFF',
+  padding: '22px',
+  marginBottom: '28px',
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+  boxSizing: 'border-box',
+};
+
+const clientsToolbarGridStyle: CSSProperties = {
+  width: '100%',
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) 220px 220px 190px',
+  gap: '14px',
   alignItems: 'center',
-  justifyContent: 'center',
-  color: OPC_BRAND.muted,
-  fontSize: '14px',
-  fontWeight: 650,
-  fontFamily: OPC_PAGE_FONT,
+  boxSizing: 'border-box',
 };
 
 const successStyle: CSSProperties = {
@@ -677,8 +716,32 @@ const errorStyle: CSSProperties = {
   fontWeight: 620,
 };
 
+const clientsListStyle: CSSProperties = {
+  width: '100%',
+  display: 'block',
+  margin: 0,
+  padding: 0,
+};
+
+const desktopListStyle: CSSProperties = {
+  width: '100%',
+  display: 'grid',
+  gap: '14px',
+  margin: 0,
+  padding: 0,
+};
+
+const mobileCardsListStyle: CSSProperties = {
+  width: '100%',
+  display: 'none',
+  gap: '14px',
+  margin: 0,
+  padding: 0,
+};
+
 const desktopRowStyle: CSSProperties = {
   width: '100%',
+  boxSizing: 'border-box',
   display: 'grid',
   gridTemplateColumns:
     'minmax(220px, 1.1fr) minmax(210px, 1fr) minmax(220px, 1fr) 130px 100px 170px',
@@ -686,9 +749,12 @@ const desktopRowStyle: CSSProperties = {
   gap: '18px',
   padding: '20px 22px',
   background: '#FFFFFF',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: '18px',
   textAlign: 'left',
   cursor: 'pointer',
   fontFamily: OPC_PAGE_FONT,
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
 };
 
 const rowTitleStyle: CSSProperties = {
@@ -798,12 +864,14 @@ const internalBadgeStyle: CSSProperties = {
 
 const mobileCardStyle: CSSProperties = {
   width: '100%',
+  boxSizing: 'border-box',
   border: `1px solid ${OPC_BRAND.border}`,
   borderRadius: '18px',
   background: '#FFFFFF',
   padding: '16px',
   textAlign: 'left',
   fontFamily: OPC_PAGE_FONT,
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
 };
 
 const mobileTopStyle: CSSProperties = {
@@ -855,6 +923,9 @@ const countStyle: CSSProperties = {
 const emptyStateStyle: CSSProperties = {
   padding: '78px 22px',
   textAlign: 'center',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: '18px',
+  background: '#FFFFFF',
 };
 
 const emptyTitleStyle: CSSProperties = {
@@ -870,3 +941,127 @@ const emptyTextStyle: CSSProperties = {
   fontWeight: 560,
   color: OPC_BRAND.muted,
 };
+
+const clientsResponsiveStyle = `
+  .opc-clients-tabs-horizontal {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    gap: 12px !important;
+    margin-bottom: 22px !important;
+  }
+
+  .opc-clients-tabs-horizontal > * {
+    display: contents !important;
+  }
+
+  .opc-clients-tabs-horizontal button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .opc-clients-metrics-2x2 .opc-time-metrics,
+  .opc-clients-metrics-2x2 .opc-page-metrics,
+  .opc-clients-metrics-2x2 .opc-metrics-grid,
+  .opc-clients-metrics-2x2 > div {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 16px !important;
+    width: 100% !important;
+    margin-bottom: 22px !important;
+  }
+
+  .opc-clients-toolbar-grid select {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .opc-clients-standalone-list,
+  .opc-clients-desktop-list,
+  .opc-clients-mobile-list,
+  .opc-requests-desktop-table,
+  .opc-requests-mobile-cards {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .opc-clients-mobile-list > *,
+  .opc-clients-desktop-list > * {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  @media (max-width: 960px) {
+    .opc-requests-desktop-table {
+      display: none !important;
+    }
+
+    .opc-requests-mobile-cards {
+      display: grid !important;
+      gap: 14px !important;
+    }
+  }
+
+  @media (min-width: 961px) {
+    .opc-requests-mobile-cards {
+      display: none !important;
+    }
+  }
+
+  @media (max-width: 680px) {
+    .opc-clients-tabs-horizontal {
+      display: grid !important;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      width: 100% !important;
+      gap: 8px !important;
+      margin-bottom: 18px !important;
+    }
+
+    .opc-clients-tabs-horizontal > * {
+      display: contents !important;
+    }
+
+    .opc-clients-tabs-horizontal button {
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+
+    .opc-clients-toolbar-grid {
+      display: grid !important;
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      width: 100% !important;
+      gap: 12px !important;
+    }
+
+    .opc-clients-toolbar-search {
+      grid-column: 1 / -1 !important;
+    }
+
+    .opc-clients-toolbar-action {
+      grid-column: 1 / -1 !important;
+      width: 100% !important;
+    }
+
+    .opc-clients-toolbar-grid select {
+      grid-column: auto !important;
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+
+    .opc-clients-metrics-2x2 .opc-time-metrics,
+    .opc-clients-metrics-2x2 .opc-page-metrics,
+    .opc-clients-metrics-2x2 .opc-metrics-grid,
+    .opc-clients-metrics-2x2 > div {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 10px !important;
+      margin-bottom: 18px !important;
+    }
+  }
+`;

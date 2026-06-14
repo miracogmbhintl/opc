@@ -1304,7 +1304,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         className="opc-settings-tabs"
         style={{
           display: 'grid',
-          gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))`,
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           gap: '16px',
           marginBottom: '22px',
         }}
@@ -1312,6 +1312,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const isSystemTab = tab.id === 'system';
 
           return (
             <button
@@ -1319,34 +1320,36 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
               type="button"
               onClick={() => setActiveTab(tab.id)}
               style={{
-                minHeight: '74px',
-                borderRadius: '18px',
+                gridColumn: isSystemTab && tabs.length % 2 === 1 ? '1 / -1' : undefined,
+                minHeight: '112px',
+                padding: '22px 18px',
+                borderRadius: '28px',
                 border: `1px solid ${isActive ? BRAND.black : BRAND.border}`,
                 background: isActive ? BRAND.black : '#FFFFFF',
                 color: isActive ? '#FFFFFF' : BRAND.text,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '12px',
+                gap: '14px',
                 fontFamily: pageFont,
-                fontSize: '14px',
+                fontSize: '18px',
                 fontWeight: 800,
                 cursor: 'pointer',
-                boxShadow: isActive ? '0 12px 30px rgba(0,0,0,0.12)' : 'none',
+                boxShadow: isActive ? '0 16px 40px rgba(0,0,0,0.14)' : '0 1px 2px rgba(15, 17, 21, 0.04)',
               }}
             >
               <span
                 style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '10px',
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '14px',
                   background: isActive ? 'rgba(255,255,255,0.12)' : '#F8F8F8',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Icon size={17} />
+                <Icon size={20} />
               </span>
               {tab.label}
             </button>
@@ -1691,7 +1694,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
                 border: `1px solid ${BRAND.border}`,
                 background: '#FAFAFA',
                 display: 'flex',
-                gap: '12px',
+                gap: '14px',
                 alignItems: 'flex-start',
               }}
             >
@@ -1836,7 +1839,11 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         }
 
         @media (max-width: 680px) {
-          .opc-settings-tabs,
+          .opc-settings-tabs {
+            grid-template-columns: 1fr 1fr !important;
+            gap: 14px !important;
+          }
+
           .opc-settings-grid-2,
           .opc-settings-grid-3 {
             grid-template-columns: 1fr !important;

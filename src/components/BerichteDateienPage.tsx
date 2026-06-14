@@ -1,19 +1,18 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
-import { baseUrl } from '../lib/base-url';
-import MirakaDashboardShell from './MirakaDashboardShell';
-import PortalSkeleton from './shared/PortalSkeleton';
 import {
   AlertTriangle,
+  CalendarDays,
+  ChevronDown,
   CheckCircle2,
-  ChevronRight,
   Clock3,
   FileText,
   Image as ImageIcon,
+  MapPin,
   Search,
-  Send,
-  Upload,
 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { baseUrl } from '../lib/base-url';
+import MirakaDashboardShell from './MirakaDashboardShell';
 
 interface RawReport {
   [key: string]: any;
@@ -51,6 +50,7 @@ interface ReportRow {
 
 type StatusFilter = 'all' | 'open' | 'review' | 'approved' | 'sent_to_client' | 'missing_photos';
 type ContentFilter = 'all' | 'photos' | 'damage' | 'time_logs' | 'missing_time';
+type ReportDateFilter = 'all' | 'today' | 'yesterday' | 'week' | 'month' | 'last30' | 'custom';
 
 const BRAND = {
   text: '#111827',
@@ -89,6 +89,21 @@ const statusLabels: Record<string, string> = {
   sent_to_client: 'An Kunde gesendet',
   completed: 'Abgeschlossen',
   cancelled: 'Storniert',
+};
+
+const filePillStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '5px',
+  height: '26px',
+  padding: '0 9px',
+  borderRadius: '999px',
+  border: `1px solid ${BRAND.border}`,
+  background: '#FFFFFF',
+  color: BRAND.muted,
+  fontSize: '11px',
+  fontWeight: 720,
+  whiteSpace: 'nowrap',
 };
 
 function getFirstValue(row: RawReport, keys: string[], fallback = '') {
@@ -196,6 +211,124 @@ function formatHours(value?: number | null) {
   })} h`;
 }
 
+function startOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function endOfDay(date: Date) {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+}
+
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+function getReportReferenceDate(report: ReportRow) {
+  return report.plannedStart || report.reportUpdatedAt || report.reportCreatedAt || null;
+}
+
+function isSameLocalDay(value: string | null | undefined, referenceDate: Date) {
+  if (!value) return false;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return false;
+
+  return date >= startOfDay(referenceDate) && date <= endOfDay(referenceDate);
+}
+
+function isWithinWeek(value: string | null | undefined, referenceDate: Date) {
+  if (!value) return false;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return false;
+
+  return date >= startOfDay(referenceDate) && date <= endOfDay(addDays(referenceDate, 7));
+}
+
+function isPreviousLocalDay(value: string | null | undefined, referenceDate: Date) {
+  if (!value) return false;
+
+  const yesterday = addDays(referenceDate, -1);
+  return isSameLocalDay(value, yesterday);
+}
+
+function isWithinCurrentMonth(value: string | null | undefined, referenceDate: Date) {
+  if (!value) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const start = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0, 23, 59, 59, 999);
+
+  return date >= start && date <= end;
+}
+
+function isWithinLastDays(value: string | null | undefined, referenceDate: Date, days: number) {
+  if (!value) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  return date >= startOfDay(addDays(referenceDate, -days + 1)) && date <= endOfDay(referenceDate);
+}
+
+function formatInputDateLabel(value: string) {
+  if (!value) return '';
+
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString('de-CH', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+}
+
+const reportDateFilterLabels: Record<ReportDateFilter, string> = {
+  all: 'Alle Zeiträume',
+  today: 'Heute',
+  yesterday: 'Gestern',
+  week: 'Diese Woche',
+  month: 'Dieser Monat',
+  last30: 'Letzte 30 Tage',
+  custom: 'Eigenes Datum',
+};
+
+function getReportDateFilterLabel(filter: ReportDateFilter, startValue: string, endValue: string) {
+  if (filter !== 'custom') return reportDateFilterLabels[filter];
+
+  if (startValue && endValue) return `${formatInputDateLabel(startValue)} – ${formatInputDateLabel(endValue)}`;
+  if (startValue) return `Ab ${formatInputDateLabel(startValue)}`;
+  if (endValue) return `Bis ${formatInputDateLabel(endValue)}`;
+
+  return reportDateFilterLabels.custom;
+}
+
+function isWithinCustomDateRange(value: string | null | undefined, startValue: string, endValue: string) {
+  if (!value || (!startValue && !endValue)) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const start = startValue ? new Date(`${startValue}T00:00:00`) : null;
+  const end = endValue ? new Date(`${endValue}T23:59:59.999`) : null;
+
+  if (start && !Number.isNaN(start.getTime()) && date < start) return false;
+  if (end && !Number.isNaN(end.getTime()) && date > end) return false;
+
+  return true;
+}
+
 function mapReport(row: RawReport): ReportRow {
   const beforePhotos = parseJsonArray(row.before_photos);
   const afterPhotos = parseJsonArray(row.after_photos);
@@ -251,7 +384,16 @@ function getLocationText(report: ReportRow) {
   if (report.siteName && addressLine) return `${report.siteName} · ${addressLine}`;
   if (report.siteName) return report.siteName;
 
-  return addressLine || '-';
+  return addressLine || 'Adresse nicht hinterlegt';
+}
+
+function getReportUpdateText(report: ReportRow) {
+  if (report.sentToClientAt) return `Gesendet ${formatDate(report.sentToClientAt)}`;
+  if (report.approvedAt) return `Freigegeben ${formatDate(report.approvedAt)}`;
+  if (report.reportUpdatedAt) return `Aktualisiert ${formatDate(report.reportUpdatedAt)}`;
+  if (report.reportCreatedAt) return `Erstellt ${formatDate(report.reportCreatedAt)}`;
+
+  return 'Noch nicht aktualisiert';
 }
 
 function StatusBadge({ report }: { report: ReportRow }) {
@@ -268,6 +410,7 @@ function StatusBadge({ report }: { report: ReportRow }) {
 
   return (
     <span
+      className="opc-report-status-badge"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -298,7 +441,7 @@ function MetricCard({
   label: string;
   value: number;
   icon: ReactNode;
-  tone?: 'neutral' | 'danger' | 'warning' | 'success';
+  tone?: 'neutral' | 'danger' | 'warning' | 'success' | 'dark';
 }) {
   const valueColor =
     tone === 'danger'
@@ -307,35 +450,40 @@ function MetricCard({
         ? BRAND.amber
         : tone === 'success'
           ? BRAND.green
-          : BRAND.text;
+          : tone === 'dark'
+            ? BRAND.black
+            : BRAND.text;
 
   return (
     <div
+      className="opc-reports-metric-card"
       style={{
         ...cardStyle,
-        minHeight: '112px',
-        padding: '20px',
+        minHeight: '96px',
+        padding: '18px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '16px',
+        gap: '14px',
       }}
     >
       <div>
         <div
+          className="opc-reports-metric-value"
           style={{
-            fontSize: '26px',
+            fontSize: '25px',
             lineHeight: 1,
             fontWeight: 820,
             letterSpacing: '-0.04em',
             color: valueColor,
-            marginBottom: '12px',
+            marginBottom: '10px',
           }}
         >
           {value}
         </div>
 
         <div
+          className="opc-reports-metric-label"
           style={{
             fontSize: '13px',
             fontWeight: 720,
@@ -347,6 +495,7 @@ function MetricCard({
       </div>
 
       <div
+        className="opc-reports-metric-icon"
         style={{
           width: '38px',
           height: '38px',
@@ -368,13 +517,7 @@ function MetricCard({
 
 function FileSummary({ report }: { report: ReportRow }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        gap: '8px',
-        flexWrap: 'wrap',
-      }}
-    >
+    <div className="opc-report-file-summary">
       <span style={filePillStyle}>
         <ImageIcon size={13} />
         {report.beforePhotoCount + report.afterPhotoCount} Fotos
@@ -393,20 +536,63 @@ function FileSummary({ report }: { report: ReportRow }) {
   );
 }
 
-const filePillStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '5px',
-  height: '26px',
-  padding: '0 9px',
-  borderRadius: '999px',
-  border: `1px solid ${BRAND.border}`,
-  background: '#FFFFFF',
-  color: BRAND.muted,
-  fontSize: '11px',
-  fontWeight: 720,
-  whiteSpace: 'nowrap',
-};
+function ReportCard({ report }: { report: ReportRow }) {
+  const title = report.reportTitle || report.jobTitle || 'Bericht';
+  const detailHref = report.reportId
+    ? `${baseUrl}/bericht/${report.reportId}`
+    : report.jobId
+      ? `${baseUrl}/bericht/job/${report.jobId}`
+      : `${baseUrl}/berichte-dateien`;
+  const jobHref = report.jobId ? `${baseUrl}/einsatz/${report.jobId}` : `${baseUrl}/einsaetze`;
+
+  return (
+    <article className="opc-report-card" style={cardStyle}>
+      <div className="opc-report-card-main">
+        <div style={{ minWidth: 0 }}>
+          <h3>{title}</h3>
+
+          <div className="opc-report-meta">
+            <span>
+              <FileText size={14} />
+              {report.serviceCategory || 'Einsatz'}
+            </span>
+
+            <span>
+              <CalendarDays size={14} />
+              {formatDateTime(report.plannedStart)}
+            </span>
+
+            <span>
+              <MapPin size={14} />
+              {getLocationText(report)}
+            </span>
+          </div>
+
+          {report.reportSummary ? <p className="opc-report-summary-text">{report.reportSummary}</p> : null}
+        </div>
+
+        <div className="opc-report-card-side">
+          <StatusBadge report={report} />
+          <span>{formatHours(report.totalHours)} · {getReportUpdateText(report)}</span>
+        </div>
+      </div>
+
+      <div className="opc-report-card-footer">
+        <FileSummary report={report} />
+      </div>
+
+      <div className="opc-report-card-actions">
+        <a className="opc-report-action dark" href={detailHref}>
+          Details öffnen
+        </a>
+
+        <a className="opc-report-action" href={jobHref}>
+          Einsatz öffnen
+        </a>
+      </div>
+    </article>
+  );
+}
 
 export default function BerichteDateienPage() {
   const [reports, setReports] = useState<ReportRow[]>([]);
@@ -415,9 +601,22 @@ export default function BerichteDateienPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [contentFilter, setContentFilter] = useState<ContentFilter>('all');
+  const [dateFilter, setDateFilter] = useState<ReportDateFilter>('all');
+  const [customDateStart, setCustomDateStart] = useState('');
+  const [customDateEnd, setCustomDateEnd] = useState('');
+  const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     void loadReports();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 60000);
+
+    return () => window.clearInterval(timer);
   }, []);
 
   async function loadReports() {
@@ -479,6 +678,7 @@ export default function BerichteDateienPage() {
 
     return reports.filter((report) => {
       const statusGroup = getStatusGroup(report.reportStatus);
+      const reportDate = getReportReferenceDate(report);
 
       const matchesStatus =
         statusFilter === 'all' ||
@@ -495,6 +695,17 @@ export default function BerichteDateienPage() {
         (contentFilter === 'missing_time' && report.timeLogCount === 0);
 
       if (!matchesContent) return false;
+
+      const matchesDate =
+        dateFilter === 'all' ||
+        (dateFilter === 'today' && isSameLocalDay(reportDate, now)) ||
+        (dateFilter === 'yesterday' && isPreviousLocalDay(reportDate, now)) ||
+        (dateFilter === 'week' && isWithinWeek(reportDate, now)) ||
+        (dateFilter === 'month' && isWithinCurrentMonth(reportDate, now)) ||
+        (dateFilter === 'last30' && isWithinLastDays(reportDate, now, 30)) ||
+        (dateFilter === 'custom' && isWithinCustomDateRange(reportDate, customDateStart, customDateEnd));
+
+      if (!matchesDate) return false;
 
       if (!query) return true;
 
@@ -514,142 +725,135 @@ export default function BerichteDateienPage() {
         .toLowerCase()
         .includes(query);
     });
-  }, [reports, searchQuery, statusFilter, contentFilter]);
-
-  const openReport = (report: ReportRow) => {
-    if (!report.jobId) return;
-
-    window.location.href = `${baseUrl}/einsatz/${report.jobId}`;
-  };
+  }, [reports, searchQuery, statusFilter, contentFilter, dateFilter, customDateStart, customDateEnd, now]);
 
   if (loading) {
     return (
       <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch', 'client']}>
-        <PortalSkeleton variant="dashboard" />
+        <div
+          style={{
+            minHeight: '60vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: BRAND.muted,
+            fontSize: '14px',
+            fontWeight: 650,
+            fontFamily: pageFont,
+          }}
+        >
+          Berichte werden geladen...
+        </div>
       </MirakaDashboardShell>
     );
   }
 
-    return (
-    <MirakaDashboardShell hideTopBar={true} requiredRole={['owner', 'admin', 'dispatch', 'client']}>
-      <div
-        className="opc-reports-page"
-        style={{
-          padding: 0,
-          fontFamily: pageFont,
-          color: BRAND.text,
-        }}
-      >
-        <div
-          className="opc-reports-header"
-          style={{
-            marginBottom: '28px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: '20px',
-          }}
-        >
-        </div>
-        <div
-          className="opc-reports-metrics"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-            gap: '16px',
-            marginBottom: '22px',
-          }}
-        >
-          <MetricCard
-            value={metrics.openReports}
-            label="Berichte offen"
-            icon={<FileText size={18} />}
-          />
+  return (
+    <MirakaDashboardShell
+      hideTopBar={true}
+      requiredRole={['owner', 'admin', 'dispatch', 'client']}
+      currentPath="/berichte-dateien"
+    >
+      <div className="opc-reports-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
+        {errorMessage ? <div className="opc-reports-error">{errorMessage}</div> : null}
 
+        <div className="opc-reports-metrics">
+          <MetricCard value={metrics.openReports} label="Berichte offen" icon={<FileText size={17} />} />
           <MetricCard
             value={metrics.reviewReports}
             label="Zur Freigabe"
-            icon={<Clock3 size={18} />}
+            icon={<Clock3 size={17} />}
             tone={metrics.reviewReports > 0 ? 'warning' : 'neutral'}
           />
-
           <MetricCard
             value={metrics.approvedReports}
             label="Freigegeben"
-            icon={<CheckCircle2 size={18} />}
+            icon={<CheckCircle2 size={17} />}
             tone="success"
           />
-
           <MetricCard
             value={metrics.missingPhotos}
             label="Fehlende Fotos"
-            icon={<ImageIcon size={18} />}
+            icon={<ImageIcon size={17} />}
             tone={metrics.missingPhotos > 0 ? 'danger' : 'neutral'}
           />
         </div>
 
-        <section
-          style={{
-            ...cardStyle,
-            padding: '18px',
-            marginBottom: '22px',
-          }}
-        >
-          <div
-            className="opc-reports-controls"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) 180px 190px 230px',
-              gap: '12px',
-              alignItems: 'center',
-            }}
-          >
-            <div style={{ position: 'relative', minWidth: 0 }}>
-              <Search
-                size={17}
-                style={{
-                  position: 'absolute',
-                  left: '14px',
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: BRAND.faint,
-                  pointerEvents: 'none',
-                }}
-              />
+        <section className="opc-reports-filter-panel" style={cardStyle}>
+          <div className="opc-reports-search">
+            <Search size={17} />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Berichte suchen..."
+            />
+          </div>
 
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Suche nach Kunde, Standort, Einsatz oder Bericht"
-                style={{
-                  width: '100%',
-                  height: '48px',
-                  padding: '0 14px 0 42px',
-                  borderRadius: '14px',
-                  border: `1px solid ${BRAND.border}`,
-                  background: '#FFFFFF',
-                  color: BRAND.text,
-                  outline: 'none',
-                  fontSize: '14px',
-                  fontWeight: 560,
-                  fontFamily: pageFont,
-                  boxSizing: 'border-box',
-                }}
-                onFocus={(event) => {
-                  event.currentTarget.style.borderColor = BRAND.black;
-                }}
-                onBlur={(event) => {
-                  event.currentTarget.style.borderColor = BRAND.border;
-                }}
-              />
-            </div>
-
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-              style={selectStyle}
+          <div className="opc-reports-date-picker">
+            <button
+              type="button"
+              className={dateMenuOpen ? 'active' : ''}
+              onClick={() => setDateMenuOpen((current) => !current)}
+              aria-expanded={dateMenuOpen}
             >
+              <CalendarDays size={16} />
+              <span>Zeitraum: {getReportDateFilterLabel(dateFilter, customDateStart, customDateEnd)}</span>
+              <ChevronDown size={16} />
+            </button>
+
+            {dateMenuOpen ? (
+              <div className="opc-reports-date-menu">
+                {(['all', 'today', 'yesterday', 'week', 'month', 'last30'] as ReportDateFilter[]).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={dateFilter === option ? 'active' : ''}
+                    onClick={() => {
+                      setDateFilter(option);
+                      setDateMenuOpen(false);
+                    }}
+                  >
+                    {reportDateFilterLabels[option]}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  className={dateFilter === 'custom' ? 'active' : ''}
+                  onClick={() => setDateFilter('custom')}
+                >
+                  Eigenes Datum
+                </button>
+
+                {dateFilter === 'custom' ? (
+                  <div className="opc-reports-date-menu-custom">
+                    <input
+                      type="date"
+                      value={customDateStart}
+                      onChange={(event) => {
+                        setCustomDateStart(event.target.value);
+                        setDateFilter('custom');
+                      }}
+                    />
+                    <input
+                      type="date"
+                      value={customDateEnd}
+                      onChange={(event) => {
+                        setCustomDateEnd(event.target.value);
+                        setDateFilter('custom');
+                      }}
+                    />
+                    <button type="button" onClick={() => setDateMenuOpen(false)}>
+                      Anwenden
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="opc-reports-select-row">
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
               <option value="all">Alle Status</option>
               <option value="open">Offen</option>
               <option value="review">Zur Freigabe</option>
@@ -658,441 +862,487 @@ export default function BerichteDateienPage() {
               <option value="missing_photos">Fehlende Fotos</option>
             </select>
 
-            <select
-              value={contentFilter}
-              onChange={(event) => setContentFilter(event.target.value as ContentFilter)}
-              style={selectStyle}
-            >
+            <select value={contentFilter} onChange={(event) => setContentFilter(event.target.value as ContentFilter)}>
               <option value="all">Alle Inhalte</option>
               <option value="photos">Mit Fotos</option>
               <option value="damage">Mit Schäden</option>
               <option value="time_logs">Mit Zeitlogs</option>
               <option value="missing_time">Ohne Zeiten</option>
             </select>
-
-            <a
-              href={`${baseUrl}/einsaetze`}
-              style={{
-                width: '100%',
-                height: '48px',
-                borderRadius: '14px',
-                border: `1px solid ${BRAND.black}`,
-                background: BRAND.black,
-                color: '#FFFFFF',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '9px',
-                fontSize: '14px',
-                fontWeight: 760,
-                fontFamily: pageFont,
-                textDecoration: 'none',
-                whiteSpace: 'nowrap',
-                boxSizing: 'border-box',
-              }}
-            >
-              <Upload size={17} />
-              Datei hinzufügen
-            </a>
           </div>
         </section>
 
-        {errorMessage && (
-          <div
-            style={{
-              marginBottom: '22px',
-              padding: '14px 16px',
-              borderRadius: '14px',
-              border: '1px solid #FCA5A5',
-              background: '#FEF2F2',
-              color: '#991B1B',
-              fontSize: '14px',
-              fontWeight: 620,
-            }}
-          >
-            {errorMessage}
+        {filteredReports.length === 0 ? (
+          <div className="opc-reports-empty" style={cardStyle}>
+            Keine Berichte für diese Auswahl gefunden.
+          </div>
+        ) : (
+          <div className="opc-reports-list">
+            {filteredReports.map((report) => (
+              <ReportCard key={report.reportId || report.jobId} report={report} />
+            ))}
           </div>
         )}
 
-        <section
-          style={{
-            ...cardStyle,
-            overflow: 'hidden',
-          }}
-        >
-          {filteredReports.length === 0 ? (
-            <div
-              style={{
-                padding: '78px 22px',
-                textAlign: 'center',
-              }}
-            >
-              <FileText
-                size={50}
-                strokeWidth={1.5}
-                color="#D1D5DB"
-                style={{ marginBottom: '18px' }}
-              />
-
-              <h3
-                style={{
-                  margin: '0 0 8px',
-                  fontSize: '17px',
-                  fontWeight: 760,
-                  color: BRAND.text,
-                }}
-              >
-                Keine Berichte gefunden
-              </h3>
-
-              <p
-                style={{
-                  margin: '0 0 22px',
-                  fontSize: '14px',
-                  fontWeight: 560,
-                  color: BRAND.muted,
-                }}
-              >
-                Sobald Einsätze abgeschlossen oder Dateien hochgeladen werden, erscheinen sie hier.
-              </p>
-
-              <a
-                href={`${baseUrl}/einsaetze`}
-                style={{
-                  height: '44px',
-                  padding: '0 16px',
-                  borderRadius: '13px',
-                  border: 'none',
-                  background: BRAND.black,
-                  color: '#FFFFFF',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '9px',
-                  fontSize: '14px',
-                  fontWeight: 760,
-                  fontFamily: pageFont,
-                  textDecoration: 'none',
-                }}
-              >
-                <ChevronRight size={17} />
-                Einsätze öffnen
-              </a>
-            </div>
-          ) : (
-            <>
-              <div className="opc-reports-desktop-table">
-                {filteredReports.map((report, index) => (
-                  <button
-                    key={report.reportId || report.jobId}
-                    type="button"
-                    onClick={() => openReport(report)}
-                    disabled={!report.jobId}
-                    style={{
-                      width: '100%',
-                      display: 'grid',
-                      gridTemplateColumns:
-                        'minmax(260px, 1.1fr) minmax(230px, 1fr) 150px 190px 90px 138px',
-                      alignItems: 'center',
-                      gap: '20px',
-                      padding: '20px 22px',
-                      border: 'none',
-                      borderBottom:
-                        index < filteredReports.length - 1 ? `1px solid #F3F4F6` : 'none',
-                      background: '#FFFFFF',
-                      textAlign: 'left',
-                      cursor: report.jobId ? 'pointer' : 'default',
-                      fontFamily: pageFont,
-                    }}
-                    onMouseEnter={(event) => {
-                      event.currentTarget.style.background = report.jobId ? '#FAFAFA' : '#FFFFFF';
-                    }}
-                    onMouseLeave={(event) => {
-                      event.currentTarget.style.background = '#FFFFFF';
-                    }}
-                  >
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: '15px',
-                          fontWeight: 800,
-                          color: BRAND.text,
-                          letterSpacing: '-0.015em',
-                          marginBottom: '7px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {report.reportTitle || report.jobTitle}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          color: BRAND.muted,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {report.serviceCategory || 'Einsatz'}
-                      </div>
-                    </div>
-
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: '14px',
-                          fontWeight: 760,
-                          color: BRAND.text,
-                          marginBottom: '7px',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {report.billingName}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: 560,
-                          color: BRAND.muted,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {getLocationText(report)}
-                      </div>
-                    </div>
-
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: 760,
-                          color: BRAND.text,
-                          whiteSpace: 'nowrap',
-                          marginBottom: '7px',
-                        }}
-                      >
-                        {formatDate(report.plannedStart)}
-                      </div>
-
-                      <div
-                        style={{
-                          fontSize: '12px',
-                          fontWeight: 560,
-                          color: BRAND.muted,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {report.reportUpdatedAt ? `Aktualisiert ${formatDate(report.reportUpdatedAt)}` : 'Nicht aktualisiert'}
-                      </div>
-                    </div>
-
-                    <FileSummary report={report} />
-
-                    <div
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: 800,
-                        color: BRAND.text,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {formatHours(report.totalHours)}
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                      }}
-                    >
-                      <StatusBadge report={report} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="opc-reports-mobile-cards">
-                {filteredReports.map((report) => (
-                  <button
-                    key={report.reportId || report.jobId}
-                    type="button"
-                    onClick={() => openReport(report)}
-                    disabled={!report.jobId}
-                    style={{
-                      width: '100%',
-                      border: `1px solid ${BRAND.border}`,
-                      borderRadius: '18px',
-                      background: '#FFFFFF',
-                      padding: '16px',
-                      textAlign: 'left',
-                      cursor: report.jobId ? 'pointer' : 'default',
-                      fontFamily: pageFont,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-start',
-                        gap: '12px',
-                        marginBottom: '12px',
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <h3
-                          style={{
-                            margin: '0 0 6px',
-                            fontSize: '15px',
-                            lineHeight: 1.25,
-                            fontWeight: 820,
-                            color: BRAND.text,
-                          }}
-                        >
-                          {report.reportTitle || report.jobTitle}
-                        </h3>
-
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '13px',
-                            fontWeight: 600,
-                            color: BRAND.muted,
-                          }}
-                        >
-                          {report.billingName}
-                        </p>
-                      </div>
-
-                      <StatusBadge report={report} />
-                    </div>
-
-                    <div
-                      style={{
-                        display: 'grid',
-                        gap: '7px',
-                        fontSize: '13px',
-                        fontWeight: 560,
-                        color: BRAND.muted,
-                        marginBottom: '12px',
-                      }}
-                    >
-                      <div>{getLocationText(report)}</div>
-                      <div>{formatDateTime(report.plannedStart)}</div>
-                      <div>{formatHours(report.totalHours)}</div>
-                    </div>
-
-                    <FileSummary report={report} />
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </section>
-
-        {filteredReports.length > 0 && (
-          <div
-            style={{
-              marginTop: '15px',
-              fontSize: '13px',
-              fontWeight: 620,
-              color: BRAND.muted,
-            }}
-          >
+        {filteredReports.length > 0 ? (
+          <div className="opc-reports-count">
             {filteredReports.length} von {reports.length} Berichten
           </div>
-        )}
-
-        <style>{`
-          .opc-reports-mobile-cards {
-            display: none;
-          }
-
-          @media (max-width: 1280px) {
-            .opc-reports-metrics {
-              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            }
-
-            .opc-reports-controls {
-              grid-template-columns: minmax(0, 1fr) 170px 180px !important;
-            }
-
-            .opc-reports-controls a {
-              grid-column: 1 / -1;
-            }
-          }
-
-          @media (max-width: 980px) {
-            .opc-reports-header {
-              flex-direction: column !important;
-              align-items: stretch !important;
-            }
-
-            .opc-reports-top-action {
-              width: 100% !important;
-            }
-
-            .opc-reports-controls {
-              grid-template-columns: 1fr !important;
-            }
-
-            .opc-reports-controls a {
-              grid-column: auto;
-            }
-
-            .opc-reports-desktop-table {
-              display: none !important;
-            }
-
-            .opc-reports-mobile-cards {
-              display: flex !important;
-              flex-direction: column;
-              gap: 14px;
-              padding: 14px;
-            }
-          }
-
-          @media (max-width: 860px) {
-            .opc-reports-metrics {
-              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-              gap: 10px !important;
-            }
-
-            .opc-reports-metrics > * {
-              min-width: 0 !important;
-            }
-          }
-
-          @media (max-width: 640px) {
-            .opc-reports-metrics {
-              grid-template-columns: 1fr !important;
-            }
-          }
-        `}</style>
+        ) : null}
       </div>
+
+      <style>{`
+        .opc-reports-page {
+          padding: 0 0 140px;
+        }
+
+        .opc-reports-page * {
+          box-sizing: border-box;
+        }
+
+        .opc-reports-hero {
+          padding: 24px;
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 18px;
+          margin-bottom: 14px;
+        }
+
+        .opc-reports-hero h1 {
+          margin: 0;
+          color: ${BRAND.text};
+          font-size: 31px;
+          line-height: 1.05;
+          letter-spacing: -0.045em;
+          font-weight: 860;
+        }
+
+        .opc-reports-hero-actions {
+          display: grid;
+          grid-template-columns: repeat(2, max-content);
+          gap: 10px;
+          justify-content: flex-end;
+          align-items: center;
+        }
+
+        .opc-reports-action,
+        .opc-report-action {
+          min-height: 42px;
+          border-radius: 13px;
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 0 14px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          text-decoration: none;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-reports-action.dark,
+        .opc-report-action.dark {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-reports-error {
+          border: 1px solid #FECACA;
+          background: #FEF2F2;
+          color: ${BRAND.red};
+          padding: 14px 16px;
+          border-radius: 16px;
+          font-size: 13px;
+          font-weight: 720;
+          margin-bottom: 14px;
+        }
+
+        .opc-reports-metrics {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+
+        .opc-reports-filter-panel {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          padding: 16px;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 12px;
+          align-items: center;
+          margin-bottom: 18px;
+          overflow: visible;
+        }
+
+        .opc-reports-search {
+          flex: 1 1 260px;
+          min-width: 0;
+          height: 44px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 0 12px;
+          color: ${BRAND.muted};
+        }
+
+        .opc-reports-search input {
+          width: 100%;
+          min-width: 0;
+          border: 0;
+          outline: 0;
+          color: ${BRAND.text};
+          font-size: 14px;
+          font-weight: 650;
+          font-family: ${pageFont};
+        }
+
+
+        .opc-reports-date-picker {
+          position: relative;
+          flex: 0 1 260px;
+          min-width: 220px;
+        }
+
+        .opc-reports-date-picker > button {
+          width: 100%;
+          height: 44px;
+          min-width: 0;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 12px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          font-size: 13px;
+          font-weight: 800;
+          font-family: ${pageFont};
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-reports-date-picker > button span {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .opc-reports-date-picker > button.active {
+          border-color: ${BRAND.black};
+        }
+
+        .opc-reports-date-menu {
+          position: absolute;
+          top: calc(100% + 8px);
+          left: 0;
+          right: 0;
+          z-index: 40;
+          display: grid;
+          gap: 7px;
+          padding: 10px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 16px;
+          background: #FFFFFF;
+          box-shadow: 0 18px 45px rgba(15, 17, 21, 0.13);
+        }
+
+        .opc-reports-date-menu > button,
+        .opc-reports-date-menu-custom > button {
+          width: 100%;
+          height: 40px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 12px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 11px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          text-align: left;
+          cursor: pointer;
+        }
+
+        .opc-reports-date-menu > button.active,
+        .opc-reports-date-menu-custom > button {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+          text-align: center;
+        }
+
+        .opc-reports-date-menu-custom {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 7px;
+          padding-top: 2px;
+        }
+
+        .opc-reports-date-menu-custom input {
+          width: 100%;
+          height: 40px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 12px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 10px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          outline: 0;
+        }
+
+        .opc-reports-select-row {
+          flex: 1 1 390px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          min-width: 0;
+        }
+
+        .opc-reports-date-buttons {
+          flex: 1 1 300px;
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .opc-reports-date-buttons button {
+          height: 44px;
+          min-width: 0;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.muted};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 820;
+          font-family: ${pageFont};
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-reports-date-buttons button.active {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-reports-custom-date-row {
+          flex: 1 1 250px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .opc-reports-custom-date-row input {
+          height: 44px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          outline: 0;
+          width: 100%;
+          min-width: 0;
+        }
+
+        .opc-reports-filter-panel select {
+          flex: 1 1 190px;
+          height: 44px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          outline: 0;
+          width: 100%;
+          min-width: 0;
+        }
+
+        .opc-reports-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .opc-report-card {
+          padding: 18px;
+        }
+
+        .opc-report-card-main {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 18px;
+          align-items: start;
+        }
+
+        .opc-report-card h3 {
+          margin: 0;
+          color: ${BRAND.text};
+          font-size: 20px;
+          line-height: 1.18;
+          letter-spacing: -0.04em;
+          font-weight: 860;
+        }
+
+        .opc-report-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin-top: 9px;
+          color: ${BRAND.muted};
+          font-size: 13px;
+          line-height: 1.35;
+          font-weight: 650;
+        }
+
+        .opc-report-meta span {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .opc-report-summary-text {
+          margin: 10px 0 0;
+          color: ${BRAND.muted};
+          font-size: 13px;
+          line-height: 1.45;
+          font-weight: 620;
+        }
+
+        .opc-report-card-side {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 8px;
+        }
+
+        .opc-report-card-side > span {
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 720;
+          white-space: nowrap;
+        }
+
+        .opc-report-card-footer {
+          margin-top: 14px;
+        }
+
+        .opc-report-file-summary {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .opc-report-card-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 16px;
+        }
+
+        .opc-reports-empty {
+          min-height: 120px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: ${BRAND.muted};
+          font-size: 14px;
+          font-weight: 650;
+          text-align: center;
+          padding: 22px;
+        }
+
+        .opc-reports-count {
+          margin-top: 15px;
+          font-size: 13px;
+          font-weight: 620;
+          color: ${BRAND.muted};
+        }
+
+        @media (max-width: 1280px) {
+          .opc-reports-filter-panel {
+            align-items: stretch;
+          }
+
+          .opc-reports-date-picker,
+          .opc-reports-select-row {
+            flex: 1 1 100%;
+          }
+        }
+
+        @media (max-width: 720px) {
+          .opc-reports-page {
+            padding-bottom: 110px;
+          }
+
+          .opc-reports-hero {
+            grid-template-columns: 1fr;
+            align-items: stretch;
+            padding: 18px;
+          }
+
+          .opc-reports-hero h1 {
+            font-size: 25px;
+          }
+
+          .opc-reports-hero-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            width: 100%;
+          }
+
+          .opc-reports-action {
+            width: 100%;
+          }
+
+          .opc-report-card-actions {
+            flex-direction: column;
+          }
+
+          .opc-report-action {
+            width: 100%;
+          }
+
+          .opc-report-card-main {
+            grid-template-columns: 1fr;
+          }
+
+          .opc-report-card-side {
+            align-items: flex-start;
+          }
+
+          .opc-report-card {
+            padding: 15px;
+          }
+
+          .opc-report-card h3 {
+            font-size: 18px;
+          }
+        }
+      `}</style>
     </MirakaDashboardShell>
   );
 }
-
-const selectStyle: CSSProperties = {
-  width: '100%',
-  height: '48px',
-  padding: '0 13px',
-  borderRadius: '14px',
-  border: `1px solid ${BRAND.border}`,
-  background: '#FFFFFF',
-  color: BRAND.text,
-  outline: 'none',
-  fontSize: '14px',
-  fontWeight: 620,
-  fontFamily: pageFont,
-  boxSizing: 'border-box',
-};
