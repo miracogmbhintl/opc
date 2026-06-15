@@ -91,7 +91,7 @@ const BRAND = {
   faint: '#9CA3AF',
   border: '#E5E7EB',
   borderStrong: '#D1D5DB',
-  black: '#111111',
+  black: '#0F1115',
   card: '#FFFFFF',
   soft: '#FAFAFA',
   green: '#166534',
@@ -121,42 +121,43 @@ const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
 };
 
 const pageFont =
-  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
 
 const cardStyle: CSSProperties = {
   background: BRAND.card,
   border: `1px solid ${BRAND.border}`,
-  borderRadius: '22px',
+  borderRadius: '20px',
   boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
 };
 
 const sectionTitleStyle: CSSProperties = {
   margin: '0 0 6px',
-  fontSize: '20px',
+  fontSize: '18px',
   fontWeight: 820,
-  letterSpacing: '-0.03em',
+  letterSpacing: '-0.035em',
 };
 
 const sectionDescriptionStyle: CSSProperties = {
   margin: 0,
   color: BRAND.muted,
-  fontSize: '14px',
-  fontWeight: 540,
+  fontSize: '13px',
+  fontWeight: 650,
+  lineHeight: 1.35,
 };
 
 const primaryButtonStyle: CSSProperties = {
-  height: '44px',
-  padding: '0 16px',
-  borderRadius: '13px',
-  border: 'none',
+  minHeight: '46px',
+  padding: '0 14px',
+  borderRadius: '14px',
+  border: `1px solid ${BRAND.black}`,
   background: BRAND.black,
   color: '#FFFFFF',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: '9px',
-  fontSize: '14px',
-  fontWeight: 780,
+  gap: '8px',
+  fontSize: '13px',
+  fontWeight: 820,
   fontFamily: pageFont,
   cursor: 'pointer',
 };
@@ -203,7 +204,7 @@ function FieldLabel({ children }: { children: ReactNode }) {
         marginBottom: '8px',
         color: BRAND.text,
         fontSize: '13px',
-        fontWeight: 760,
+        fontWeight: 820,
         letterSpacing: '-0.01em',
       }}
     >
@@ -235,7 +236,7 @@ function TextInput({
       style={{
         width: '100%',
         height: '46px',
-        borderRadius: '13px',
+        borderRadius: '14px',
         border: `1px solid ${BRAND.border}`,
         background: disabled ? '#F9FAFB' : '#FFFFFF',
         color: disabled ? BRAND.faint : BRAND.text,
@@ -243,7 +244,7 @@ function TextInput({
         outline: 'none',
         boxSizing: 'border-box',
         fontSize: '14px',
-        fontWeight: 560,
+        fontWeight: 650,
         fontFamily: pageFont,
       }}
       onFocus={(event) => {
@@ -272,7 +273,7 @@ function SelectInput({
       style={{
         width: '100%',
         height: '46px',
-        borderRadius: '13px',
+        borderRadius: '14px',
         border: `1px solid ${BRAND.border}`,
         background: '#FFFFFF',
         color: BRAND.text,
@@ -280,7 +281,7 @@ function SelectInput({
         outline: 'none',
         boxSizing: 'border-box',
         fontSize: '14px',
-        fontWeight: 560,
+        fontWeight: 760,
         fontFamily: pageFont,
       }}
       onFocus={(event) => {
@@ -315,8 +316,8 @@ function Toggle({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '18px',
-        padding: '16px',
+        gap: '12px',
+        padding: '15px 16px',
         borderRadius: '16px',
         border: `1px solid ${BRAND.border}`,
         background: '#FFFFFF',
@@ -331,7 +332,7 @@ function Toggle({
             display: 'block',
             color: BRAND.text,
             fontSize: '14px',
-            fontWeight: 760,
+            fontWeight: 820,
             marginBottom: '4px',
           }}
         >
@@ -343,7 +344,7 @@ function Toggle({
             display: 'block',
             color: BRAND.muted,
             fontSize: '13px',
-            fontWeight: 520,
+            fontWeight: 650,
             lineHeight: 1.45,
           }}
         >
@@ -393,7 +394,7 @@ function StatusMessage({
   return (
     <div
       style={{
-        marginBottom: '18px',
+        marginBottom: '14px',
         padding: '13px 15px',
         borderRadius: '14px',
         border: `1px solid ${isSuccess ? '#BBF7D0' : '#FCA5A5'}`,
@@ -683,8 +684,8 @@ function GoogleCalendarSystemPanel() {
   return (
     <div
       style={{
-        marginTop: '22px',
-        padding: '20px',
+        marginTop: '18px',
+        padding: '16px',
         borderRadius: '18px',
         border: `1px solid ${BRAND.border}`,
         background: '#FAFAFA',
@@ -1292,6 +1293,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
 
   return (
     <div
+      className="opc-settings-page"
       style={{
         width: '100%',
         minHeight: '100%',
@@ -1305,8 +1307,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          gap: '16px',
-          marginBottom: '22px',
+          gap: '12px',
+          marginBottom: '14px',
         }}
       >
         {tabs.map((tab) => {
@@ -1318,40 +1320,75 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
             <button
               key={tab.id}
               type="button"
+              className={isActive ? 'opc-settings-tab is-active' : 'opc-settings-tab'}
               onClick={() => setActiveTab(tab.id)}
               style={{
                 gridColumn: isSystemTab && tabs.length % 2 === 1 ? '1 / -1' : undefined,
-                minHeight: '112px',
-                padding: '22px 18px',
-                borderRadius: '28px',
+                minHeight: '96px',
+                padding: '18px',
+                borderRadius: '20px',
                 border: `1px solid ${isActive ? BRAND.black : BRAND.border}`,
                 background: isActive ? BRAND.black : '#FFFFFF',
                 color: isActive ? '#FFFFFF' : BRAND.text,
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
+                justifyContent: 'space-between',
                 gap: '14px',
                 fontFamily: pageFont,
-                fontSize: '18px',
-                fontWeight: 800,
+                fontSize: '13px',
+                fontWeight: 820,
                 cursor: 'pointer',
-                boxShadow: isActive ? '0 16px 40px rgba(0,0,0,0.14)' : '0 1px 2px rgba(15, 17, 21, 0.04)',
+                boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+                textAlign: 'left',
               }}
             >
               <span
                 style={{
-                  width: '44px',
-                  height: '44px',
-                  borderRadius: '14px',
-                  background: isActive ? 'rgba(255,255,255,0.12)' : '#F8F8F8',
+                  display: 'grid',
+                  gap: '10px',
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: '25px',
+                    lineHeight: 1,
+                    fontWeight: 820,
+                    letterSpacing: '-0.04em',
+                    color: isActive ? '#FFFFFF' : BRAND.text,
+                  }}
+                >
+                  {tab.label}
+                </span>
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: '13px',
+                    fontWeight: 720,
+                    color: isActive ? 'rgba(255, 255, 255, 0.72)' : BRAND.muted,
+                  }}
+                >
+                  Einstellungen
+                </span>
+              </span>
+
+              <span
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '13px',
+                  border: `1px solid ${isActive ? 'rgba(255, 255, 255, 0.28)' : BRAND.border}`,
+                  background: isActive ? '#FFFFFF' : '#FAFAFA',
+                  color: BRAND.black,
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  flexShrink: 0,
                 }}
               >
                 <Icon size={20} />
               </span>
-              {tab.label}
             </button>
           );
         })}
@@ -1361,15 +1398,15 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
       <StatusMessage type="success" message={success} />
 
       {activeTab === 'account' && (
-        <form onSubmit={handleSaveAccount} style={{ ...cardStyle, padding: '26px' }}>
-          <div style={{ marginBottom: '28px' }}>
+        <form onSubmit={handleSaveAccount} style={{ ...cardStyle, padding: '18px' }}>
+          <div style={{ marginBottom: '20px' }}>
             <h2 style={sectionTitleStyle}>Konto</h2>
             <p style={sectionDescriptionStyle}>
               Persönliche Einstellungen für dein Benutzerkonto.
             </p>
           </div>
 
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <FieldLabel>Profilbild</FieldLabel>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -1471,7 +1508,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
             </div>
           </div>
 
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <FieldLabel>Firma</FieldLabel>
             <TextInput value={company} onChange={setCompany} placeholder="Firmenname eingeben" />
           </div>
@@ -1480,10 +1517,10 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
             className="opc-settings-grid-3"
             style={{
               borderTop: `1px solid ${BRAND.border}`,
-              paddingTop: '24px',
+              paddingTop: '18px',
               display: 'grid',
               gridTemplateColumns: '1fr 1fr 1fr',
-              gap: '18px',
+              gap: '12px',
             }}
           >
             <div>
@@ -1550,8 +1587,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
       )}
 
       {activeTab === 'google' && (
-        <section style={{ ...cardStyle, padding: '26px' }}>
-          <div style={{ marginBottom: '24px' }}>
+        <section style={{ ...cardStyle, padding: '18px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <h2 style={sectionTitleStyle}>Google Kalender</h2>
             <p style={sectionDescriptionStyle}>
               Jeder Benutzer verbindet sein eigenes Google Konto. Die Verbindung wird pro Benutzer gespeichert und später für Kalender-Synchronisation, Termine und Google Meet verwendet.
@@ -1563,8 +1600,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
       )}
 
       {activeTab === 'notifications' && (
-        <section style={{ ...cardStyle, padding: '26px' }}>
-          <div style={{ marginBottom: '24px' }}>
+        <section style={{ ...cardStyle, padding: '18px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <h2 style={sectionTitleStyle}>Benachrichtigungen</h2>
             <p style={sectionDescriptionStyle}>
               Lege fest, welche Updates du per E-Mail oder im System erhalten möchtest.
@@ -1642,8 +1679,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
       )}
 
       {activeTab === 'security' && (
-        <section style={{ ...cardStyle, padding: '26px' }}>
-          <div style={{ marginBottom: '24px' }}>
+        <section style={{ ...cardStyle, padding: '18px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <h2 style={sectionTitleStyle}>Sicherheit</h2>
             <p style={sectionDescriptionStyle}>
               Verwalte Passwort und Sicherheitseinstellungen für dein Konto.
@@ -1719,8 +1756,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
       )}
 
       {activeTab === 'system' && isOwner && (
-        <section style={{ ...cardStyle, padding: '26px' }}>
-          <div style={{ marginBottom: '24px' }}>
+        <section style={{ ...cardStyle, padding: '18px' }}>
+          <div style={{ marginBottom: '14px' }}>
             <h2 style={sectionTitleStyle}>System</h2>
             <p style={sectionDescriptionStyle}>
               Owner-Einstellungen für Portalverhalten, Standards und interne Abläufe.
@@ -1732,7 +1769,7 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
             style={{
               display: 'grid',
               gridTemplateColumns: '1fr 1fr',
-              gap: '18px',
+              gap: '12px',
               marginBottom: '20px',
             }}
           >
@@ -1828,6 +1865,25 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
       )}
 
       <style>{`
+        .opc-settings-page,
+        .opc-settings-page * {
+          font-family: ${pageFont};
+        }
+
+        .opc-settings-tabs button:not(.is-active):hover {
+          background: #FAFAFA !important;
+        }
+
+        .opc-settings-tabs button.is-active:hover {
+          background: ${BRAND.black} !important;
+        }
+
+        .opc-settings-tab {
+          line-height: 1.15;
+          -webkit-font-smoothing: antialiased;
+          text-rendering: geometricPrecision;
+        }
+
         @media (max-width: 980px) {
           .opc-settings-tabs {
             grid-template-columns: 1fr 1fr !important;
@@ -1841,7 +1897,26 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
         @media (max-width: 680px) {
           .opc-settings-tabs {
             grid-template-columns: 1fr 1fr !important;
-            gap: 14px !important;
+            gap: 12px !important;
+          }
+
+          .opc-settings-tabs button {
+            min-height: 88px !important;
+            padding: 15px !important;
+            border-radius: 18px !important;
+          }
+
+          .opc-settings-tabs button > span:first-child > span:first-child {
+            font-size: 22px !important;
+          }
+
+          .opc-settings-tabs button > span:first-child > span:last-child {
+            font-size: 12px !important;
+          }
+
+          .opc-settings-tabs button > span:last-child {
+            width: 34px !important;
+            height: 34px !important;
           }
 
           .opc-settings-grid-2,
@@ -1857,8 +1932,8 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
 const twoColumnGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: '1fr 1fr',
-  gap: '18px',
-  marginBottom: '18px',
+  gap: '12px',
+  marginBottom: '14px',
 };
 
 const buttonRowStyle: CSSProperties = {

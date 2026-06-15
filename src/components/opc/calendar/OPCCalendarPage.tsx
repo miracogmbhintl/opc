@@ -16,7 +16,6 @@ import {
   CalendarDays,
   Clock3,
   Loader2,
-  MapPin,
   Pencil,
   Plus,
   RefreshCcw,
@@ -130,7 +129,8 @@ const BRAND = {
   green: '#166534',
 };
 
-const pageFont = 'Inter, Helvetica, Arial, sans-serif';
+const pageFont =
+  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Entwurf',
@@ -157,99 +157,96 @@ const cardStyle: CSSProperties = {
   background: BRAND.card,
   border: `1px solid ${BRAND.border}`,
   borderRadius: '20px',
-  boxShadow: '0 12px 32px rgba(15, 17, 21, 0.04)',
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
 };
 
 const selectStyle: CSSProperties = {
   width: '100%',
-  height: '48px',
+  height: '46px',
   borderRadius: '14px',
   border: `1px solid ${BRAND.border}`,
   background: '#FFFFFF',
   color: BRAND.text,
   outline: 'none',
-  padding: '0 13px',
-  fontSize: '14px',
-  fontWeight: 650,
+  padding: '0 12px',
+  fontSize: '13px',
+  fontWeight: 760,
   fontFamily: pageFont,
   boxSizing: 'border-box',
 };
 
 const blackButtonStyle: CSSProperties = {
   width: '100%',
-  height: '48px',
-  borderRadius: '16px',
+  minHeight: '46px',
+  borderRadius: '14px',
   border: `1px solid ${BRAND.black}`,
-  background: 'linear-gradient(180deg, #171A20 0%, #0F1115 100%)',
+  background: BRAND.black,
   color: '#FFFFFF',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: '9px',
-  fontSize: '14px',
-  fontWeight: 800,
+  gap: '8px',
+  padding: '0 12px',
+  fontSize: '13px',
+  fontWeight: 820,
   fontFamily: pageFont,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
   boxSizing: 'border-box',
   cursor: 'pointer',
-  boxShadow: '0 10px 24px rgba(15, 17, 21, 0.14)',
-  transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
 };
 
 const secondaryButtonStyle: CSSProperties = {
   width: '100%',
-  height: '48px',
-  borderRadius: '16px',
+  minHeight: '46px',
+  borderRadius: '14px',
   border: `1px solid ${BRAND.border}`,
-  background: 'linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%)',
+  background: '#FFFFFF',
   color: BRAND.text,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: '9px',
-  fontSize: '14px',
-  fontWeight: 760,
+  gap: '8px',
+  padding: '0 12px',
+  fontSize: '13px',
+  fontWeight: 820,
   fontFamily: pageFont,
   textDecoration: 'none',
   whiteSpace: 'nowrap',
   boxSizing: 'border-box',
   cursor: 'pointer',
-  boxShadow: '0 8px 20px rgba(15, 17, 21, 0.045)',
-  transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
 };
 
 const compactButtonStyle: CSSProperties = {
-  height: '44px',
-  borderRadius: '15px',
+  width: '100%',
+  minHeight: '46px',
+  borderRadius: '14px',
   border: `1px solid ${BRAND.border}`,
-  background: 'linear-gradient(180deg, #FFFFFF 0%, #FAFAFA 100%)',
+  background: '#FFFFFF',
   color: BRAND.text,
-  padding: '0 20px',
+  padding: '0 12px',
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
   gap: '7px',
-  fontSize: '14px',
-  fontWeight: 800,
+  fontSize: '13px',
+  fontWeight: 820,
   fontFamily: pageFont,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
-  boxShadow: '0 8px 20px rgba(15, 17, 21, 0.045)',
-  transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+  boxSizing: 'border-box',
 };
 
 const compactBlackButtonStyle: CSSProperties = {
   ...compactButtonStyle,
   border: `1px solid ${BRAND.black}`,
-  background: 'linear-gradient(180deg, #171A20 0%, #0F1115 100%)',
+  background: BRAND.black,
   color: '#FFFFFF',
-  boxShadow: '0 10px 24px rgba(15, 17, 21, 0.14)',
 };
 
 const inputWithIconStyle: CSSProperties = {
   width: '100%',
-  height: '48px',
+  height: '46px',
   padding: '0 14px 0 42px',
   borderRadius: '14px',
   border: `1px solid ${BRAND.border}`,
@@ -257,7 +254,7 @@ const inputWithIconStyle: CSSProperties = {
   color: BRAND.text,
   outline: 'none',
   fontSize: '14px',
-  fontWeight: 560,
+  fontWeight: 650,
   fontFamily: pageFont,
   boxSizing: 'border-box',
 };
@@ -421,24 +418,14 @@ function MetricCard({
   label,
   value,
   icon,
-  tone = 'neutral',
 }: {
   label: string;
   value: number;
   icon: ReactNode;
-  tone?: 'neutral' | 'danger' | 'warning' | 'success';
 }) {
-  const valueColor =
-    tone === 'danger'
-      ? BRAND.red
-      : tone === 'warning'
-        ? BRAND.amber
-        : tone === 'success'
-          ? BRAND.green
-          : BRAND.text;
-
   return (
     <div
+      className="opc-calendar-metric-card"
       style={{
         ...cardStyle,
         minHeight: '96px',
@@ -449,14 +436,15 @@ function MetricCard({
         gap: '14px',
       }}
     >
-      <div>
+      <div style={{ minWidth: 0 }}>
         <div
+          className="opc-calendar-metric-value"
           style={{
-            fontSize: '24px',
+            fontSize: '25px',
             lineHeight: 1,
             fontWeight: 820,
             letterSpacing: '-0.04em',
-            color: valueColor,
+            color: BRAND.text,
             marginBottom: '10px',
           }}
         >
@@ -464,6 +452,7 @@ function MetricCard({
         </div>
 
         <div
+          className="opc-calendar-metric-label"
           style={{
             fontSize: '13px',
             fontWeight: 720,
@@ -475,10 +464,11 @@ function MetricCard({
       </div>
 
       <div
+        className="opc-calendar-metric-icon"
         style={{
-          width: '36px',
-          height: '36px',
-          borderRadius: '12px',
+          width: '38px',
+          height: '38px',
+          borderRadius: '13px',
           border: `1px solid ${BRAND.border}`,
           background: '#FAFAFA',
           display: 'flex',
@@ -1969,43 +1959,33 @@ export default function OPCCalendarPage() {
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-          gap: '14px',
-          marginBottom: '18px',
+          gap: '12px',
+          marginBottom: '14px',
         }}
       >
-        <MetricCard value={metrics.today} label="Heutige Einträge" icon={<CalendarDays size={17} />} />
-        <MetricCard value={metrics.pending} label="Offene Einladungen" icon={<Clock3 size={17} />} tone="warning" />
+        <MetricCard value={metrics.today} label="Heute" icon={<CalendarDays size={17} />} />
+        <MetricCard value={metrics.pending} label="Offene Einladungen" icon={<Clock3 size={17} />} />
       </div>
 
-      <section style={{ ...cardStyle, padding: '16px', marginBottom: '16px' }}>
-        <div
-          className={`opc-requests-controls ${isAdmin ? 'is-admin' : 'is-basic'}`}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: isAdmin
-              ? 'minmax(260px, 1.6fr) repeat(6, minmax(130px, 1fr))'
-              : 'minmax(260px, 1.6fr) repeat(4, minmax(130px, 1fr))',
-            gap: '10px',
-            alignItems: 'center',
-          }}
-        >
-          <div className="opc-calendar-search-control" style={{ position: 'relative', minWidth: 0 }}>
-            <Search size={17} style={searchIconStyle} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Suche nach Einsatz, Standort, Kunde oder Notiz"
-              style={inputWithIconStyle}
-              onFocus={(event) => {
-                event.currentTarget.style.borderColor = BRAND.black;
-              }}
-              onBlur={(event) => {
-                event.currentTarget.style.borderColor = BRAND.border;
-              }}
-            />
-          </div>
+      <section className="opc-calendar-filter-panel" style={{ ...cardStyle, padding: '16px', marginBottom: '18px' }}>
+        <div className="opc-calendar-search-control" style={{ position: 'relative', minWidth: 0 }}>
+          <Search size={17} style={searchIconStyle} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Kalendereinträge suchen..."
+            style={inputWithIconStyle}
+            onFocus={(event) => {
+              event.currentTarget.style.borderColor = BRAND.black;
+            }}
+            onBlur={(event) => {
+              event.currentTarget.style.borderColor = BRAND.border;
+            }}
+          />
+        </div>
 
+        <div className={`opc-calendar-action-row ${isAdmin ? 'is-admin' : 'is-basic'}`}>
           {isAdmin && (
             <button
               type="button"
@@ -2024,8 +2004,8 @@ export default function OPCCalendarPage() {
                 cursor: defaultCalendarId ? 'pointer' : 'not-allowed',
               }}
             >
-              <Plus size={17} />
-              Neuer Eintrag
+              <Plus size={16} />
+              <span>Neuer Eintrag</span>
             </button>
           )}
 
@@ -2041,8 +2021,8 @@ export default function OPCCalendarPage() {
                 cursor: saving ? 'wait' : 'pointer',
               }}
             >
-              <Video size={17} />
-              Google Meet
+              <Video size={16} />
+              <span>Google Meet</span>
             </button>
           )}
 
@@ -2057,10 +2037,12 @@ export default function OPCCalendarPage() {
               cursor: isRefreshing ? 'wait' : 'pointer',
             }}
           >
-            {isRefreshing ? <Loader2 size={17} className="spin" /> : <RefreshCcw size={17} />}
-            {isRefreshing ? 'Lädt' : 'Neu laden'}
+            {isRefreshing ? <Loader2 size={16} className="spin" /> : <RefreshCcw size={16} />}
+            <span>{isRefreshing ? 'Lädt' : 'Neu laden'}</span>
           </button>
+        </div>
 
+        <div className="opc-calendar-select-row">
           <select value={staffFilter} onChange={(event) => setStaffFilter(event.target.value)} style={selectStyle}>
             <option value="all">Alle Mitarbeiter</option>
             {staff.map((person) => (
@@ -2107,7 +2089,9 @@ export default function OPCCalendarPage() {
 
       <section style={{ ...cardStyle, overflow: 'hidden' }}>
         <div className="opc-calendar-custom-controls">
-          <div className="opc-calendar-control-group opc-calendar-nav-group">
+          <div className="opc-calendar-title">{calendarTitle || 'Kalender'}</div>
+
+          <div className="opc-calendar-control-row opc-calendar-nav-row">
             <button type="button" onClick={goToday} style={compactButtonStyle}>
               Heute
             </button>
@@ -2121,9 +2105,7 @@ export default function OPCCalendarPage() {
             </button>
           </div>
 
-          <div className="opc-calendar-title">{calendarTitle || 'Kalender'}</div>
-
-          <div className="opc-calendar-control-group opc-calendar-view-group right">
+          <div className="opc-calendar-control-row opc-calendar-view-row">
             <button type="button" onClick={() => changeView('dayGridMonth')} style={viewMode === 'dayGridMonth' ? compactBlackButtonStyle : compactButtonStyle}>
               Monat
             </button>
@@ -2226,6 +2208,10 @@ export default function OPCCalendarPage() {
       )}
 
       <style>{`
+        .opc-calendar-page * {
+          box-sizing: border-box;
+        }
+
         .spin {
           animation: opc-calendar-spin 0.9s linear infinite;
         }
@@ -2234,69 +2220,102 @@ export default function OPCCalendarPage() {
           to { transform: rotate(360deg); }
         }
 
-        .opc-calendar-actions-row {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 10px;
-          min-width: 0;
+        .opc-calendar-filter-panel {
           width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+          overflow: visible;
+        }
+
+        .opc-calendar-search-control {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .opc-calendar-search-control input::placeholder {
+          color: #9CA3AF;
+          font-weight: 700;
+        }
+
+        .opc-calendar-action-row {
+          width: 100%;
+          display: grid;
+          gap: 8px;
+          align-items: stretch;
+        }
+
+        .opc-calendar-action-row.is-admin {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .opc-calendar-action-row.is-basic {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .opc-calendar-select-row {
+          width: 100%;
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
         }
 
         .opc-calendar-new-entry-button,
         .opc-calendar-quick-meet-button,
-        .opc-calendar-refresh-button {
+        .opc-calendar-refresh-button,
+        .opc-calendar-control-row button {
           width: 100% !important;
           min-width: 0 !important;
           max-width: none !important;
+          min-height: 46px !important;
+          border-radius: 14px !important;
           padding: 0 12px !important;
-          border-radius: 16px !important;
+          font-size: 13px !important;
+          font-weight: 820 !important;
+          letter-spacing: -0.01em;
+        }
+
+        .opc-calendar-new-entry-button span,
+        .opc-calendar-quick-meet-button span,
+        .opc-calendar-refresh-button span {
+          display: inline-block;
+          overflow: hidden;
+          text-overflow: ellipsis;
           white-space: nowrap;
+          min-width: 0;
         }
 
         .opc-calendar-new-entry-button:hover,
         .opc-calendar-quick-meet-button:hover,
         .opc-calendar-refresh-button:hover,
-        .opc-requests-controls button:hover,
-        .opc-calendar-custom-controls button:hover {
-          transform: translateY(-1px);
-          box-shadow: 0 12px 26px rgba(15, 17, 21, 0.12) !important;
-        }
-
-        .opc-calendar-new-entry-button:active,
-        .opc-calendar-quick-meet-button:active,
-        .opc-calendar-refresh-button:active,
-        .opc-requests-controls button:active,
-        .opc-calendar-custom-controls button:active {
-          transform: translateY(0);
-          box-shadow: 0 6px 14px rgba(15, 17, 21, 0.08) !important;
+        .opc-calendar-control-row button:hover {
+          background-image: none !important;
         }
 
         .opc-calendar-focus-strip {
-          display: flex;
-          gap: 8px;
-          overflow-x: auto;
-          margin-bottom: 12px;
-          padding-bottom: 2px;
-          scrollbar-width: thin;
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 14px;
         }
 
         .opc-calendar-focus-card {
-          min-width: 280px;
-          max-width: 420px;
-          height: 48px;
+          min-width: 0;
+          min-height: 96px;
           border: 1px solid ${BRAND.border};
-          border-radius: 16px;
+          border-radius: 20px;
           background: #FFFFFF;
-          padding: 0 12px;
+          padding: 14px 16px;
           text-align: left;
           cursor: pointer;
           font-family: ${pageFont};
-          box-shadow: 0 8px 18px rgba(15, 17, 21, 0.03);
+          box-shadow: 0 1px 2px rgba(15, 17, 21, 0.04);
           display: grid;
-          grid-template-columns: auto minmax(0, 1fr) auto auto;
-          gap: 10px;
-          align-items: center;
-          flex: 1;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 5px;
+          align-content: start;
         }
 
         .opc-calendar-focus-card:hover {
@@ -2314,6 +2333,7 @@ export default function OPCCalendarPage() {
 
         .opc-focus-title {
           font-size: 13px;
+          line-height: 1.2;
           font-weight: 820;
           color: ${BRAND.text};
           overflow: hidden;
@@ -2323,48 +2343,26 @@ export default function OPCCalendarPage() {
 
         .opc-focus-meta {
           font-size: 12px;
+          line-height: 1.25;
           font-weight: 650;
           color: ${BRAND.muted};
           white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .opc-calendar-focus-card > span:last-child {
+          margin-top: 4px;
+          width: 100%;
         }
 
         .opc-calendar-custom-controls {
           padding: 18px 20px;
           border-bottom: 1px solid ${BRAND.border};
           display: grid;
-          grid-template-columns: auto minmax(0, 1fr) auto;
-          align-items: center;
-          gap: 14px;
+          grid-template-columns: 1fr;
+          gap: 12px;
           background: #FFFFFF;
-        }
-
-        .opc-calendar-control-group {
-          display: flex;
-          gap: 10px;
-          flex-wrap: nowrap;
-          align-items: center;
-          min-width: 0;
-          background: transparent !important;
-          border: 0 !important;
-          box-shadow: none !important;
-          padding: 0 !important;
-          border-radius: 0 !important;
-        }
-
-        .opc-calendar-control-group.right {
-          justify-content: flex-end;
-        }
-
-        .opc-calendar-nav-group button {
-          min-width: 58px;
-        }
-
-        .opc-calendar-nav-group button:first-child {
-          min-width: 108px;
-        }
-
-        .opc-calendar-view-group button {
-          min-width: 104px;
         }
 
         .opc-calendar-title {
@@ -2379,9 +2377,17 @@ export default function OPCCalendarPage() {
           text-overflow: ellipsis;
         }
 
+        .opc-calendar-control-row {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 10px;
+          align-items: stretch;
+          width: 100%;
+        }
+
         .opc-calendar-fullcalendar-wrap {
-          height: min(760px, calc(100vh - 330px));
-          min-height: 560px;
+          height: min(720px, calc(100vh - 330px));
+          min-height: 520px;
           overflow: hidden;
           display: flex;
           flex-direction: column;
@@ -2475,163 +2481,6 @@ export default function OPCCalendarPage() {
           margin-top: 1px;
         }
 
-        @media (max-width: 1500px) {
-          .opc-requests-controls.is-admin {
-            grid-template-columns: minmax(240px, 1.4fr) repeat(6, minmax(118px, 1fr)) !important;
-          }
-
-          .opc-requests-controls.is-basic {
-            grid-template-columns: minmax(240px, 1.4fr) repeat(4, minmax(118px, 1fr)) !important;
-          }
-
-          .opc-calendar-view-group button {
-            min-width: 92px;
-          }
-        }
-
-        @media (max-width: 1280px) {
-          .opc-requests-metrics {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .opc-requests-controls.is-admin,
-          .opc-requests-controls.is-basic {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .opc-calendar-search-control {
-            grid-column: 1 / -1;
-          }
-
-          .opc-calendar-custom-controls {
-            grid-template-columns: 1fr;
-            gap: 12px;
-          }
-
-          .opc-calendar-title {
-            order: -1;
-            text-align: center;
-          }
-
-          .opc-calendar-control-group,
-          .opc-calendar-control-group.right {
-            justify-content: center;
-          }
-        }
-
-        @media (max-width: 860px) {
-          .opc-requests-metrics {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            gap: 10px !important;
-          }
-
-          .opc-requests-metrics > * {
-            min-width: 0 !important;
-          }
-        }
-
-        @media (max-width: 980px) {
-          .opc-requests-controls.is-admin,
-          .opc-requests-controls.is-basic {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .opc-calendar-search-control {
-            grid-column: 1 / -1;
-          }
-
-          .opc-calendar-new-entry-button,
-          .opc-calendar-quick-meet-button,
-          .opc-calendar-refresh-button {
-            height: 54px !important;
-            font-size: 13px !important;
-            padding: 0 8px !important;
-          }
-
-          .opc-calendar-new-entry-button svg,
-          .opc-calendar-quick-meet-button svg,
-          .opc-calendar-refresh-button svg {
-            width: 16px;
-            height: 16px;
-          }
-
-          .opc-calendar-control-group {
-            width: 100%;
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 8px;
-          }
-
-          .opc-calendar-control-group button,
-          .opc-calendar-nav-group button,
-          .opc-calendar-nav-group button:first-child,
-          .opc-calendar-view-group button {
-            width: 100%;
-            min-width: 0;
-            padding-left: 10px;
-            padding-right: 10px;
-          }
-
-          .opc-calendar-focus-card {
-            min-width: 300px;
-            grid-template-columns: auto minmax(0, 1fr);
-            height: auto;
-            min-height: 58px;
-            padding: 10px 12px;
-          }
-
-          .opc-focus-meta {
-            display: none;
-          }
-        }
-
-
-        @media (max-width: 760px) {
-          .opc-modal-backdrop form {
-            padding: 20px !important;
-            border-radius: 22px !important;
-          }
-
-          .opc-modal-backdrop form > div {
-            grid-template-columns: 1fr !important;
-          }
-        }
-
-
-        @media (max-width: 760px) {
-          .opc-calendar-page [role="dialog"] > div {
-            max-width: calc(100vw - 24px) !important;
-          }
-
-          .opc-calendar-page [role="dialog"] a,
-          .opc-calendar-page [role="dialog"] button {
-            min-width: 0;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .opc-requests-metrics {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .opc-requests-controls.is-admin,
-          .opc-requests-controls.is-basic {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-
-          .opc-calendar-search-control {
-            grid-column: 1 / -1;
-          }
-
-          .opc-calendar-custom-controls {
-            padding: 14px;
-          }
-
-          .opc-calendar-title {
-            font-size: 17px;
-          }
-        }
-
         .opc-quick-view-meet-actions {
           display: flex;
           flex-wrap: wrap;
@@ -2698,6 +2547,135 @@ export default function OPCCalendarPage() {
           font-weight: 720;
         }
 
+        @media (max-width: 1280px) {
+          .opc-calendar-focus-strip {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 980px) {
+          .opc-calendar-action-row.is-admin {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-calendar-refresh-button {
+            grid-column: 1 / -1;
+          }
+
+          .opc-calendar-select-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-calendar-select-row select:first-child {
+            grid-column: 1 / -1;
+          }
+
+          .opc-calendar-fullcalendar-wrap {
+            height: min(660px, calc(100vh - 300px));
+            min-height: 500px;
+          }
+        }
+
+        @media (max-width: 760px) {
+          .opc-modal-backdrop form {
+            padding: 20px !important;
+            border-radius: 22px !important;
+          }
+
+          .opc-modal-backdrop form > div {
+            grid-template-columns: 1fr !important;
+          }
+
+          .opc-calendar-page [role="dialog"] > div {
+            max-width: calc(100vw - 24px) !important;
+          }
+
+          .opc-calendar-page [role="dialog"] a,
+          .opc-calendar-page [role="dialog"] button {
+            min-width: 0;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .opc-requests-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 12px !important;
+          }
+
+          .opc-calendar-metric-card {
+            min-height: 86px !important;
+            padding: 15px !important;
+          }
+
+          .opc-calendar-metric-value {
+            font-size: 23px !important;
+          }
+
+          .opc-calendar-metric-label {
+            font-size: 12px !important;
+            line-height: 1.2;
+          }
+
+          .opc-calendar-metric-icon {
+            width: 34px !important;
+            height: 34px !important;
+          }
+
+          .opc-calendar-action-row.is-admin {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-calendar-refresh-button {
+            grid-column: 1 / -1;
+          }
+
+          .opc-calendar-select-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-calendar-select-row select:first-child {
+            grid-column: 1 / -1;
+          }
+
+          .opc-calendar-new-entry-button,
+          .opc-calendar-quick-meet-button,
+          .opc-calendar-refresh-button,
+          .opc-calendar-control-row button {
+            min-height: 46px !important;
+            font-size: 12px !important;
+            padding: 0 8px !important;
+          }
+
+          .opc-calendar-focus-strip {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+          }
+
+          .opc-calendar-focus-card {
+            min-height: 92px;
+            padding: 13px 14px;
+          }
+
+          .opc-focus-title {
+            font-size: 12px;
+          }
+
+          .opc-focus-meta {
+            font-size: 11px;
+          }
+
+          .opc-calendar-custom-controls {
+            padding: 14px;
+          }
+
+          .opc-calendar-title {
+            font-size: 17px;
+          }
+
+          .opc-calendar-control-row {
+            gap: 8px;
+          }
+        }
       `}</style>
     </div>
   );

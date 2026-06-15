@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { safeNavigate } from '../lib/opc-navigation-guard';
 
 const LOGO_URL =
   'https://cdn.prod.website-files.com/6944470386300e196e5fc347/6949534529e8342842456097_REGULAR%20COLOR%20ORANGE%20PRO%20CLEAN%20LOGO%20ORIGINAL.png';
@@ -12,6 +13,7 @@ const supabase = createClient(
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     },
   }
 );
@@ -63,11 +65,13 @@ export default function OPCLogin() {
         throw new Error(result?.error || 'Server-Session konnte nicht gesetzt werden.');
       }
 
+      localStorage.removeItem('mco_logged_out');
+      sessionStorage.removeItem('mco_logged_out');
       localStorage.setItem('opc_auth_token', data.session.access_token);
       localStorage.setItem('opc_user_id', data.user.id);
       localStorage.setItem('opc_user_email', data.user.email || email.trim().toLowerCase());
 
-      window.location.href = '/dashboard';
+      safeNavigate('/dashboard');
     } catch (err: any) {
       setError(err?.message || 'Login fehlgeschlagen.');
       setLoading(false);

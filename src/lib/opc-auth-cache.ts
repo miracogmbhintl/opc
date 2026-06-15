@@ -1,13 +1,16 @@
 import { supabase, type UserProfile, type UserRole } from './supabase';
 
 /**
- * Versioned cache key. The previous cache could keep an old admin/owner role
- * after a staff account was changed to employee. Bumping the key forces a fresh
- * permission read after this patch is deployed.
+ * Persistent OPC profile cache.
+ *
+ * Staff should stay logged in on mobile. Supabase already persists the session;
+ * this cache keeps the normalized OPC role/profile available across browser
+ * restarts and temporary network outages. It is only profile metadata, not the
+ * Supabase session itself.
  */
-const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v3';
-const LEGACY_AUTH_CACHE_KEYS = ['opc:auth-profile-cache', 'opc:auth-profile-cache:v2'];
-const AUTH_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v4:persistent';
+const LEGACY_AUTH_CACHE_KEYS = ['opc:auth-profile-cache', 'opc:auth-profile-cache:v2', 'opc:auth-profile-cache:v3'];
+const AUTH_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 type AuthCachePayload = {
   savedAt: number;
@@ -27,9 +30,14 @@ type StaffRoleRow = {
   can_view_all_jobs?: boolean | null;
 };
 
+function isBrowser() {
+  return typeof window !== 'undefined';
+}
+
 function normalizeRole(value: unknown): UserRole {
   const role = String(value || '').toLowerCase().trim();
 
+  if (role === 'godmode') return 'owner';
   if (role === 'owner') return 'owner';
   if (role === 'admin') return 'admin';
   if (role === 'dispatch' || role === 'dispatcher' || role === 'disposition') return 'dispatch';
@@ -59,8 +67,23 @@ function normalizeStaffRole(row: StaffRoleRow | null | undefined): UserRole {
   return 'employee';
 }
 
+function isNetworkLikeError(error: unknown) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return (
+    message.includes('failed to fetch') ||
+    message.includes('networkerror') ||
+    message.includes('network request failed') ||
+    message.includes('fetch failed') ||
+    message.includes('offline') ||
+    message.includes('timeout') ||
+    message.includes('connection')
+  );
+}
+
 function profileFromLegacyLocalStorage(): UserProfile | null {
-  if (typeof window === 'undefined') return null;
+  if (!isBrowser()) return null;
 
   try {
     const rawUserData = window.localStorage.getItem('mco_user_data') || window.localStorage.getItem('mco_auth');
@@ -85,11 +108,12 @@ function profileFromLegacyLocalStorage(): UserProfile | null {
 }
 
 function cleanupLegacyAuthCaches() {
-  if (typeof window === 'undefined') return;
+  if (!isBrowser()) return;
 
   try {
     for (const key of LEGACY_AUTH_CACHE_KEYS) {
       window.sessionStorage.removeItem(key);
+      window.localStorage.removeItem(key);
     }
   } catch {
     // Ignore cache cleanup failures.
@@ -97,31 +121,32 @@ function cleanupLegacyAuthCaches() {
 }
 
 export function readCachedOpcAuthProfile(maxAgeMs = AUTH_CACHE_MAX_AGE_MS): UserProfile | null {
-  if (typeof window === 'undefined') return null;
+  if (!isBrowser()) return null;
 
   cleanupLegacyAuthCaches();
 
   try {
-    const raw = window.sessionStorage.getItem(AUTH_CACHE_KEY);
+    const raw = window.localStorage.getItem(AUTH_CACHE_KEY) || window.sessionStorage.getItem(AUTH_CACHE_KEY);
 
-    if (!raw) return null;
+    if (!raw) return profileFromLegacyLocalStorage();
 
     const parsed = JSON.parse(raw) as AuthCachePayload;
-    if (!parsed?.profile || typeof parsed.savedAt !== 'number') return null;
+    if (!parsed?.profile || typeof parsed.savedAt !== 'number') return profileFromLegacyLocalStorage();
 
     if (Date.now() - parsed.savedAt > maxAgeMs) {
+      window.localStorage.removeItem(AUTH_CACHE_KEY);
       window.sessionStorage.removeItem(AUTH_CACHE_KEY);
-      return null;
+      return profileFromLegacyLocalStorage();
     }
 
     return parsed.profile;
   } catch {
-    return null;
+    return profileFromLegacyLocalStorage();
   }
 }
 
 export function writeCachedOpcAuthProfile(profile: UserProfile) {
-  if (typeof window === 'undefined') return;
+  if (!isBrowser()) return;
 
   cleanupLegacyAuthCaches();
 
@@ -131,7 +156,10 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
       profile,
     };
 
-    window.sessionStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(payload));
+    const serialized = JSON.stringify(payload);
+
+    window.localStorage.setItem(AUTH_CACHE_KEY, serialized);
+    window.sessionStorage.setItem(AUTH_CACHE_KEY, serialized);
     window.localStorage.setItem('mco_user_role', profile.role);
     window.localStorage.setItem(
       'mco_user_data',
@@ -141,7 +169,7 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
         name: profile.full_name,
         full_name: profile.full_name,
         username: profile.full_name || profile.email || 'User',
-      })
+      }),
     );
     window.localStorage.setItem(
       'mco_auth',
@@ -151,7 +179,7 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
         name: profile.full_name,
         full_name: profile.full_name,
         username: profile.full_name || profile.email || 'User',
-      })
+      }),
     );
   } catch {
     // Cache failure should not block the app.
@@ -159,12 +187,14 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
 }
 
 export function clearCachedOpcAuthProfile() {
-  if (typeof window === 'undefined') return;
+  if (!isBrowser()) return;
 
   try {
     window.sessionStorage.removeItem(AUTH_CACHE_KEY);
+    window.localStorage.removeItem(AUTH_CACHE_KEY);
     for (const key of LEGACY_AUTH_CACHE_KEYS) {
       window.sessionStorage.removeItem(key);
+      window.localStorage.removeItem(key);
     }
   } catch {
     // Ignore.
@@ -206,59 +236,73 @@ async function fetchActiveStaffRoleByUser(userId: string, email?: string | null)
 export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
   cleanupLegacyAuthCaches();
 
+  const cachedProfile = readCachedOpcAuthProfile();
+
   const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
 
-  if (userError || !user) return null;
+  if (sessionError) {
+    if (cachedProfile && isNetworkLikeError(sessionError)) return cachedProfile;
+    return null;
+  }
 
-  const staffRole = await fetchActiveStaffRoleByUser(user.id, user.email);
+  const user = session?.user || null;
+  if (!user) return null;
 
-  if (staffRole) {
-    let employeeName = '';
-    let employeeEmail = '';
+  try {
+    const staffRole = await fetchActiveStaffRoleByUser(user.id, user.email);
 
-    if (staffRole.employee_id) {
-      const { data: employee } = await supabase
-        .from('employees')
-        .select('full_name, email')
-        .eq('id', staffRole.employee_id)
-        .maybeSingle();
+    if (staffRole) {
+      let employeeName = '';
+      let employeeEmail = '';
 
-      employeeName = employee?.full_name || '';
-      employeeEmail = employee?.email || '';
+      if (staffRole.employee_id) {
+        const { data: employee } = await supabase
+          .from('employees')
+          .select('full_name, email')
+          .eq('id', staffRole.employee_id)
+          .maybeSingle();
+
+        employeeName = employee?.full_name || '';
+        employeeEmail = employee?.email || '';
+      }
+
+      const profile: UserProfile = {
+        id: user.id,
+        email: staffRole.email || employeeEmail || user.email || '',
+        full_name: staffRole.display_name || employeeName || user.email || 'User',
+        role: normalizeStaffRole(staffRole),
+        created_at: '',
+        updated_at: '',
+      };
+
+      writeCachedOpcAuthProfile(profile);
+      return profile;
     }
 
+    const { data: legacyProfile } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!legacyProfile) return cachedProfile || null;
+
     const profile: UserProfile = {
+      ...legacyProfile,
       id: user.id,
-      email: staffRole.email || employeeEmail || user.email || '',
-      full_name: staffRole.display_name || employeeName || user.email || 'User',
-      role: normalizeStaffRole(staffRole),
-      created_at: '',
-      updated_at: '',
-    };
+      email: legacyProfile.email || user.email || '',
+      full_name: legacyProfile.full_name || legacyProfile.name || user.email || 'User',
+      role: normalizeRole(legacyProfile.role || legacyProfile.opc_staff_role || legacyProfile.staff_role),
+    } as UserProfile;
 
     writeCachedOpcAuthProfile(profile);
     return profile;
+  } catch (error) {
+    if (cachedProfile && isNetworkLikeError(error)) return cachedProfile;
+    if (cachedProfile) return cachedProfile;
+    return null;
   }
-
-  const { data: legacyProfile } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (!legacyProfile) return null;
-
-  const profile: UserProfile = {
-    ...legacyProfile,
-    id: user.id,
-    email: legacyProfile.email || user.email || '',
-    full_name: legacyProfile.full_name || legacyProfile.name || user.email || 'User',
-    role: normalizeRole(legacyProfile.role || legacyProfile.opc_staff_role || legacyProfile.staff_role),
-  } as UserProfile;
-
-  writeCachedOpcAuthProfile(profile);
-  return profile;
 }

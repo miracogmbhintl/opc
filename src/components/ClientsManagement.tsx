@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
+import { safeNavigate } from '../lib/opc-navigation-guard';
 import {
   Building2,
   LockKeyhole,
@@ -232,7 +233,7 @@ function EmptyState({
 
       <p style={emptyTextStyle}>{text}</p>
 
-      <a href={`${baseUrl}/kunde-anlegen`} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+      <a href={`${baseUrl}/kunde-anlegen`} data-astro-prefetch="false" style={{ ...opcBlackButtonStyle, width: 'auto' }}>
         <Plus size={17} />
         Kunde anlegen
       </a>
@@ -250,8 +251,12 @@ export default function ClientsManagement() {
   const [clientTypeFilter, setClientTypeFilter] = useState<ClientTypeFilter>('all');
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [grantingClientId, setGrantingClientId] = useState<string | null>(null);
+  const didInitialClientsLoadRef = useRef(false);
 
   useEffect(() => {
+    if (didInitialClientsLoadRef.current) return;
+    didInitialClientsLoadRef.current = true;
+
     const cachedClients = readOpcPageCache<Client[]>(CLIENTS_PAGE_CACHE_KEY);
 
     if (cachedClients) {
@@ -425,7 +430,7 @@ export default function ClientsManagement() {
   }, [clients, searchQuery, activeTab, clientTypeFilter, sortOrder]);
 
   function handleClientClick(clientId: string) {
-    window.location.href = `${baseUrl}/kunde/${clientId}`;
+    safeNavigate(`${baseUrl}/kunde/${clientId}`);
   }
 
   if (loading) {
@@ -512,7 +517,7 @@ export default function ClientsManagement() {
 
             <a
               className="opc-clients-toolbar-action"
-              href={`${baseUrl}/kunde-anlegen`}
+              href={`${baseUrl}/kunde-anlegen`} data-astro-prefetch="false"
               style={{
                 ...opcBlackButtonStyle,
                 width: '100%',

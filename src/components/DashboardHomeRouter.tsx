@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
 import {
   Briefcase,
   CalendarDays,
@@ -322,8 +322,11 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [tick, setTick] = useState(0);
+  const didInitialDashboardLoadRef = useRef(false);
 
   useEffect(() => {
+    if (didInitialDashboardLoadRef.current) return;
+    didInitialDashboardLoadRef.current = true;
     void loadDashboard(true);
   }, []);
 
@@ -580,7 +583,7 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <a href={`${baseUrl}/einsatz/${nextJob.id}`} style={primaryButtonStyle}><Briefcase size={16} /> Einsatz öffnen</a>
+                <a href={`${baseUrl}/einsatz/${nextJob.id}`} data-astro-prefetch="false" style={primaryButtonStyle}><Briefcase size={16} /> Einsatz öffnen</a>
                 <a href={getMapsUrl(nextJob)} target="_blank" rel="noreferrer" style={secondaryButtonStyle}><Navigation size={16} /> Navigation</a>
               </div>
             </div>
@@ -605,7 +608,7 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
             <h2 style={{ margin: 0, fontSize: 20, fontWeight: 860, letterSpacing: '-0.03em' }}>Heutige Einsätze</h2>
             <p style={{ margin: '6px 0 0', color: BRAND.muted, fontSize: 13, fontWeight: 620 }}>Zugewiesene Jobs mit Navigation und Status.</p>
           </div>
-          <a href={`${baseUrl}/einsaetze`} style={secondaryButtonStyle}>Alle Einsätze</a>
+          <a href={`${baseUrl}/einsaetze`} data-astro-prefetch="false" style={secondaryButtonStyle}>Alle Einsätze</a>
         </div>
 
         {todayJobs.length === 0 ? (
@@ -627,7 +630,7 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
 
                 <div className="opc-employee-job-actions">
                   <StatusPill status={job.status} />
-                  <a href={`${baseUrl}/einsatz/${job.id}`} style={secondaryButtonStyle}>Öffnen</a>
+                  <a href={`${baseUrl}/einsatz/${job.id}`} data-astro-prefetch="false" style={secondaryButtonStyle}>Öffnen</a>
                   <a href={getMapsUrl(job)} target="_blank" rel="noreferrer" style={secondaryButtonStyle}><Navigation size={15} /> Maps</a>
                 </div>
               </article>
@@ -730,8 +733,12 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
 export default function DashboardHomeRouter() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const didProfileLoadRef = useRef(false);
 
   useEffect(() => {
+    if (didProfileLoadRef.current) return;
+    didProfileLoadRef.current = true;
+
     let mounted = true;
 
     async function loadProfile() {

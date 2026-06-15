@@ -1,11 +1,3 @@
-/**
- * Client-side Supabase initialization
- * This file is specifically for use in React components (browser environment)
- * 
- * IMPORTANT: This should ONLY be imported in client:only components
- * Do NOT use in SSR contexts - use getSupabase() from supabase.ts instead
- */
-
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let clientInstance: SupabaseClient | null = null;
@@ -53,7 +45,7 @@ export function getSupabaseClient(): SupabaseClient {
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: true,
-      storage: window.localStorage
+      storage: window.localStorage,
     }
   });
 

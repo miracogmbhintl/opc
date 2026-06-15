@@ -13,6 +13,7 @@ import {
   LockKeyhole,
   Mail,
   MapPin,
+  PhoneCall,
   Save,
   Send,
   User,
@@ -91,6 +92,23 @@ interface OpcJob {
   city?: string | null;
   job_created_at?: string | null;
   job_updated_at?: string | null;
+}
+
+
+interface RelatedRecord {
+  id: string;
+  title: string;
+  status?: string | null;
+  date?: string | null;
+  amount?: string | number | null;
+  href?: string | null;
+  meta?: string | null;
+}
+
+interface RelatedSection {
+  key: string;
+  title: string;
+  records: RelatedRecord[];
 }
 
 interface ClientDetailProps {
@@ -297,12 +315,74 @@ function getInitials(name?: string) {
     .toUpperCase();
 }
 
+
+function formatMoney(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return '';
+
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount === 0) return '';
+
+  return new Intl.NumberFormat('de-CH', {
+    style: 'currency',
+    currency: 'CHF',
+  }).format(amount);
+}
+
+function pickRelatedTitle(row: Record<string, any>, fallback: string) {
+  return (
+    cleanText(row.quote_number) ||
+    cleanText(row.invoice_number) ||
+    cleanText(row.document_number) ||
+    cleanText(row.contract_number) ||
+    cleanText(row.order_confirmation_number) ||
+    cleanText(row.title) ||
+    cleanText(row.name) ||
+    fallback
+  );
+}
+
+function pickRelatedDate(row: Record<string, any>) {
+  return (
+    cleanText(row.issue_date) ||
+    cleanText(row.created_at) ||
+    cleanText(row.updated_at) ||
+    cleanText(row.sent_at) ||
+    cleanText(row.signed_at) ||
+    null
+  );
+}
+
+function pickRelatedAmount(row: Record<string, any>) {
+  return row.total_chf ?? row.amount_chf ?? row.balance_chf ?? row.total ?? null;
+}
+
+function buildRelatedRecord(row: Record<string, any>, fallbackTitle: string, hrefPrefix?: string): RelatedRecord | null {
+  const id = cleanText(row.id || row.quote_id || row.invoice_id || row.document_id || row.contract_id);
+  if (!id) return null;
+
+  const amount = formatMoney(pickRelatedAmount(row));
+  const status = cleanText(row.status);
+  const date = pickRelatedDate(row);
+  const metaParts = [status ? getStatusLabel(status) : '', date ? formatDate(date) : '', amount].filter(Boolean);
+
+  return {
+    id,
+    title: pickRelatedTitle(row, fallbackTitle),
+    status,
+    date,
+    amount,
+    href: hrefPrefix ? `${hrefPrefix}/${id}` : null,
+    meta: metaParts.join(' · '),
+  };
+}
+
 export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailProps) {
   const [resolvedClientId, setResolvedClientId] = useState(clientId);
   const [client, setClient] = useState<OpcClientDetail | null>(null);
   const [editedClient, setEditedClient] = useState<OpcClientDetail | null>(null);
   const [clientUser, setClientUser] = useState<OpcClientUser | null>(null);
   const [jobs, setJobs] = useState<OpcJob[]>([]);
+  const [relatedSections, setRelatedSections] = useState<RelatedSection[]>([]);
   const [userRole, setUserRole] = useState<string | null>(null);
 
   const [mounted, setMounted] = useState(false);
@@ -351,6 +431,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         loadClientData(opcClientId),
         loadClientJobs(opcClientId),
         loadClientUser(opcClientId),
+        loadClientRelatedSections(opcClientId),
       ]);
     } finally {
       setLoadingClient(false);
@@ -451,6 +532,83 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
       setJobError(err?.message || 'Einsätze konnten nicht geladen werden.');
     }
   }
+
+  async function loadClientRelatedSections(opcClientId: string) {
+    const configs: Array<{
+      key: string;
+      title: string;
+      tableCandidates: string[];
+      fallbackTitle: string;
+      hrefPrefix?: string;
+    }> = [
+      {
+        key: 'quotes',
+        title: 'Offerten',
+        tableCandidates: ['opc_quotes'],
+        fallbackTitle: 'Offerte',
+        hrefPrefix: `${appBaseUrl}/offerte`,
+      },
+      {
+        key: 'order_confirmations',
+        title: 'Auftragsbestätigungen',
+        tableCandidates: ['opc_order_confirmations', 'opc_order_confirmation_documents'],
+        fallbackTitle: 'Auftragsbestätigung',
+      },
+      {
+        key: 'contracts',
+        title: 'Verträge',
+        tableCandidates: ['opc_contracts', 'opc_client_contracts'],
+        fallbackTitle: 'Vertrag',
+      },
+      {
+        key: 'invoices',
+        title: 'Rechnungen',
+        tableCandidates: ['opc_invoices'],
+        fallbackTitle: 'Rechnung',
+        hrefPrefix: `${appBaseUrl}/rechnung`,
+      },
+      {
+        key: 'documents',
+        title: 'Dokumente',
+        tableCandidates: ['opc_client_documents', 'opc_documents'],
+        fallbackTitle: 'Dokument',
+      },
+    ];
+
+    const nextSections: RelatedSection[] = [];
+
+    for (const config of configs) {
+      for (const table of config.tableCandidates) {
+        try {
+          const { data, error: fetchError } = await supabase
+            .from(table)
+            .select('*')
+            .eq('client_id', opcClientId)
+            .order('created_at', { ascending: false })
+            .limit(12);
+
+          if (fetchError || !Array.isArray(data) || data.length === 0) {
+            continue;
+          }
+
+          const records = data
+            .map((row) => buildRelatedRecord(row as Record<string, any>, config.fallbackTitle, config.hrefPrefix))
+            .filter(Boolean) as RelatedRecord[];
+
+          if (records.length > 0) {
+            nextSections.push({ key: config.key, title: config.title, records });
+          }
+
+          break;
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    setRelatedSections(nextSections);
+  }
+
 
   async function handleSave() {
     if (!editedClient || !client) return;
@@ -632,6 +790,18 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     window.location.href = `${appBaseUrl}/besichtigung/neu?${params.toString()}`;
   }
 
+  function startQuote() {
+    if (!client) return;
+
+    const params = new URLSearchParams();
+    params.set('client_id', resolvedClientId);
+
+    if (client.primary_site_id) params.set('site_id', client.primary_site_id);
+    if (client.contact_id) params.set('contact_id', client.contact_id);
+
+    window.location.href = `${appBaseUrl}/offerte/neu?${params.toString()}`;
+  }
+
   function updateEditedClient<K extends keyof OpcClientDetail>(key: K, value: OpcClientDetail[K]) {
     setEditedClient((prev) => {
       if (!prev) return prev;
@@ -652,7 +822,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     const inputType = options?.type || 'text';
 
     return (
-      <div>
+      <div style={fieldItemStyle}>
         <label style={labelStyle}>{label}</label>
 
         {editMode && field && !options?.disabled ? (
@@ -727,13 +897,6 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         <div style={actionRowStyle}>
           {!editMode ? (
             <>
-              {canManageSalesPipeline && (
-                <button type="button" onClick={startInspection} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
-                  <ClipboardList size={16} />
-                  Besichtigung starten
-                </button>
-              )}
-
               {isAdminOrOwner && (
                 <button onClick={() => setEditMode(true)} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
                   <Edit2 size={16} />
@@ -758,21 +921,38 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
       </div>
 
       <section style={heroStyle}>
-        <div style={heroIdentityStyle}>
-          <div style={avatarStyle}>{getInitials(displayClient.billing_name || displayClient.company_name)}</div>
-
-          <div style={{ minWidth: 0 }}>
-            <div style={statusRowStyle}>
-              <span style={statusBadgeStyle}>{getStatusLabel(displayClient.status)}</span>
-              <span style={smallMutedStyle}>Erstellt am {formatDate(displayClient.created_at)}</span>
+        <div style={heroContentStyle}>
+          <div style={heroIdentityStyle}>
+            <div style={avatarStyle}>
+              {getInitials(displayClient.billing_name || displayClient.company_name)}
             </div>
 
-            <h1 style={titleStyle}>{displayClient.billing_name || displayClient.company_name || 'Kundendetails'}</h1>
+            <div style={{ minWidth: 0 }}>
+              <div style={statusRowStyle}>
+                <span style={statusBadgeStyle}>{getStatusLabel(displayClient.status)}</span>
+                <span style={smallMutedStyle}>Erstellt am {formatDate(displayClient.created_at)}</span>
+              </div>
 
-            <p style={subtitleStyle}>
-              {valueOrDash(displayClient.full_name)} · {valueOrDash(displayClient.email || displayClient.billing_email)}
-            </p>
+              <h1 style={titleStyle}>
+                {displayClient.billing_name || displayClient.company_name || 'Kundendetails'}
+              </h1>
+
+              <p style={subtitleStyle}>
+                {valueOrDash(displayClient.full_name)} · {valueOrDash(displayClient.email || displayClient.billing_email)}
+              </p>
+            </div>
           </div>
+
+          {(displayClient.phone_e164 || displayClient.phone_raw || displayClient.billing_phone_e164) && (
+            <a
+              href={`tel:${displayClient.phone_e164 || displayClient.phone_raw || displayClient.billing_phone_e164}`}
+              style={phoneButtonStyle}
+              aria-label="Kunden anrufen"
+              title="Kunden anrufen"
+            >
+              <PhoneCall size={20} />
+            </a>
+          )}
         </div>
       </section>
 
@@ -785,12 +965,26 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
 
       {error && <div style={errorAlertStyle}>{error}</div>}
 
-      <OPCMetricsGrid>
+      <div style={metricsGridStyle}>
         <OPCMetricCard value={displayClient.active_site_count} label="Standort(e)" icon={<Building2 size={18} />} />
         <OPCMetricCard value={jobs.length} label="Einsätze" icon={<Briefcase size={18} />} />
         <OPCMetricCard value={hasPortalAccess ? 'Aktiv' : 'Intern'} label="Portalzugang" icon={<LockKeyhole size={18} />} />
         <OPCMetricCard value={formatDate(displayClient.last_activity_at)} label="Letzte Aktivität" icon={<Clock size={18} />} />
-      </OPCMetricsGrid>
+      </div>
+
+      {canManageSalesPipeline && !editMode && (
+        <div style={primaryActionGridStyle}>
+          <button type="button" onClick={startInspection} style={primaryActionLightStyle}>
+            <ClipboardList size={16} />
+            Besichtigung starten
+          </button>
+
+          <button type="button" onClick={startQuote} style={primaryActionDarkStyle}>
+            <FileText size={16} />
+            Offerte erstellen
+          </button>
+        </div>
+      )}
 
       <div style={topGridStyle}>
         <OPCListCard>
@@ -831,6 +1025,152 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
           </div>
         </OPCListCard>
       </div>
+
+      <div style={infoGridStyle}>
+        <OPCListCard>
+          <CardHeader icon={<MapPin size={18} />} title="Standort" />
+
+          {editMode && (
+            <div style={copyButtonsStyle}>
+              <button type="button" onClick={copyBillingAddressToSite} style={smallLightButtonStyle}>
+                Standort aus Rechnungsadresse übernehmen
+              </button>
+
+              <button type="button" onClick={copySiteAddressToBilling} style={smallDarkButtonStyle}>
+                Rechnungsadresse = Standort
+              </button>
+            </div>
+          )}
+
+          <div style={fieldStackStyle}>
+            {renderField('Standortname', displayClient.primary_site_name, 'primary_site_name')}
+            {renderField('Standorttyp', getSiteTypeLabel(displayClient.primary_site_type), 'primary_site_type', {
+              type: 'select',
+              selectOptions: SITE_TYPE_OPTIONS,
+            })}
+            {renderField('Adresse', displayClient.primary_site_address, 'primary_site_address')}
+            {renderField('PLZ', displayClient.primary_site_postal_code, 'primary_site_postal_code')}
+            {renderField('Ort', displayClient.primary_site_city, 'primary_site_city')}
+            {renderField('Land', displayClient.primary_site_country, 'primary_site_country')}
+          </div>
+        </OPCListCard>
+
+        <OPCListCard>
+          <CardHeader icon={<FileText size={18} />} title="Verrechnung & Notizen" />
+
+          <div style={fieldStackStyle}>
+            {renderField('Rechnungs-E-Mail', displayClient.billing_email, 'billing_email', { type: 'email' })}
+            {renderField('Rechnungstelefon', displayClient.billing_phone_e164, 'billing_phone_e164', { type: 'tel' })}
+            {renderField('Rechnungsadresse', displayClient.billing_address, 'billing_address')}
+            {renderField('Interne Notizen', displayClient.internal_notes, 'internal_notes', { type: 'textarea' })}
+          </div>
+        </OPCListCard>
+      </div>
+
+      {(loadingJobs || jobError || jobs.length > 0) && (
+        <section style={{ marginTop: '22px' }}>
+          <OPCListCard>
+            <div style={jobsHeaderStyle}>
+              <CardHeader icon={<Briefcase size={18} />} title="Einsätze" />
+              <span style={countBadgeStyle}>{jobs.length}</span>
+            </div>
+
+            {jobError && <div style={errorAlertStyle}>{jobError}</div>}
+
+            {loadingJobs ? (
+              <div style={emptyJobsStyle}>Einsätze werden geladen.</div>
+            ) : jobs.length === 0 ? null : (
+              <div>
+                {jobs.map((job, index) => (
+                  <div
+                    key={job.job_id}
+                    style={{
+                      ...jobRowStyle,
+                      borderBottom: index < jobs.length - 1 ? '1px solid #F3F4F6' : 'none',
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={jobTitleStyle}>{job.title || 'Einsatz'}</div>
+                      <div style={jobMetaStyle}>
+                        {[job.service_category, job.site_name, job.address_text, job.city].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+
+                    <div style={jobDateStyle}>
+                      <Calendar size={15} />
+                      {formatDateTime(job.planned_start)}
+                    </div>
+
+                    <span style={statusBadgeStyle}>{getStatusLabel(job.status)}</span>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      {isCompletedJob(job.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => sendThankYouEmail(job)}
+                          disabled={sendingThankYouJobId === job.job_id}
+                          style={{ ...opcSecondaryButtonStyle, width: 'auto', height: '38px' }}
+                        >
+                          <Mail size={15} />
+                          {sendingThankYouJobId === job.job_id ? 'Sendet...' : 'Danke senden'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </OPCListCard>
+        </section>
+      )}
+
+      {typeof relatedSections !== 'undefined' && relatedSections.map((section) => (
+        <section key={section.key} style={{ marginTop: '22px' }}>
+          <OPCListCard>
+            <div style={jobsHeaderStyle}>
+              <CardHeader icon={<FileText size={18} />} title={section.title} />
+              <span style={countBadgeStyle}>{section.records.length}</span>
+            </div>
+
+            <div>
+              {section.records.map((record, index) => {
+                const content = (
+                  <>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={jobTitleStyle}>{record.title}</div>
+                      <div style={jobMetaStyle}>{record.meta || 'Keine Details hinterlegt'}</div>
+                    </div>
+                    <span style={statusBadgeStyle}>{record.status ? getStatusLabel(record.status) : 'Gespeichert'}</span>
+                  </>
+                );
+
+                return record.href ? (
+                  <a
+                    key={record.id}
+                    href={record.href}
+                    style={{
+                      ...relatedRowStyle,
+                      borderBottom: index < section.records.length - 1 ? '1px solid #F3F4F6' : 'none',
+                    }}
+                  >
+                    {content}
+                  </a>
+                ) : (
+                  <div
+                    key={record.id}
+                    style={{
+                      ...relatedRowStyle,
+                      borderBottom: index < section.records.length - 1 ? '1px solid #F3F4F6' : 'none',
+                    }}
+                  >
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          </OPCListCard>
+        </section>
+      ))}
 
       <section style={{ marginTop: '22px' }}>
         <OPCListCard>
@@ -891,116 +1231,20 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         </OPCListCard>
       </section>
 
-      <div style={infoGridStyle}>
-        <OPCListCard>
-          <CardHeader icon={<MapPin size={18} />} title="Standort" />
-
-          {editMode && (
-            <div style={copyButtonsStyle}>
-              <button type="button" onClick={copyBillingAddressToSite} style={smallLightButtonStyle}>
-                Standort aus Rechnungsadresse übernehmen
-              </button>
-
-              <button type="button" onClick={copySiteAddressToBilling} style={smallDarkButtonStyle}>
-                Rechnungsadresse = Standort
-              </button>
-            </div>
-          )}
-
-          <div style={fieldStackStyle}>
-            {renderField('Standortname', displayClient.primary_site_name, 'primary_site_name')}
-            {renderField('Standorttyp', getSiteTypeLabel(displayClient.primary_site_type), 'primary_site_type', {
-              type: 'select',
-              selectOptions: SITE_TYPE_OPTIONS,
-            })}
-            {renderField('Adresse', displayClient.primary_site_address, 'primary_site_address')}
-            {renderField('PLZ', displayClient.primary_site_postal_code, 'primary_site_postal_code')}
-            {renderField('Ort', displayClient.primary_site_city, 'primary_site_city')}
-            {renderField('Land', displayClient.primary_site_country, 'primary_site_country')}
-          </div>
-        </OPCListCard>
-
-        <OPCListCard>
-          <CardHeader icon={<FileText size={18} />} title="Verrechnung & Notizen" />
-
-          <div style={fieldStackStyle}>
-            {renderField('Rechnungs-E-Mail', displayClient.billing_email, 'billing_email', { type: 'email' })}
-            {renderField('Rechnungstelefon', displayClient.billing_phone_e164, 'billing_phone_e164', { type: 'tel' })}
-            {renderField('Rechnungsadresse', displayClient.billing_address, 'billing_address')}
-            {renderField('Interne Notizen', displayClient.internal_notes, 'internal_notes', { type: 'textarea' })}
-          </div>
-        </OPCListCard>
-      </div>
-
-      <section style={{ marginTop: '22px' }}>
-        <OPCListCard>
-          <div style={jobsHeaderStyle}>
-            <CardHeader icon={<Briefcase size={18} />} title="Einsätze" />
-            <span style={countBadgeStyle}>{jobs.length}</span>
-          </div>
-
-          {jobError && <div style={errorAlertStyle}>{jobError}</div>}
-
-          {loadingJobs ? (
-            <div style={emptyJobsStyle}>Einsätze werden geladen.</div>
-          ) : jobs.length === 0 ? (
-            <div style={emptyJobsStyle}>Keine Einsätze vorhanden.</div>
-          ) : (
-            <div>
-              {jobs.map((job, index) => (
-                <div
-                  key={job.job_id}
-                  style={{
-                    ...jobRowStyle,
-                    borderBottom: index < jobs.length - 1 ? '1px solid #F3F4F6' : 'none',
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={jobTitleStyle}>{job.title || 'Einsatz'}</div>
-                    <div style={jobMetaStyle}>
-                      {[job.service_category, job.site_name, job.address_text, job.city].filter(Boolean).join(' · ')}
-                    </div>
-                  </div>
-
-                  <div style={jobDateStyle}>
-                    <Calendar size={15} />
-                    {formatDateTime(job.planned_start)}
-                  </div>
-
-                  <span style={statusBadgeStyle}>{getStatusLabel(job.status)}</span>
-
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    {isCompletedJob(job.status) ? (
-                      <button
-                        type="button"
-                        onClick={() => sendThankYouEmail(job)}
-                        disabled={sendingThankYouJobId === job.job_id}
-                        style={{ ...opcSecondaryButtonStyle, width: 'auto', height: '38px' }}
-                      >
-                        <Mail size={15} />
-                        {sendingThankYouJobId === job.job_id ? 'Sendet...' : 'Danke senden'}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </OPCListCard>
-      </section>
-
       <style>{`
         ${opcResponsiveStyle}
 
-        @media (max-width: 980px) {
-          .opc-client-detail-two {
-            grid-template-columns: 1fr !important;
+        @media (max-width: 760px) {
+          a[style*="grid-template-columns"],
+          div[style*="grid-template-columns"] {
+            min-width: 0;
           }
         }
       `}</style>
     </OPCPageShell>
   );
 }
+
 
 function CardHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
@@ -1010,6 +1254,28 @@ function CardHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
     </div>
   );
 }
+
+const primaryActionGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: '12px',
+  marginTop: '22px',
+  marginBottom: '22px',
+};
+
+const primaryActionLightStyle: CSSProperties = {
+  ...opcSecondaryButtonStyle,
+  width: '100%',
+  height: '46px',
+  borderRadius: '14px',
+};
+
+const primaryActionDarkStyle: CSSProperties = {
+  ...opcBlackButtonStyle,
+  width: '100%',
+  height: '46px',
+  borderRadius: '14px',
+};
 
 const topBarStyle: CSSProperties = {
   display: 'flex',
@@ -1053,6 +1319,14 @@ const heroStyle: CSSProperties = {
   marginBottom: '22px',
 };
 
+
+const heroContentStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '18px',
+};
+
 const heroIdentityStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -1071,6 +1345,21 @@ const avatarStyle: CSSProperties = {
   fontSize: '18px',
   fontWeight: 820,
   flexShrink: 0,
+};
+
+
+const phoneButtonStyle: CSSProperties = {
+  width: '52px',
+  height: '52px',
+  borderRadius: '17px',
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FFFFFF',
+  color: OPC_BRAND.text,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  textDecoration: 'none',
+  flex: '0 0 auto',
 };
 
 const statusRowStyle: CSSProperties = {
@@ -1145,11 +1434,18 @@ const errorAlertStyle: CSSProperties = {
 
 const topGridStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
   gap: '22px',
 };
 
 const infoGridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+  gap: '22px',
+  marginTop: '22px',
+};
+
+const metricsGridStyle: CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
   gap: '22px',
@@ -1173,9 +1469,15 @@ const cardTitleStyle: CSSProperties = {
 
 const fieldStackStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
   gap: '18px',
   padding: '20px',
+  alignItems: 'start',
+};
+
+const fieldItemStyle: CSSProperties = {
+  minWidth: 0,
+  overflow: 'hidden',
 };
 
 const labelStyle: CSSProperties = {
@@ -1186,6 +1488,8 @@ const labelStyle: CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   marginBottom: '7px',
+  lineHeight: 1.15,
+  overflowWrap: 'anywhere',
 };
 
 const valueStyle: CSSProperties = {
@@ -1194,6 +1498,8 @@ const valueStyle: CSSProperties = {
   fontWeight: 720,
   color: OPC_BRAND.text,
   lineHeight: 1.35,
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
 };
 
 const inputStyle: CSSProperties = {
@@ -1286,6 +1592,17 @@ const emptyJobsStyle: CSSProperties = {
   color: OPC_BRAND.muted,
   fontSize: '14px',
   fontWeight: 700,
+};
+
+
+const relatedRowStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) auto',
+  alignItems: 'center',
+  gap: '18px',
+  padding: '18px 20px',
+  color: OPC_BRAND.text,
+  textDecoration: 'none',
 };
 
 const jobRowStyle: CSSProperties = {

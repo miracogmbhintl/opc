@@ -49,11 +49,24 @@ type MediaItem = {
 type TimeLogItem = {
   id: string;
   employeeName: string;
+  employeeId: string;
+  assignmentId: string;
   startedAt: string | null;
   endedAt: string | null;
   durationMinutes: number;
   breakMinutes: number;
   status: string;
+  notes: string;
+  raw: JsonRecord;
+};
+
+type ManualTimeDraft = {
+  employeeName: string;
+  employeeId: string;
+  assignmentId: string;
+  startedAt: string;
+  endedAt: string;
+  breakMinutes: string;
   notes: string;
 };
 
@@ -189,6 +202,7 @@ function getFirstValue(row: JsonRecord | null | undefined, keys: string[], fallb
 function roleKey(role?: string | null) {
   const clean = normalize(role);
 
+  if (clean === 'godmode' || clean === 'superadmin' || clean === 'super_admin') return 'godmode';
   if (clean === 'owner' || clean === 'inhaber') return 'owner';
   if (clean === 'admin' || clean === 'administrator') return 'admin';
   if (clean === 'dispatch' || clean === 'dispatcher' || clean === 'disposition') return 'dispatch';
@@ -199,7 +213,7 @@ function roleKey(role?: string | null) {
 }
 
 function isManagerRole(role?: string | null) {
-  return ['owner', 'admin', 'dispatch', 'manager'].includes(roleKey(role));
+  return ['godmode', 'owner', 'admin', 'dispatch', 'manager'].includes(roleKey(role));
 }
 
 function parseJsonArray(value: unknown): JsonArray {
@@ -316,6 +330,68 @@ function formatTime(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function toDateTimeLocal(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60 * 1000);
+
+  return local.toISOString().slice(0, 16);
+}
+
+function fromDateTimeLocal(value: string) {
+  if (!value) return null;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toISOString();
+}
+
+function nowDateTimeLocal() {
+  return toDateTimeLocal(new Date().toISOString());
+}
+
+function durationMinutesBetween(startLocal: string, endLocal: string, breakMinutesRaw: string | number = 0) {
+  const start = new Date(startLocal).getTime();
+  const end = new Date(endLocal).getTime();
+  const breakMinutes = Math.max(0, Number(String(breakMinutesRaw || '0').replace(',', '.')) || 0);
+
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
+
+  return Math.max(0, Math.round((end - start) / 60000) - breakMinutes);
+}
+
+function createEmptyManualTimeDraft(report: ReportDetail | null): ManualTimeDraft {
+  const defaultStart = toDateTimeLocal(report?.plannedStart) || nowDateTimeLocal();
+  const defaultEnd = toDateTimeLocal(report?.plannedEnd) || defaultStart;
+
+  return {
+    employeeName: '',
+    employeeId: '',
+    assignmentId: '',
+    startedAt: defaultStart,
+    endedAt: defaultEnd,
+    breakMinutes: '0',
+    notes: '',
+  };
+}
+
+function createManualTimeDraftFromLog(log: TimeLogItem): ManualTimeDraft {
+  return {
+    employeeName: log.employeeName || 'Mitarbeiter',
+    employeeId: log.employeeId || '',
+    assignmentId: log.assignmentId || '',
+    startedAt: toDateTimeLocal(log.startedAt) || nowDateTimeLocal(),
+    endedAt: toDateTimeLocal(log.endedAt) || nowDateTimeLocal(),
+    breakMinutes: String(log.breakMinutes || 0),
+    notes: log.notes || '',
+  };
 }
 
 function formatHours(value?: number | null) {
@@ -453,12 +529,15 @@ function normalizeTimeLog(item: JsonRecord, index: number): TimeLogItem {
   return {
     id: String(item.id || item.time_log_id || `time-${index}`),
     employeeName: getFirstValue(item, ['employee_name', 'display_name', 'staff_name', 'email'], 'Mitarbeiter'),
+    employeeId: getFirstValue(item, ['employee_id', 'staff_id']) || String(metadata.employee_id || metadata.staff_role_id || ''),
+    assignmentId: getFirstValue(item, ['assignment_id']),
     startedAt: getFirstValue(item, ['started_at', 'start_time', 'clock_in_at', 'created_at']) || null,
     endedAt: getFirstValue(item, ['ended_at', 'end_time', 'clock_out_at', 'finished_at']) || null,
     durationMinutes: Number(item.duration_minutes || item.total_minutes || 0),
     breakMinutes: Number(metadata.break_minutes || item.break_minutes || 0),
     status: getFirstValue(item, ['status'], 'submitted'),
     notes: getFirstValue(item, ['notes', 'employee_note', 'note']),
+    raw: item,
   };
 }
 
@@ -518,9 +597,9 @@ function mergeReportDetail(reportRow: JsonRecord | null, jobRow: JsonRecord | nu
     jobRow?.final_hours ??
     null;
 
-  const timeLogRows = parseJsonArray(reportRow?.time_logs).length
-    ? parseJsonArray(reportRow?.time_logs)
-    : parseJsonArray(jobRow?.time_logs);
+  const jobTimeLogRows = parseJsonArray(jobRow?.time_logs);
+  const reportTimeLogRows = parseJsonArray(reportRow?.time_logs);
+  const timeLogRows = jobTimeLogRows.length ? jobTimeLogRows : reportTimeLogRows;
 
   const damageRows = parseJsonArray(reportRow?.damage_reports).length
     ? parseJsonArray(reportRow?.damage_reports)
@@ -676,6 +755,56 @@ async function tryUpdateReportById(report: ReportDetail, payload: JsonRecord) {
   throw new Error(lastError?.message || 'Bericht konnte nicht aktualisiert werden.');
 }
 
+
+async function tryInsertOne(table: string, variants: JsonRecord[]) {
+  let lastError: any = null;
+
+  for (const variant of variants) {
+    const payload = compactPayload(variant);
+
+    try {
+      const response = await supabase.from(table).insert(payload).select('*').limit(1);
+
+      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
+        return response.data[0] as JsonRecord;
+      }
+
+      lastError = response.error || new Error(`${table}: keine Zeile erstellt.`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(lastError?.message || `${table}: Insert konnte nicht erstellt werden.`);
+}
+
+async function tryUpdateOne(table: string, idColumn: string, idValue: string, variants: JsonRecord[]) {
+  let lastError: any = null;
+
+  for (const variant of variants) {
+    const payload = compactPayload(variant);
+
+    try {
+      const response = await supabase
+        .from(table)
+        .update(payload)
+        .eq(idColumn, idValue)
+        .select('*')
+        .limit(1);
+
+      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
+        return response.data[0] as JsonRecord;
+      }
+
+      lastError = response.error || new Error(`${table}: keine Zeile aktualisiert.`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(lastError?.message || `${table}: Update konnte nicht ausgeführt werden.`);
+}
+
 function StatusBadge({ status, label }: { status?: string | null; label?: string | null }) {
   const style = getReportStatusStyle(status);
 
@@ -762,16 +891,21 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
   const [editMode, setEditMode] = useState(false);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [access, setAccess] = useState<AccessState>({ loading: true, userId: null, role: null, canEdit: false });
+  const [manualTimeFormOpen, setManualTimeFormOpen] = useState(false);
+  const [manualTimeDraft, setManualTimeDraft] = useState<ManualTimeDraft>(() => createEmptyManualTimeDraft(null));
+  const [editingTimeLogId, setEditingTimeLogId] = useState<string | null>(null);
 
   const reportJobId = report?.jobId || jobIdFromRoute;
   const totalMediaCount = (report?.beforePhotos.length || 0) + (report?.afterPhotos.length || 0) + (report?.otherMedia.length || 0);
   const computedTotalHours = useMemo(() => {
+    const minutes = (report?.timeLogs || []).reduce((sum, log) => sum + Number(log.durationMinutes || 0), 0);
+    if (minutes > 0) return minutes / 60;
+
     if (report?.totalHours !== null && report?.totalHours !== undefined && !Number.isNaN(Number(report.totalHours))) {
       return report.totalHours;
     }
 
-    const minutes = (report?.timeLogs || []).reduce((sum, log) => sum + Number(log.durationMinutes || 0), 0);
-    return minutes > 0 ? minutes / 60 : null;
+    return null;
   }, [report]);
 
   const makeEditDraft = useCallback((source: ReportDetail): EditDraft => {
@@ -869,6 +1003,12 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
     void loadReport(true);
   }, [loadReport]);
 
+  useEffect(() => {
+    if (!manualTimeFormOpen && !editingTimeLogId) {
+      setManualTimeDraft(createEmptyManualTimeDraft(report));
+    }
+  }, [editingTimeLogId, manualTimeFormOpen, report]);
+
   const updateDraft = (field: keyof EditDraft, value: string) => {
     setEditDraft((current) => (current ? { ...current, [field]: value } : current));
   };
@@ -930,6 +1070,106 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
     });
   };
 
+
+  const openManualTimeForm = () => {
+    setEditingTimeLogId(null);
+    setManualTimeDraft(createEmptyManualTimeDraft(report));
+    setManualTimeFormOpen(true);
+  };
+
+  const handleEditManualTimeLog = (log: TimeLogItem) => {
+    if (!access.canEdit) return;
+    setEditingTimeLogId(log.id);
+    setManualTimeDraft(createManualTimeDraftFromLog(log));
+    setManualTimeFormOpen(true);
+  };
+
+  const handleCancelManualTime = () => {
+    setManualTimeFormOpen(false);
+    setEditingTimeLogId(null);
+    setManualTimeDraft(createEmptyManualTimeDraft(report));
+  };
+
+  const handleSaveManualTimeLog = async () => {
+    if (!report || !access.canEdit) return;
+
+    const jobId = report.jobId || jobIdFromRoute;
+    const startedAt = fromDateTimeLocal(manualTimeDraft.startedAt);
+    const endedAt = fromDateTimeLocal(manualTimeDraft.endedAt);
+    const breakMinutes = Math.max(0, Number(String(manualTimeDraft.breakMinutes || '0').replace(',', '.')) || 0);
+    const durationMinutes = durationMinutesBetween(manualTimeDraft.startedAt, manualTimeDraft.endedAt, breakMinutes);
+
+    if (!jobId) {
+      setActionError('Keine Einsatz-ID für diese Zeit vorhanden.');
+      return;
+    }
+
+    if (!startedAt || !endedAt || durationMinutes <= 0) {
+      setActionError('Manuelle Zeit ungültig. Start, Ende und Dauer müssen korrekt sein.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const employeeName = manualTimeDraft.employeeName.trim() || 'Mitarbeiter';
+    const payload = {
+      job_id: jobId,
+      assignment_id: manualTimeDraft.assignmentId || null,
+      employee_id: manualTimeDraft.employeeId || null,
+      employee_name: employeeName,
+      started_at: startedAt,
+      ended_at: endedAt,
+      duration_minutes: durationMinutes,
+      status: 'submitted',
+      notes: cleanNullable(manualTimeDraft.notes),
+      metadata: {
+        source: 'manual_admin_entry',
+        created_via: 'bericht_detail_admin_manual_time',
+        entered_by_user_id: access.userId,
+        entered_by_role: access.role,
+        break_minutes: breakMinutes,
+        manually_entered: true,
+        updated_at: now,
+      },
+      updated_at: now,
+      created_at: now,
+    };
+
+    await runReportAction(editingTimeLogId ? 'manual_time_update' : 'manual_time_create', async () => {
+      if (editingTimeLogId) {
+        await tryUpdateOne('opc_job_time_logs', 'id', editingTimeLogId, [payload]);
+      } else {
+        await tryInsertOne('opc_job_time_logs', [payload]);
+      }
+
+      const allMinutes = (report.timeLogs || [])
+        .filter((log) => String(log.id) !== String(editingTimeLogId || ''))
+        .reduce((sum, log) => sum + Number(log.durationMinutes || 0), 0) + durationMinutes;
+      const totalHours = Number((allMinutes / 60).toFixed(2));
+
+      try {
+        await supabase
+          .from('opc_service_jobs')
+          .update({ final_hours: totalHours, actual_start: report.actualStart || startedAt, actual_end: endedAt, updated_at: now })
+          .eq('id', jobId)
+          .select('id')
+          .limit(1);
+      } catch {
+        // Best effort only.
+      }
+
+      try {
+        await tryUpdateReportById(report, { total_hours: totalHours });
+      } catch {
+        // Best effort only. Time logs are the source of truth.
+      }
+
+      setManualTimeFormOpen(false);
+      setEditingTimeLogId(null);
+      setManualTimeDraft(createEmptyManualTimeDraft(report));
+      setActionMessage(editingTimeLogId ? 'Einzelzeit wurde aktualisiert.' : 'Arbeitszeit wurde manuell erfasst.');
+    });
+  };
+
   const renderMediaList = (items: MediaItem[], emptyText: string) => {
     if (!items.length) return <div className="opc-empty-box">{emptyText}</div>;
 
@@ -958,12 +1198,106 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
     );
   };
 
+  const renderManualTimeForm = () => {
+    if (!manualTimeFormOpen || !access.canEdit) return null;
+
+    const duration = durationMinutesBetween(manualTimeDraft.startedAt, manualTimeDraft.endedAt, manualTimeDraft.breakMinutes);
+
+    return (
+      <div className="opc-manual-time-form">
+        <div className="opc-manual-time-head">
+          <div>
+            <strong>{editingTimeLogId ? 'Einzelzeit bearbeiten' : 'Arbeitszeit manuell erfassen'}</strong>
+            <span>Nur Admin, Dispatch, Owner und Godmode.</span>
+          </div>
+          <button type="button" className="opc-link-button" onClick={handleCancelManualTime}>Schliessen</button>
+        </div>
+
+        <div className="opc-manual-time-grid">
+          <label>
+            Name
+            <input
+              style={inputStyle()}
+              value={manualTimeDraft.employeeName}
+              placeholder="z.B. Filip Andjekovic"
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, employeeName: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Start
+            <input
+              style={inputStyle()}
+              type="datetime-local"
+              value={manualTimeDraft.startedAt}
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, startedAt: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Ende
+            <input
+              style={inputStyle()}
+              type="datetime-local"
+              value={manualTimeDraft.endedAt}
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, endedAt: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Pause in Minuten
+            <input
+              style={inputStyle()}
+              inputMode="decimal"
+              value={manualTimeDraft.breakMinutes}
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, breakMinutes: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Berechnete Dauer
+            <input style={inputStyle()} value={formatMinutes(duration)} disabled readOnly />
+          </label>
+        </div>
+
+        <label className="opc-note-label">
+          Notiz
+          <textarea
+            style={{ ...inputStyle(), minHeight: 82, resize: 'vertical' }}
+            placeholder="Optional. Beispiel: Nachträglich gemäss Mitarbeiterangabe erfasst."
+            value={manualTimeDraft.notes}
+            onChange={(event) => setManualTimeDraft((current) => ({ ...current, notes: event.target.value }))}
+          />
+        </label>
+
+        <div className="opc-manual-time-actions">
+          <button type="button" className="opc-btn opc-btn-light" onClick={handleCancelManualTime} disabled={Boolean(actionLoading)}>
+            Abbrechen
+          </button>
+          <button type="button" className="opc-btn opc-btn-dark" onClick={() => void handleSaveManualTimeLog()} disabled={Boolean(actionLoading)}>
+            {actionLoading === 'manual_time_create' || actionLoading === 'manual_time_update' ? <Loader2 size={15} className="spin" /> : <Clock3 size={15} />}
+            {editingTimeLogId ? 'Zeit aktualisieren' : 'Zeit speichern'}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderTimeLogs = () => {
     if (!report) return null;
 
     return (
       <section className="opc-section-card" style={cardStyle}>
-        <SectionHeader title="Zeiterfassung" />
+        <SectionHeader
+          title="Zeiterfassung"
+          action={
+            access.canEdit ? (
+              <button type="button" className="opc-link-button" onClick={openManualTimeForm}>
+                + Zeit manuell erfassen
+              </button>
+            ) : null
+          }
+        />
 
         {report.timeLogs.length === 0 ? (
           <div className="opc-empty-box">Keine Zeiten für diesen Bericht vorhanden.</div>
@@ -982,13 +1316,22 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
                   <span>Pause {formatMinutes(log.breakMinutes)}</span>
                 </div>
 
-                <StatusBadge status={log.status} />
+                <div className="opc-time-row-actions">
+                  <StatusBadge status={log.status} />
+                  {access.canEdit ? (
+                    <button type="button" className="opc-mini-action" onClick={() => handleEditManualTimeLog(log)}>
+                      Bearbeiten
+                    </button>
+                  ) : null}
+                </div>
 
                 {log.notes ? <p>{log.notes}</p> : null}
               </div>
             ))}
           </div>
         )}
+
+        {renderManualTimeForm()}
       </section>
     );
   };
@@ -1885,6 +2228,83 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
           to { transform: rotate(360deg); }
         }
 
+
+
+        .opc-time-row-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .opc-mini-action {
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          border-radius: 999px;
+          min-height: 30px;
+          padding: 0 10px;
+          font-size: 12px;
+          font-weight: 800;
+          cursor: pointer;
+          font-family: ${pageFont};
+        }
+
+        .opc-manual-time-form {
+          margin-top: 14px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 18px;
+          padding: 14px;
+          background: #FAFAFA;
+        }
+
+        .opc-manual-time-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: flex-start;
+          margin-bottom: 12px;
+        }
+
+        .opc-manual-time-head strong {
+          display: block;
+          color: ${BRAND.text};
+          font-size: 15px;
+          font-weight: 850;
+        }
+
+        .opc-manual-time-head span {
+          display: block;
+          margin-top: 3px;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 650;
+        }
+
+        .opc-manual-time-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 10px;
+        }
+
+        .opc-manual-time-grid label,
+        .opc-manual-time-form label {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          color: ${BRAND.text};
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .opc-manual-time-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-top: 12px;
+        }
         @media (max-width: 1180px) {
           .opc-main-grid {
             grid-template-columns: minmax(0, 1fr);
@@ -1905,6 +2325,11 @@ export default function BerichtDateiDetailPage({ reportId: reportIdProp = '', jo
         }
 
         @media (max-width: 740px) {
+          .opc-manual-time-grid,
+          .opc-manual-time-actions {
+            grid-template-columns: 1fr;
+          }
+
           .opc-page {
             padding: 0 8px 96px;
           }

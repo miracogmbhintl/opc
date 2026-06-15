@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   Briefcase,
   CalendarDays,
   CheckCircle2,
@@ -12,7 +11,6 @@ import {
   MapPin,
   Navigation,
   Plus,
-  RefreshCw,
   Repeat,
   Save,
   Search,
@@ -521,7 +519,7 @@ function JobCard({ job, employeeMode }: { job: Job; employeeMode: boolean }) {
       </div>
 
       <div className="opc-job-card-actions">
-        <a className="opc-job-action dark" href={`${baseUrl}/einsatz/${job.id}`}>
+        <a className="opc-job-action dark" href={`${baseUrl}/einsatz/${job.id}`} data-astro-prefetch="false">
           {employeeMode ? 'Einsatz öffnen' : 'Details öffnen'}
         </a>
 
@@ -544,20 +542,27 @@ function EinsaetzeOverview() {
   const [customDateStart, setCustomDateStart] = useState('');
   const [customDateEnd, setCustomDateEnd] = useState('');
   const [jobTypeFilter, setJobTypeFilter] = useState<JobTypeFilter>('all');
+  const [showDatePopover, setShowDatePopover] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [viewerRole, setViewerRole] = useState<ViewerRole>('');
+  const didLoadViewerRef = useRef(false);
+  const lastJobsLoadRoleRef = useRef<ViewerRole | ''>('');
 
   const employeeMode = viewerRole === 'employee';
   const canPlanJobs = isManagerRole(viewerRole);
 
   useEffect(() => {
+    if (didLoadViewerRef.current) return;
+    didLoadViewerRef.current = true;
     void loadViewer();
   }, []);
 
   useEffect(() => {
-    if (viewerRole) {
-      void loadJobs(viewerRole);
-    }
+    if (!viewerRole) return;
+    if (lastJobsLoadRoleRef.current === viewerRole) return;
+
+    lastJobsLoadRoleRef.current = viewerRole;
+    void loadJobs(viewerRole);
   }, [viewerRole]);
 
   useEffect(() => {
@@ -757,26 +762,6 @@ function EinsaetzeOverview() {
       currentPath="/einsaetze"
     >
       <div className="opc-jobs-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
-        <div className="opc-jobs-hero" style={cardStyle}>
-          <div>
-            <h1>{employeeMode ? 'Meine Aufträge' : 'Einsätze'}</h1>
-          </div>
-
-          <div className="opc-jobs-hero-actions">
-            <button type="button" className="opc-jobs-action" onClick={() => void loadJobs(viewerRole)}>
-              <RefreshCw size={16} />
-              Aktualisieren
-            </button>
-
-            {canPlanJobs ? (
-              <a className="opc-jobs-action dark" href={`${baseUrl}/einsatz-planen`}>
-                <Plus size={16} />
-                Einsatz planen
-              </a>
-            ) : null}
-          </div>
-        </div>
-
         {errorMessage ? <div className="opc-jobs-error">{errorMessage}</div> : null}
 
         <div className="opc-jobs-metrics">
@@ -810,62 +795,131 @@ function EinsaetzeOverview() {
             <button
               type="button"
               className={dateFilter === 'today' ? 'active' : ''}
-              onClick={() => setDateFilter('today')}
+              onClick={() => {
+                setDateFilter('today');
+                setShowDatePopover(false);
+              }}
             >
               Heute
             </button>
+
             <button
               type="button"
               className={dateFilter === 'week' ? 'active' : ''}
-              onClick={() => setDateFilter('week')}
+              onClick={() => {
+                setDateFilter('week');
+                setShowDatePopover(false);
+              }}
             >
               Woche
             </button>
+
             <button
               type="button"
               className={dateFilter === 'all' ? 'active' : ''}
-              onClick={() => setDateFilter('all')}
+              onClick={() => {
+                setDateFilter('all');
+                setShowDatePopover(false);
+              }}
             >
               Alle
             </button>
           </div>
 
           {canPlanJobs ? (
-            <div className="opc-jobs-custom-date-row" aria-label="Datum auswählen">
-              <input
-                type="date"
-                value={customDateStart}
-                onChange={(event) => {
-                  setCustomDateStart(event.target.value);
-                  setDateFilter('custom');
-                }}
-              />
-              <input
-                type="date"
-                value={customDateEnd}
-                onChange={(event) => {
-                  setCustomDateEnd(event.target.value);
-                  setDateFilter('custom');
-                }}
-              />
+            <div className="opc-jobs-date-plan-row">
+              <div className="opc-date-popover-wrap">
+                <button
+                  type="button"
+                  className={`opc-date-popup-trigger ${dateFilter === 'custom' ? 'active' : ''}`}
+                  onClick={() => setShowDatePopover((current) => !current)}
+                >
+                  <CalendarDays size={15} />
+                  {dateFilter === 'custom'
+                    ? `${customDateStart || 'Start'} – ${customDateEnd || 'Ende'}`
+                    : 'Datum auswählen'}
+                </button>
+
+                {showDatePopover ? (
+                  <div className="opc-date-popover">
+                    <div className="opc-date-popover-title">Datumsbereich</div>
+
+                    <label>
+                      <span>Von</span>
+                      <input
+                        type="date"
+                        value={customDateStart}
+                        onChange={(event) => {
+                          setCustomDateStart(event.target.value);
+                          setDateFilter('custom');
+                        }}
+                      />
+                    </label>
+
+                    <label>
+                      <span>Bis</span>
+                      <input
+                        type="date"
+                        value={customDateEnd}
+                        onChange={(event) => {
+                          setCustomDateEnd(event.target.value);
+                          setDateFilter('custom');
+                        }}
+                      />
+                    </label>
+
+                    <div className="opc-date-popover-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomDateStart('');
+                          setCustomDateEnd('');
+                          setDateFilter('today');
+                          setShowDatePopover(false);
+                        }}
+                      >
+                        Zurücksetzen
+                      </button>
+
+                      <button
+                        type="button"
+                        className="dark"
+                        onClick={() => {
+                          setDateFilter('custom');
+                          setShowDatePopover(false);
+                        }}
+                      >
+                        Anwenden
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <a className="opc-jobs-plan-button" href={`${baseUrl}/einsatz-planen`} data-astro-prefetch="false">
+                <Plus size={16} />
+                Einsatz planen
+              </a>
             </div>
           ) : null}
 
-          <select value={jobTypeFilter} onChange={(event) => setJobTypeFilter(event.target.value as JobTypeFilter)}>
-            <option value="all">Alle Auftragsarten</option>
-            <option value="recurring">Wiederkehrende Einsätze</option>
-          </select>
+          <div className="opc-jobs-select-row">
+            <select value={jobTypeFilter} onChange={(event) => setJobTypeFilter(event.target.value as JobTypeFilter)}>
+              <option value="all">Alle Auftragsarten</option>
+              <option value="recurring">Wiederkehrende Einsätze</option>
+            </select>
 
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-            <option value="all">Alle Status</option>
-            <option value="open_jobs">Offene Einsätze</option>
-            <option value="completed_jobs">Abgeschlossene Einsätze</option>
-            {availableStatuses.map((status) => (
-              <option key={status} value={status}>
-                {formatStatus(status)}
-              </option>
-            ))}
-          </select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">Alle Status</option>
+              <option value="open_jobs">Offene Einsätze</option>
+              <option value="completed_jobs">Abgeschlossene Einsätze</option>
+              {availableStatuses.map((status) => (
+                <option key={status} value={status}>
+                  {formatStatus(status)}
+                </option>
+              ))}
+            </select>
+          </div>
         </section>
 
         {filteredJobs.length === 0 ? (
@@ -1137,6 +1191,158 @@ function EinsaetzeOverview() {
           margin-top: 16px;
         }
 
+        .opc-jobs-filter-panel {
+          display: grid !important;
+          grid-template-columns: 1fr !important;
+          gap: 12px !important;
+          align-items: stretch !important;
+          overflow: visible !important;
+        }
+
+        .opc-jobs-search {
+          flex: unset !important;
+          width: 100% !important;
+          height: 46px;
+        }
+
+        .opc-jobs-date-buttons {
+          flex: unset !important;
+          width: 100% !important;
+          display: grid !important;
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          gap: 8px !important;
+        }
+
+        .opc-jobs-date-buttons button {
+          width: 100%;
+          height: 46px;
+        }
+
+        .opc-jobs-date-plan-row {
+          width: 100%;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 8px;
+          align-items: stretch;
+          position: relative;
+        }
+
+        .opc-date-popover-wrap {
+          position: relative;
+          min-width: 0;
+        }
+
+        .opc-date-popup-trigger,
+        .opc-jobs-plan-button {
+          width: 100%;
+          min-height: 46px;
+          border-radius: 14px;
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 820;
+          font-family: ${pageFont};
+          text-decoration: none;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-date-popup-trigger.active,
+        .opc-jobs-plan-button {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-date-popover {
+          position: absolute;
+          left: 0;
+          top: calc(100% + 8px);
+          width: min(360px, 86vw);
+          z-index: 20;
+          padding: 14px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 18px;
+          background: #FFFFFF;
+          box-shadow: 0 18px 44px rgba(15, 17, 21, 0.14);
+          display: grid;
+          gap: 10px;
+        }
+
+        .opc-date-popover-title {
+          color: ${BRAND.text};
+          font-size: 13px;
+          font-weight: 860;
+          letter-spacing: -0.02em;
+        }
+
+        .opc-date-popover label {
+          display: grid;
+          gap: 6px;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 760;
+        }
+
+        .opc-date-popover input {
+          width: 100%;
+          height: 42px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 13px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 11px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          outline: none;
+        }
+
+        .opc-date-popover-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 2px;
+        }
+
+        .opc-date-popover-actions button {
+          min-height: 40px;
+          border-radius: 12px;
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          font-size: 12px;
+          font-weight: 800;
+          font-family: ${pageFont};
+          cursor: pointer;
+        }
+
+        .opc-date-popover-actions button.dark {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-jobs-select-row {
+          width: 100%;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .opc-jobs-select-row select {
+          flex: unset !important;
+          width: 100% !important;
+          min-width: 0 !important;
+          height: 46px;
+        }
+
         .opc-jobs-empty {
           min-height: 120px;
           display: flex;
@@ -1170,19 +1376,23 @@ function EinsaetzeOverview() {
             padding-bottom: 110px;
           }
 
-          .opc-jobs-hero {
-            grid-template-columns: 1fr;
-            align-items: stretch;
-            padding: 18px;
-          }
-
-          .opc-jobs-hero h1 {
-            font-size: 25px;
-          }
-
-          .opc-jobs-hero-actions {
+          .opc-jobs-date-plan-row {
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            width: 100%;
+          }
+
+          .opc-jobs-select-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-date-popup-trigger,
+          .opc-jobs-plan-button {
+            min-height: 46px;
+            font-size: 12px;
+            padding: 0 8px;
+          }
+
+          .opc-date-popover {
+            width: min(340px, calc(100vw - 48px));
           }
 
           .opc-job-card-actions {
@@ -1853,6 +2063,13 @@ function EinsatzPlanningView() {
     }
   }
 
+  const plannedPreviewStart = combineLocalDateTime(startDate, startTime)?.toISOString() || null;
+  const plannedPreviewEnd = combineLocalDateTime(startDate, endTime)?.toISOString() || null;
+  const planClientLabel = clientName.trim() || (selectedClient ? getClientLabel(selectedClient) : 'Kunde noch nicht gewählt');
+  const planSiteLabel = siteName.trim() || 'Standort noch nicht gewählt';
+  const planTitle = title.trim() || 'Einsatz planen';
+  const planStatusLabel = statusLabels[status] || formatStatus(status);
+
   return (
     <MirakaDashboardShell
       hideTopBar={true}
@@ -1860,72 +2077,146 @@ function EinsatzPlanningView() {
       currentPath="/einsaetze"
     >
       <div className="opc-plan-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
-        <div className="opc-plan-hero" style={cardStyle}>
-          <div>
-            <a className="opc-back-link" href={`${baseUrl}/einsaetze`}>
-              <ArrowLeft size={15} />
-              Zurück zu Einsätze
-            </a>
-            <h1>Einsatz planen</h1>
-          </div>
-
-          <button type="button" className="opc-save-button" disabled={saving} onClick={() => void handleSave()}>
-            {saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
-            {saving ? 'Speichert...' : 'Speichern'}
-          </button>
-        </div>
+        <a href={`${baseUrl}/einsaetze`} className="opc-back-link opc-plan-top-back">
+          ← Zurück zu Einsätze
+        </a>
 
         {errorMessage ? <div className="opc-plan-error">{errorMessage}</div> : null}
         {message ? <div className="opc-plan-message">{message}</div> : null}
 
+        <div className="opc-plan-metrics-grid">
+          <div className="opc-plan-metric-card">
+            <div>
+              <div className="opc-plan-metric-value">{planStatusLabel}</div>
+              <div className="opc-plan-metric-label">Status</div>
+            </div>
+            <div className="opc-plan-metric-icon"><CheckCircle2 size={18} /></div>
+          </div>
+
+          <div className="opc-plan-metric-card">
+            <div>
+              <div className="opc-plan-metric-value">{formatTime(plannedPreviewStart)}</div>
+              <div className="opc-plan-metric-label">Geplant</div>
+              <div className="opc-plan-metric-helper">{formatDateTime(plannedPreviewStart)}</div>
+            </div>
+            <div className="opc-plan-metric-icon"><CalendarDays size={18} /></div>
+          </div>
+
+          <div className="opc-plan-metric-card">
+            <div>
+              <div className="opc-plan-metric-value">{estimatedHours || '—'} h</div>
+              <div className="opc-plan-metric-label">Dauer</div>
+              <div className="opc-plan-metric-helper">Ende {formatTime(plannedPreviewEnd)}</div>
+            </div>
+            <div className="opc-plan-metric-icon"><Clock3 size={18} /></div>
+          </div>
+
+          <div className="opc-plan-metric-card">
+            <div>
+              <div className="opc-plan-metric-value">Erforderlich</div>
+              <div className="opc-plan-metric-label">Bericht</div>
+            </div>
+            <div className="opc-plan-metric-icon"><FileText size={18} /></div>
+          </div>
+        </div>
+
         <div className="opc-plan-grid single">
           <div className="opc-plan-main">
-            <PlanSectionCard title="Auftragsdaten" icon={<Briefcase size={17} />}>
-              <div className="opc-form-grid">
-                <PlanField label="Titel">
-                  <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="z.B. Unterhaltsreinigung Update Fitness" />
-                </PlanField>
-
-                <PlanField label="Kunde">
+            <PlanSectionCard title="Kunde und Standort" icon={<Briefcase size={17} />}>
+              <div className="opc-plan-two-row">
+                <PlanField label="Kunde *">
                   <select value={clientId} onChange={(event) => handleClientChange(event.target.value)}>
-                    <option value="">Kunde auswählen oder manuell eintragen</option>
+                    <option value="">Kunde auswählen</option>
                     {clientOptions.map((client) => (
                       <option key={client.id} value={client.id}>{getClientLabel(client)}</option>
                     ))}
                   </select>
                 </PlanField>
 
-                <PlanField label="Kundenname manuell">
-                  <input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Kundenname" />
-                </PlanField>
-
-                <PlanField label="Standort">
+                <PlanField label="Standort *">
                   <select value={siteId} onChange={(event) => handleSiteChange(event.target.value)} disabled={!clientId || siteOptions.length === 0}>
-                    <option value="">Standort auswählen oder manuell eintragen</option>
+                    <option value="">Zuerst Kunden auswählen</option>
                     {siteOptions.map((site) => (
                       <option key={site.id} value={site.id}>{getSiteLabel(site)}</option>
                     ))}
                   </select>
                 </PlanField>
+              </div>
 
-                <PlanField label="Standortname">
-                  <input value={siteName} onChange={(event) => setSiteName(event.target.value)} placeholder="Objekt / Standort" />
+              <div className="opc-selected-site-box">
+                <span>Ausgewählter Standort</span>
+                <strong>{siteName || addressText || 'Wählen Sie zuerst einen Kunden aus.'}</strong>
+                {addressText || postalCode || city ? (
+                  <p>{[addressText, postalCode, city].filter(Boolean).join(', ')}</p>
+                ) : null}
+              </div>
+
+              <details className="opc-plan-expandable-card opc-plan-manual-location">
+                <summary>Manuelle Kundendaten / Standortdaten</summary>
+
+                <div className="opc-form-grid">
+                  <PlanField label="Kundenname manuell">
+                    <input value={clientName} onChange={(event) => setClientName(event.target.value)} placeholder="Kundenname" />
+                  </PlanField>
+
+                  <PlanField label="Standortname">
+                    <input value={siteName} onChange={(event) => setSiteName(event.target.value)} placeholder="Objekt / Standort" />
+                  </PlanField>
+
+                  <PlanField label="Adresse">
+                    <input value={addressText} onChange={(event) => setAddressText(event.target.value)} placeholder="Strasse und Nummer" />
+                  </PlanField>
+
+                  <PlanField label="PLZ">
+                    <input value={postalCode} onChange={(event) => setPostalCode(event.target.value)} placeholder="PLZ" />
+                  </PlanField>
+
+                  <PlanField label="Ort">
+                    <input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Ort" />
+                  </PlanField>
+                </div>
+              </details>
+            </PlanSectionCard>
+
+            <PlanSectionCard title="Einsatzdaten" icon={<CalendarDays size={17} />}>
+              <div className="opc-plan-two-row">
+                <PlanField label="Dienstleistung *">
+                  <input value={serviceCategory} onChange={(event) => setServiceCategory(event.target.value)} placeholder="Allgemeine Reinigung" />
                 </PlanField>
 
-                <PlanField label="Adresse">
-                  <input value={addressText} onChange={(event) => setAddressText(event.target.value)} placeholder="Strasse und Nummer" />
+                <PlanField label="Datum *">
+                  <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value || today)} />
+                </PlanField>
+              </div>
+
+              <div className="opc-plan-three-row">
+                <PlanField label="Startzeit *">
+                  <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
                 </PlanField>
 
-                <PlanField label="PLZ">
-                  <input value={postalCode} onChange={(event) => setPostalCode(event.target.value)} placeholder="PLZ" />
+                <PlanField label="Endzeit *">
+                  <input
+                    type="time"
+                    value={endTime}
+                    onChange={(event) => {
+                      setAutoEndTime(false);
+                      setEndTime(event.target.value);
+                    }}
+                  />
                 </PlanField>
 
-                <PlanField label="Ort">
-                  <input value={city} onChange={(event) => setCity(event.target.value)} placeholder="Ort" />
+                <PlanField label="Geschätzte Stunden">
+                  <input inputMode="decimal" value={estimatedHours} onChange={(event) => setEstimatedHours(event.target.value)} />
                 </PlanField>
+              </div>
 
-                <PlanField label="Service">
-                  <input value={serviceCategory} onChange={(event) => setServiceCategory(event.target.value)} placeholder="Unterhaltsreinigung, Fensterreinigung..." />
+              <div className="opc-plan-two-row">
+                <PlanField label="Status">
+                  <select value={status} onChange={(event) => setStatus(event.target.value)}>
+                    <option value="scheduled">Geplant</option>
+                    <option value="assigned">Zugewiesen</option>
+                    <option value="confirmed">Bestätigt</option>
+                  </select>
                 </PlanField>
 
                 <PlanField label="Priorität">
@@ -1939,43 +2230,8 @@ function EinsatzPlanningView() {
               </div>
 
               <PlanField label="Beschreibung">
-                <textarea value={serviceDescription} onChange={(event) => setServiceDescription(event.target.value)} placeholder="Kurze Beschreibung des Einsatzes." />
+                <textarea value={serviceDescription} onChange={(event) => setServiceDescription(event.target.value)} placeholder="Beschreiben Sie kurz, was vor Ort erledigt werden soll." />
               </PlanField>
-            </PlanSectionCard>
-
-            <PlanSectionCard title="Termin" icon={<CalendarDays size={17} />}>
-              <div className="opc-form-grid">
-                <PlanField label="Datum">
-                  <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value || today)} />
-                </PlanField>
-
-                <PlanField label="Startzeit">
-                  <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
-                </PlanField>
-
-                <PlanField label="Geschätzte Stunden">
-                  <input inputMode="decimal" value={estimatedHours} onChange={(event) => setEstimatedHours(event.target.value)} />
-                </PlanField>
-
-                <PlanField label="Endzeit">
-                  <input
-                    type="time"
-                    value={endTime}
-                    onChange={(event) => {
-                      setAutoEndTime(false);
-                      setEndTime(event.target.value);
-                    }}
-                  />
-                </PlanField>
-
-                <PlanField label="Status">
-                  <select value={status} onChange={(event) => setStatus(event.target.value)}>
-                    <option value="scheduled">Geplant</option>
-                    <option value="assigned">Zugewiesen</option>
-                    <option value="confirmed">Bestätigt</option>
-                  </select>
-                </PlanField>
-              </div>
 
               <button type="button" className="opc-soft-button" onClick={() => { setAutoEndTime(true); setEndTime(addHoursToTime(startTime, estimatedHours || '2')); }}>
                 <Clock3 size={15} />
@@ -2078,18 +2334,30 @@ function EinsatzPlanningView() {
               </div>
             </PlanSectionCard>
 
-            <PlanSectionCard title="Interne Hinweise" icon={<FileText size={17} />}>
+            <details className="opc-plan-expandable-card opc-plan-internal-notes">
+              <summary>
+                <span>
+                  <FileText size={17} />
+                  Interne Hinweise
+                </span>
+                <strong>Selten benötigt</strong>
+              </summary>
+
               <textarea
                 value={internalNotes}
                 onChange={(event) => setInternalNotes(event.target.value)}
                 placeholder="Interne Hinweise für Disposition, Admin oder Team. Diese Hinweise sind nicht für Kunden gedacht."
               />
-            </PlanSectionCard>
+            </details>
 
-            <div className="opc-plan-bottom-save" style={cardStyle}>
-              <button type="button" className="opc-save-button full" disabled={saving} onClick={() => void handleSave()}>
+            <div className="opc-plan-bottom-actions" style={cardStyle}>
+              <a className="opc-save-button light" href={`${baseUrl}/einsaetze`}>
+                Abbrechen
+              </a>
+
+              <button type="button" className="opc-save-button" disabled={saving} onClick={() => void handleSave()}>
                 {saving ? <Loader2 size={16} className="spin" /> : <Save size={16} />}
-                {saving ? 'Speichert...' : 'Speichern'}
+                {saving ? 'Speichert...' : 'Einsatz erstellen'}
               </button>
             </div>
           </div>
@@ -2105,27 +2373,151 @@ function EinsatzPlanningView() {
           box-sizing: border-box;
         }
 
+        .opc-plan-top-back {
+          margin-bottom: 14px;
+        }
+
         .opc-plan-hero {
+          position: relative;
           padding: 24px;
+          margin-bottom: 14px;
+        }
+
+        .opc-plan-hero-main {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          align-items: flex-start;
+          padding-right: 64px;
+        }
+
+        .opc-plan-status-dot {
+          position: absolute;
+          top: 20px;
+          right: 20px;
+          width: 42px;
+          height: 42px;
+          border-radius: 999px;
+          border: 1px solid #FDE68A;
+          background: #FEF3C7;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .opc-plan-status-dot span {
+          width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          display: block;
+          background: #F59E0B;
+        }
+
+        .opc-plan-eyebrow {
+          font-size: 12px;
+          color: ${BRAND.muted};
+          font-weight: 760;
+          margin-bottom: 6px;
+        }
+
+        .opc-plan-hero h1 {
+          margin: 0;
+          color: ${BRAND.text};
+          font-size: 29px;
+          line-height: 1.05;
+          letter-spacing: -0.045em;
+          font-weight: 860;
+        }
+
+        .opc-plan-hero-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin-top: 9px;
+          font-size: 13px;
+          font-weight: 720;
+          color: ${BRAND.muted};
+        }
+
+        .opc-plan-hero-button-bar {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 18px;
+          width: 100%;
+        }
+
+        .opc-plan-hero-button-bar .opc-save-button {
+          width: 100%;
+          height: 46px;
+        }
+
+        .opc-plan-metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .opc-plan-metric-card {
+          min-height: 74px;
+          padding: 16px 18px;
           display: flex;
           justify-content: space-between;
           align-items: center;
-          gap: 18px;
-          margin-bottom: 14px;
+          gap: 12px;
+          background: #FFFFFF;
+          border: 1px solid ${BRAND.border};
+          border-radius: 18px;
+          box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+        }
+
+        .opc-plan-metric-value {
+          font-size: 22px;
+          line-height: 1.05;
+          font-weight: 860;
+          letter-spacing: -0.035em;
+          color: ${BRAND.text};
+        }
+
+        .opc-plan-metric-label {
+          margin-top: 5px;
+          font-size: 12px;
+          font-weight: 820;
+          color: ${BRAND.muted};
+        }
+
+        .opc-plan-metric-helper {
+          margin-top: 4px;
+          font-size: 11px;
+          font-weight: 680;
+          color: #9CA3AF;
+        }
+
+        .opc-plan-metric-icon {
+          width: 36px;
+          height: 36px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 13px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: ${BRAND.black};
+          background: #FAFAFA;
+          flex: 0 0 auto;
         }
 
         .opc-back-link {
           display: inline-flex;
           align-items: center;
-          gap: 7px;
-          height: 34px;
-          padding: 0 12px;
-          margin-bottom: 12px;
+          height: 38px;
+          padding: 0 14px;
+          margin-bottom: 14px;
           border: 1px solid ${BRAND.border};
           border-radius: 999px;
           color: ${BRAND.text};
           text-decoration: none;
-          font-size: 12px;
+          font-size: 13px;
           font-weight: 760;
           background: #FFFFFF;
         }
@@ -2163,6 +2555,13 @@ function EinsatzPlanningView() {
           width: 100%;
         }
 
+        .opc-save-button.light {
+          border-color: ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+        }
+
+
         .opc-save-button:disabled {
           opacity: 0.6;
           cursor: not-allowed;
@@ -2194,6 +2593,136 @@ function EinsatzPlanningView() {
           border: 1px solid #BBF7D0;
           background: #F0FDF4;
           color: ${BRAND.green};
+        }
+
+        .opc-plan-top-back {
+          margin-bottom: 14px;
+        }
+
+        .opc-plan-two-row {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+
+        .opc-plan-three-row {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+
+        .opc-selected-site-box {
+          border: 1px solid #F3F4F6;
+          border-radius: 16px;
+          background: #FAFAFA;
+          padding: 13px 14px;
+          margin-top: 12px;
+          color: ${BRAND.text};
+        }
+
+        .opc-selected-site-box span {
+          display: block;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 800;
+          margin-bottom: 5px;
+        }
+
+        .opc-selected-site-box strong {
+          display: block;
+          font-size: 13px;
+          font-weight: 820;
+          color: ${BRAND.text};
+        }
+
+        .opc-selected-site-box p {
+          margin: 4px 0 0;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 650;
+        }
+
+        .opc-plan-expandable-card {
+          background: #FFFFFF;
+          border: 1px solid ${BRAND.border};
+          border-radius: 20px;
+          box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+          padding: 0;
+          overflow: hidden;
+        }
+
+        .opc-plan-expandable-card summary {
+          min-height: 58px;
+          padding: 0 18px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          cursor: pointer;
+          list-style: none;
+          color: ${BRAND.text};
+          font-size: 18px;
+          font-weight: 860;
+          letter-spacing: -0.035em;
+        }
+
+        .opc-plan-expandable-card summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .opc-plan-expandable-card summary span {
+          display: inline-flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .opc-plan-expandable-card summary strong {
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 760;
+          letter-spacing: 0;
+        }
+
+        .opc-plan-expandable-card[open] summary {
+          border-bottom: 1px solid #F3F4F6;
+        }
+
+        .opc-plan-expandable-card textarea {
+          width: calc(100% - 36px);
+          min-height: 110px;
+          margin: 18px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 10px 12px;
+          font-size: 14px;
+          font-weight: 650;
+          font-family: ${pageFont};
+          outline: none;
+          resize: vertical;
+        }
+
+        .opc-plan-manual-location {
+          margin-top: 12px;
+          background: #FAFAFA;
+        }
+
+        .opc-plan-manual-location .opc-form-grid {
+          padding: 18px;
+        }
+
+        .opc-plan-bottom-actions {
+          padding: 14px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .opc-plan-bottom-actions .opc-save-button {
+          width: 100%;
         }
 
         .opc-plan-grid.single {
@@ -2368,6 +2897,47 @@ function EinsatzPlanningView() {
         }
 
         @media (max-width: 740px) {
+          .opc-plan-two-row,
+          .opc-plan-three-row,
+          .opc-plan-bottom-actions {
+            grid-template-columns: 1fr;
+          }
+
+          .opc-plan-expandable-card summary {
+            min-height: 54px;
+            padding: 0 14px;
+            font-size: 17px;
+          }
+
+          .opc-plan-expandable-card textarea {
+            width: calc(100% - 28px);
+            margin: 14px;
+          }
+
+          .opc-plan-hero {
+            padding: 18px;
+          }
+
+          .opc-plan-hero-main {
+            padding-right: 52px;
+          }
+
+          .opc-plan-hero h1 {
+            font-size: 25px;
+          }
+
+          .opc-plan-hero-button-bar,
+          .opc-plan-metrics-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .opc-plan-status-dot {
+            top: 16px;
+            right: 16px;
+            width: 38px;
+            height: 38px;
+          }
+
           .opc-plan-page {
             padding: 0 8px 110px;
           }

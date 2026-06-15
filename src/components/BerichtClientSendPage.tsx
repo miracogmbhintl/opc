@@ -240,6 +240,7 @@ function normalize(value?: string | null) {
 function roleKey(role?: string | null) {
   const clean = normalize(role);
 
+  if (clean === 'godmode' || clean === 'superadmin' || clean === 'super_admin') return 'godmode';
   if (clean === 'owner' || clean === 'inhaber') return 'owner';
   if (clean === 'admin' || clean === 'administrator') return 'admin';
   if (clean === 'dispatch' || clean === 'dispatcher' || clean === 'disposition') return 'dispatch';
@@ -251,7 +252,7 @@ function roleKey(role?: string | null) {
 }
 
 function isManagerRole(role?: string | null) {
-  return ['owner', 'admin', 'dispatch', 'manager'].includes(roleKey(role));
+  return ['godmode', 'owner', 'admin', 'dispatch', 'manager'].includes(roleKey(role));
 }
 
 function getFirstValue(row: JsonRecord | null | undefined, keys: string[], fallback = '') {

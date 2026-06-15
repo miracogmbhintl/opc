@@ -118,6 +118,57 @@ const periodOptions: { value: PeriodPreset; label: string }[] = [
 const pageFont =
   '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
 
+const BRAND = {
+  text: '#111827',
+  muted: '#6B7280',
+  faint: '#9CA3AF',
+  border: '#E5E7EB',
+  black: '#0F1115',
+  card: '#FFFFFF',
+  soft: '#FAFAFA',
+  green: '#166534',
+  red: '#B91C1C',
+};
+
+const cardStyle: CSSProperties = {
+  background: BRAND.card,
+  border: `1px solid ${BRAND.border}`,
+  borderRadius: '20px',
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+};
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  minHeight: '44px',
+  border: `1px solid ${BRAND.border}`,
+  borderRadius: '14px',
+  padding: '10px 12px',
+  fontSize: '14px',
+  fontWeight: 620,
+  color: BRAND.text,
+  outline: 'none',
+  fontFamily: pageFont,
+  background: '#FFFFFF',
+  boxSizing: 'border-box',
+};
+
+const textareaStyle: CSSProperties = {
+  width: '100%',
+  minHeight: '110px',
+  border: `1px solid ${BRAND.border}`,
+  borderRadius: '14px',
+  padding: '10px 12px',
+  fontSize: '14px',
+  fontWeight: 620,
+  color: BRAND.text,
+  outline: 'none',
+  fontFamily: pageFont,
+  background: '#FFFFFF',
+  resize: 'vertical',
+  boxSizing: 'border-box',
+  lineHeight: 1.5,
+};
+
 function todayInputValue() {
   const today = new Date();
   const offset = today.getTimezoneOffset();
@@ -242,79 +293,21 @@ function getEmployeeName(employee?: EmployeeOption | null) {
 
 function FieldLabel({ children, required = false }: { children: ReactNode; required?: boolean }) {
   return (
-    <label
-      style={{
-        display: 'block',
-        fontSize: '13px',
-        fontWeight: 700,
-        color: '#111111',
-        marginBottom: '7px',
-      }}
-    >
+    <label className="opc-field-label">
       {children}
-      {required && <span style={{ color: '#D97706' }}> *</span>}
+      {required && <span> *</span>}
     </label>
   );
 }
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div
-      style={{
-        background: '#FFFFFF',
-        border: '1px solid #E5E7EB',
-        borderRadius: '22px',
-        padding: '26px',
-        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-        marginBottom: '22px',
-      }}
-    >
-      <h2
-        style={{
-          margin: '0 0 20px',
-          fontSize: '17px',
-          fontWeight: 760,
-          color: '#111111',
-          letterSpacing: '-0.02em',
-        }}
-      >
-        {title}
-      </h2>
-
+    <section className="opc-plan-card" style={cardStyle}>
+      <h2>{title}</h2>
       {children}
-    </div>
+    </section>
   );
 }
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  height: '46px',
-  border: '1px solid #E5E7EB',
-  borderRadius: '12px',
-  padding: '0 14px',
-  fontSize: '14px',
-  color: '#111111',
-  outline: 'none',
-  fontFamily: 'inherit',
-  background: '#FFFFFF',
-  boxSizing: 'border-box',
-};
-
-const textareaStyle: CSSProperties = {
-  width: '100%',
-  minHeight: '110px',
-  border: '1px solid #E5E7EB',
-  borderRadius: '12px',
-  padding: '13px 14px',
-  fontSize: '14px',
-  color: '#111111',
-  outline: 'none',
-  fontFamily: 'inherit',
-  background: '#FFFFFF',
-  resize: 'vertical',
-  boxSizing: 'border-box',
-  lineHeight: 1.5,
-};
 
 export default function CreateProjectForm() {
   const [form, setForm] = useState<FormState>(() => createInitialFormState());
@@ -401,7 +394,7 @@ export default function CreateProjectForm() {
           primary_site_address,
           primary_site_postal_code,
           primary_site_city
-        `
+        `,
         )
         .order('billing_name', { ascending: true });
 
@@ -721,111 +714,39 @@ export default function CreateProjectForm() {
 
   return (
     <MirakaDashboardShell
-      title="Einsatz planen"
       requiredRole={['owner', 'admin', 'dispatch']}
       currentPath="/einsatz-planen"
-      hideTopBar={false}
-      fullWidth={false}
+      hideTopBar={true}
+      fullWidth={true}
     >
-      <div style={{ maxWidth: '1080px', margin: '0 auto', fontFamily: pageFont }}>
-        <div style={{ marginBottom: '28px' }}>
-          <a
-            href={`${baseUrl}/einsaetze`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              color: '#6B7280',
-              textDecoration: 'none',
-              fontSize: '14px',
-              fontWeight: 600,
-              marginBottom: '18px',
-            }}
-          >
-            Zurück zu Einsätze
-          </a>
-
-          <h1
-            style={{
-              margin: 0,
-              fontSize: '34px',
-              lineHeight: 1.1,
-              fontWeight: 780,
-              letterSpacing: '-0.04em',
-              color: '#111111',
-            }}
-          >
-            Einsatz planen
-          </h1>
-
-          <p
-            style={{
-              margin: '10px 0 0',
-              fontSize: '15px',
-              color: '#6B7280',
-              lineHeight: 1.6,
-            }}
-          >
-            Erfassen Sie einen neuen Reinigungseinsatz für einen bestehenden Kunden.
-          </p>
-        </div>
+      <div className="opc-create-page" style={{ fontFamily: pageFont }}>
+        <a href={`${baseUrl}/einsaetze`} className="opc-back-link">
+          ← Zurück zu Einsätze
+        </a>
 
         {databaseError && (
-          <div
-            style={{
-              background: '#FEF2F2',
-              border: '1px solid #FECACA',
-              color: '#991B1B',
-              borderRadius: '14px',
-              padding: '16px',
-              marginBottom: '18px',
-              fontSize: '14px',
-              fontWeight: 650,
-              lineHeight: 1.5,
-            }}
-          >
+          <div className="opc-plan-error">
             {databaseError}
           </div>
         )}
 
         {successJobId && (
-          <div
-            style={{
-              background: '#ECFDF5',
-              border: '1px solid #A7F3D0',
-              color: '#065F46',
-              borderRadius: '14px',
-              padding: '16px',
-              marginBottom: '18px',
-              fontSize: '14px',
-              fontWeight: 650,
-              lineHeight: 1.5,
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: '12px',
-              flexWrap: 'wrap',
-            }}
-          >
+          <div className="opc-plan-message">
             <span>
               {successCount > 1
                 ? `${successCount} Einsätze wurden erstellt.`
                 : 'Der Einsatz wurde erstellt.'}
             </span>
-            <a
-              href={`${baseUrl}/einsatz/${successJobId}`}
-              style={{
-                color: '#065F46',
-                fontWeight: 750,
-                textDecoration: 'underline',
-              }}
-            >
+
+            <a href={`${baseUrl}/einsatz/${successJobId}`}>
               Ersten Einsatz öffnen
             </a>
           </div>
         )}
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} className="opc-create-form">
           <Card title="Kunde und Standort">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '18px' }}>
+            <div className="opc-customer-grid">
               <div>
                 <FieldLabel required>Kunde</FieldLabel>
                 <select
@@ -874,58 +795,31 @@ export default function CreateProjectForm() {
                   ))}
                 </select>
               </div>
+            </div>
 
-              <div
-                style={{
-                  border: '1px solid #F3F4F6',
-                  background: '#FAFAFA',
-                  borderRadius: '16px',
-                  padding: '16px',
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: '13px',
-                    color: '#6B7280',
-                    fontWeight: 700,
-                    marginBottom: '6px',
-                  }}
-                >
-                  Ausgewählter Standort
-                </div>
+            <div className="opc-selected-site-box">
+              <span>Ausgewählter Standort</span>
 
-                <div
-                  style={{
-                    fontSize: '14px',
-                    color: '#111111',
-                    fontWeight: 650,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {selectedSite
-                    ? getSiteLabel(selectedSite)
-                    : form.clientId
-                      ? 'Bitte Standort auswählen.'
-                      : 'Wählen Sie zuerst einen Kunden aus.'}
-                </div>
+              <strong>
+                {selectedSite
+                  ? getSiteLabel(selectedSite)
+                  : form.clientId
+                    ? 'Bitte Standort auswählen.'
+                    : 'Wählen Sie zuerst einen Kunden aus.'}
+              </strong>
 
-                {selectedSite?.access_notes && (
-                  <div style={{ marginTop: '10px', fontSize: '13px', color: '#6B7280', lineHeight: 1.5 }}>
-                    Zugang: {selectedSite.access_notes}
-                  </div>
-                )}
+              {selectedSite?.access_notes && (
+                <p>Zugang: {selectedSite.access_notes}</p>
+              )}
 
-                {selectedSite?.cleaning_notes && (
-                  <div style={{ marginTop: '6px', fontSize: '13px', color: '#6B7280', lineHeight: 1.5 }}>
-                    Reinigung: {selectedSite.cleaning_notes}
-                  </div>
-                )}
-              </div>
+              {selectedSite?.cleaning_notes && (
+                <p>Reinigung: {selectedSite.cleaning_notes}</p>
+              )}
             </div>
           </Card>
 
           <Card title="Einsatzdaten">
-            <div className="opc-form-grid-two">
+            <div className="opc-einsatzdaten-row two">
               <div>
                 <FieldLabel required>Dienstleistung</FieldLabel>
                 <select
@@ -941,18 +835,6 @@ export default function CreateProjectForm() {
                 </select>
               </div>
 
-              {form.serviceCategory === 'Andere' && (
-                <div>
-                  <FieldLabel required>Eigene Dienstleistung</FieldLabel>
-                  <input
-                    value={form.customServiceCategory}
-                    onChange={(event) => updateField('customServiceCategory', event.target.value)}
-                    placeholder="z.B. Praxisreinigung"
-                    style={inputStyle}
-                  />
-                </div>
-              )}
-
               <div>
                 <FieldLabel required>Datum</FieldLabel>
                 <input
@@ -962,7 +844,21 @@ export default function CreateProjectForm() {
                   style={inputStyle}
                 />
               </div>
+            </div>
 
+            {form.serviceCategory === 'Andere' && (
+              <div className="opc-einsatzdaten-full">
+                <FieldLabel required>Eigene Dienstleistung</FieldLabel>
+                <input
+                  value={form.customServiceCategory}
+                  onChange={(event) => updateField('customServiceCategory', event.target.value)}
+                  placeholder="z.B. Praxisreinigung"
+                  style={inputStyle}
+                />
+              </div>
+            )}
+
+            <div className="opc-einsatzdaten-row three">
               <div>
                 <FieldLabel required>Startzeit</FieldLabel>
                 <input
@@ -1013,10 +909,16 @@ export default function CreateProjectForm() {
                   style={inputStyle}
                 />
               </div>
+            </div>
 
+            <div className="opc-einsatzdaten-row two">
               <div>
                 <FieldLabel>Status</FieldLabel>
-                <select value={form.status} onChange={(event) => updateField('status', event.target.value)} style={inputStyle}>
+                <select
+                  value={form.status}
+                  onChange={(event) => updateField('status', event.target.value)}
+                  style={inputStyle}
+                >
                   {statusOptions.map((status) => (
                     <option key={status.value} value={status.value}>
                       {status.label}
@@ -1027,7 +929,11 @@ export default function CreateProjectForm() {
 
               <div>
                 <FieldLabel>Priorität</FieldLabel>
-                <select value={form.priority} onChange={(event) => updateField('priority', event.target.value)} style={inputStyle}>
+                <select
+                  value={form.priority}
+                  onChange={(event) => updateField('priority', event.target.value)}
+                  style={inputStyle}
+                >
                   {priorityOptions.map((priority) => (
                     <option key={priority.value} value={priority.value}>
                       {priority.label}
@@ -1037,7 +943,7 @@ export default function CreateProjectForm() {
               </div>
             </div>
 
-            <div style={{ marginTop: '18px' }}>
+            <div className="opc-einsatzdaten-full">
               <FieldLabel>Beschreibung</FieldLabel>
               <textarea
                 value={form.serviceDescription}
@@ -1094,7 +1000,7 @@ export default function CreateProjectForm() {
                   ) : (
                     <div>
                       <FieldLabel>Enddatum</FieldLabel>
-                      <input value={computedEndDate || '-'} readOnly style={{ ...inputStyle, background: '#FAFAFA' }} />
+                      <input value={computedEndDate || '-'} readOnly style={{ ...inputStyle, background: BRAND.soft }} />
                     </div>
                   )}
 
@@ -1118,7 +1024,7 @@ export default function CreateProjectForm() {
             </div>
 
             {isRecurring && form.recurrenceType === 'weekdays' && (
-              <div style={{ marginTop: '18px' }}>
+              <div className="opc-weekday-block">
                 <FieldLabel required>Wochentage</FieldLabel>
                 <div className="opc-weekday-row">
                   {weekdayOptions.map((day) => {
@@ -1140,19 +1046,7 @@ export default function CreateProjectForm() {
             )}
 
             {isRecurring && (
-              <div
-                style={{
-                  marginTop: '18px',
-                  border: '1px solid #F3F4F6',
-                  background: '#FAFAFA',
-                  borderRadius: '16px',
-                  padding: '14px',
-                  fontSize: '13px',
-                  color: '#6B7280',
-                  lineHeight: 1.5,
-                  fontWeight: 650,
-                }}
-              >
+              <div className="opc-recurrence-note">
                 Jeder generierte Termin wird als eigener Einsatz gespeichert. Dadurch bleiben Fotos, Zeiten, Notizen und Berichte pro Tag getrennt.
               </div>
             )}
@@ -1160,9 +1054,9 @@ export default function CreateProjectForm() {
 
           <Card title="Mitarbeiter zuweisen">
             {loadingEmployees ? (
-              <div style={{ color: '#6B7280', fontSize: '14px', fontWeight: 650 }}>Mitarbeiter werden geladen...</div>
+              <div className="opc-empty-box">Mitarbeiter werden geladen...</div>
             ) : employees.length === 0 ? (
-              <div style={{ color: '#6B7280', fontSize: '14px', fontWeight: 650 }}>Keine aktiven Mitarbeiter gefunden.</div>
+              <div className="opc-empty-box">Keine aktiven Mitarbeiter gefunden.</div>
             ) : (
               <div className="opc-employee-grid">
                 {employees.map((employee) => {
@@ -1188,7 +1082,7 @@ export default function CreateProjectForm() {
             )}
 
             {selectedEmployees.length > 0 && (
-              <div style={{ marginTop: '18px' }}>
+              <div className="opc-assignment-note">
                 <FieldLabel>Zuweisungsnotiz</FieldLabel>
                 <textarea
                   value={form.assignmentNote}
@@ -1200,8 +1094,13 @@ export default function CreateProjectForm() {
             )}
           </Card>
 
-          <Card title="Interne Hinweise">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '18px' }}>
+          <details className="opc-expandable-card">
+            <summary>
+              <span>Interne Hinweise</span>
+              <strong>Selten benötigt</strong>
+            </summary>
+
+            <div className="opc-expandable-body">
               <div>
                 <FieldLabel>Dispo-Notizen</FieldLabel>
                 <textarea
@@ -1232,74 +1131,26 @@ export default function CreateProjectForm() {
                 />
               </div>
 
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  fontSize: '14px',
-                  color: '#111111',
-                  fontWeight: 650,
-                  cursor: 'pointer',
-                }}
-              >
+              <label className="opc-checkbox-row">
                 <input
                   type="checkbox"
                   checked={form.reportRequired}
                   onChange={(event) => updateField('reportRequired', event.target.checked)}
-                  style={{ width: '16px', height: '16px' }}
                 />
                 Bericht für diesen Einsatz vorbereiten
               </label>
             </div>
-          </Card>
+          </details>
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: '12px',
-              marginBottom: '60px',
-            }}
-          >
-            <a
-              href={`${baseUrl}/einsaetze`}
-              style={{
-                height: '46px',
-                padding: '0 18px',
-                borderRadius: '12px',
-                border: '1px solid #E5E7EB',
-                background: '#FFFFFF',
-                color: '#111111',
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '14px',
-                fontWeight: 650,
-              }}
-            >
+          <div className="opc-bottom-actions" style={cardStyle}>
+            <a href={`${baseUrl}/einsaetze`} className="opc-action-button light">
               Abbrechen
             </a>
 
             <button
               type="submit"
               disabled={submitting}
-              style={{
-                height: '46px',
-                padding: '0 20px',
-                borderRadius: '12px',
-                border: 'none',
-                background: submitting ? '#9CA3AF' : '#111111',
-                color: '#FFFFFF',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '14px',
-                fontWeight: 700,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit',
-              }}
+              className="opc-action-button dark"
             >
               {submitting
                 ? isRecurring
@@ -1314,10 +1165,200 @@ export default function CreateProjectForm() {
       </div>
 
       <style>{`
-        .opc-form-grid-two {
+        .opc-create-page {
+          width: 100%;
+          max-width: none;
+          margin: 0;
+          padding: 0 0 140px;
+          color: ${BRAND.text};
+        }
+
+        .opc-create-page * {
+          box-sizing: border-box;
+        }
+
+        .opc-create-page input,
+        .opc-create-page select {
+          height: 56px !important;
+          min-height: 56px !important;
+          border-radius: 18px !important;
+          font-size: 15px !important;
+          font-weight: 720 !important;
+          line-height: 1.2 !important;
+        }
+
+        .opc-create-page select {
+          appearance: none !important;
+          -webkit-appearance: none !important;
+          background-color: #FFFFFF !important;
+          background-image:
+            linear-gradient(45deg, transparent 50%, ${BRAND.text} 50%),
+            linear-gradient(135deg, ${BRAND.text} 50%, transparent 50%);
+          background-position:
+            calc(100% - 18px) calc(50% - 4px),
+            calc(100% - 18px) calc(50% + 4px);
+          background-size:
+            7px 7px,
+            7px 7px;
+          background-repeat: no-repeat;
+          padding-right: 42px !important;
+        }
+
+        .opc-create-page input[type="date"],
+        .opc-create-page input[type="time"],
+        .opc-create-page input[type="number"] {
+          appearance: none;
+          -webkit-appearance: none;
+        }
+
+
+        .opc-back-link {
+          display: inline-flex;
+          align-items: center;
+          height: 34px;
+          padding: 0 13px;
+          margin-bottom: 12px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 999px;
+          color: ${BRAND.text};
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 760;
+          background: #FFFFFF;
+        }
+
+        .opc-create-form {
+          display: grid;
+          gap: 12px;
+        }
+
+        .opc-plan-card,
+        .opc-expandable-card,
+        .opc-bottom-actions {
+          background: #FFFFFF;
+          border: 1px solid ${BRAND.border};
+          border-radius: 20px;
+          box-shadow: 0 1px 2px rgba(15, 17, 21, 0.04);
+        }
+
+        .opc-plan-card {
+          padding: 16px 18px;
+        }
+
+        .opc-plan-card h2 {
+          margin: 0 0 14px;
+          color: ${BRAND.text};
+          font-size: 18px;
+          line-height: 1.15;
+          letter-spacing: -0.035em;
+          font-weight: 840;
+        }
+
+        .opc-field-label {
+          display: block;
+          font-size: 12px;
+          font-weight: 760;
+          color: #374151;
+          margin-bottom: 7px;
+          letter-spacing: -0.01em;
+        }
+
+        .opc-field-label span {
+          color: #D97706;
+        }
+
+        .opc-plan-error,
+        .opc-plan-message {
+          border-radius: 18px;
+          padding: 16px 18px;
+          font-size: 14px;
+          font-weight: 720;
+          margin-bottom: 14px;
+        }
+
+        .opc-plan-error {
+          border: 1px solid #FECACA;
+          color: #991B1B;
+          background: #FEF2F2;
+        }
+
+        .opc-plan-message {
+          border: 1px solid #BBF7D0;
+          color: #166534;
+          background: #F0FDF4;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .opc-plan-message a {
+          color: #166534;
+          font-weight: 800;
+          text-decoration: underline;
+        }
+
+        .opc-customer-grid,
+        .opc-form-grid-two,
+        .opc-einsatzdaten-row.two {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 18px;
+          gap: 12px;
+        }
+
+        .opc-einsatzdaten-row.three {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .opc-einsatzdaten-row,
+        .opc-einsatzdaten-full {
+          margin-bottom: 12px;
+        }
+
+        .opc-einsatzdaten-full:last-child,
+        .opc-einsatzdaten-row:last-child {
+          margin-bottom: 0;
+        }
+
+        .opc-selected-site-box {
+          border: 1px solid #F3F4F6;
+          border-radius: 16px;
+          background: #FAFAFA;
+          padding: 13px 14px;
+          margin-top: 12px;
+          color: ${BRAND.text};
+        }
+
+        .opc-selected-site-box span {
+          display: block;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 800;
+          margin-bottom: 5px;
+        }
+
+        .opc-selected-site-box strong {
+          display: block;
+          font-size: 13px;
+          font-weight: 820;
+          color: ${BRAND.text};
+          line-height: 1.45;
+        }
+
+        .opc-selected-site-box p {
+          margin: 6px 0 0;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 650;
+          line-height: 1.45;
+        }
+
+        .opc-weekday-block,
+        .opc-assignment-note {
+          margin-top: 18px;
         }
 
         .opc-weekday-row {
@@ -1331,19 +1372,35 @@ export default function CreateProjectForm() {
           min-width: 52px;
           padding: 0 14px;
           border-radius: 999px;
-          border: 1px solid #E5E7EB;
+          border: 1px solid ${BRAND.border};
           background: #FFFFFF;
-          color: #111111;
+          color: ${BRAND.text};
           font-size: 13px;
           font-weight: 750;
           cursor: pointer;
-          font-family: inherit;
+          font-family: ${pageFont};
         }
 
         .opc-choice-pill.active {
-          background: #111111;
+          background: ${BRAND.black};
           color: #FFFFFF;
-          border-color: #111111;
+          border-color: ${BRAND.black};
+        }
+
+        .opc-recurrence-note,
+        .opc-empty-box {
+          border: 1px solid #F3F4F6;
+          background: #FAFAFA;
+          border-radius: 16px;
+          padding: 14px;
+          font-size: 13px;
+          color: ${BRAND.muted};
+          line-height: 1.5;
+          font-weight: 650;
+        }
+
+        .opc-recurrence-note {
+          margin-top: 18px;
         }
 
         .opc-employee-grid {
@@ -1358,18 +1415,18 @@ export default function CreateProjectForm() {
           grid-template-columns: 42px minmax(0, 1fr) auto;
           gap: 11px;
           align-items: center;
-          border: 1px solid #E5E7EB;
+          border: 1px solid ${BRAND.border};
           border-radius: 16px;
           padding: 11px;
           background: #FFFFFF;
-          color: #111111;
+          color: ${BRAND.text};
           text-align: left;
           cursor: pointer;
-          font-family: inherit;
+          font-family: ${pageFont};
         }
 
         .opc-employee-card.active {
-          border-color: #111111;
+          border-color: ${BRAND.black};
           background: #FAFAFA;
         }
 
@@ -1380,7 +1437,7 @@ export default function CreateProjectForm() {
           align-items: center;
           justify-content: center;
           border-radius: 999px;
-          background: #111111;
+          background: ${BRAND.black};
           color: #FFFFFF;
           font-size: 14px;
           font-weight: 860;
@@ -1395,7 +1452,7 @@ export default function CreateProjectForm() {
         .opc-employee-copy strong {
           font-size: 14px;
           font-weight: 780;
-          color: #111111;
+          color: ${BRAND.text};
           overflow: hidden;
           white-space: nowrap;
           text-overflow: ellipsis;
@@ -1404,7 +1461,7 @@ export default function CreateProjectForm() {
         .opc-employee-copy span {
           font-size: 12px;
           font-weight: 650;
-          color: #6B7280;
+          color: ${BRAND.muted};
           overflow: hidden;
           white-space: nowrap;
           text-overflow: ellipsis;
@@ -1418,30 +1475,165 @@ export default function CreateProjectForm() {
           padding: 0 11px;
           border-radius: 999px;
           background: #F3F4F6;
-          color: #6B7280;
+          color: ${BRAND.muted};
           font-size: 12px;
           font-weight: 760;
           white-space: nowrap;
         }
 
         .opc-employee-card.active .opc-employee-check {
-          background: #111111;
+          background: ${BRAND.black};
           color: #FFFFFF;
         }
 
+        .opc-expandable-card {
+          overflow: hidden;
+        }
+
+        .opc-expandable-card summary {
+          min-height: 58px;
+          padding: 0 18px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          cursor: pointer;
+          list-style: none;
+          color: ${BRAND.text};
+          font-size: 19px;
+          font-weight: 860;
+          letter-spacing: -0.035em;
+        }
+
+        .opc-expandable-card summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .opc-expandable-card summary strong {
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 760;
+          letter-spacing: 0;
+        }
+
+        .opc-expandable-card[open] summary {
+          border-bottom: 1px solid #F3F4F6;
+        }
+
+        .opc-expandable-body {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 18px;
+          padding: 18px;
+        }
+
+        .opc-checkbox-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          font-size: 14px;
+          color: ${BRAND.text};
+          font-weight: 650;
+          cursor: pointer;
+        }
+
+        .opc-checkbox-row input {
+          width: 16px;
+          height: 16px;
+        }
+
+        .opc-bottom-actions {
+          padding: 12px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 60px;
+        }
+
+        .opc-action-button {
+          min-height: 46px;
+          padding: 0 18px;
+          border-radius: 14px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
+          font-weight: 820;
+          font-family: ${pageFont};
+          text-decoration: none;
+          cursor: pointer;
+          border: 1px solid ${BRAND.border};
+          white-space: nowrap;
+        }
+
+        .opc-action-button.light {
+          background: #FFFFFF;
+          color: ${BRAND.text};
+        }
+
+        .opc-action-button.dark {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-action-button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
         @media (max-width: 900px) {
+          .opc-create-page {
+            padding: 0 0 110px;
+          }
+
+          .opc-plan-card {
+            padding: 14px;
+            border-radius: 18px !important;
+          }
+
+          .opc-plan-card h2 {
+            font-size: 18px;
+          }
+
+          .opc-customer-grid,
           .opc-form-grid-two,
           .opc-employee-grid {
             grid-template-columns: 1fr !important;
           }
 
-          form > div:last-child {
-            flex-direction: column-reverse !important;
+          .opc-einsatzdaten-row.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
 
-          form > div:last-child a,
-          form > div:last-child button {
-            width: 100% !important;
+          .opc-einsatzdaten-row.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+
+          .opc-einsatzdaten-row.two,
+          .opc-einsatzdaten-row.three {
+            gap: 8px;
+          }
+
+          .opc-einsatzdaten-row.two input,
+          .opc-einsatzdaten-row.two select,
+          .opc-einsatzdaten-row.three input,
+          .opc-einsatzdaten-row.three select {
+            height: 52px !important;
+            min-height: 52px !important;
+            padding-left: 10px !important;
+            padding-right: 34px !important;
+            font-size: 13px !important;
+          }
+
+          .opc-bottom-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            padding: 12px;
+          }
+
+          .opc-action-button {
+            padding: 0 10px;
+            font-size: 13px;
           }
 
           .opc-employee-card {
@@ -1456,6 +1648,40 @@ export default function CreateProjectForm() {
           .opc-employee-check {
             grid-column: 1 / -1;
             width: 100%;
+          }
+
+          .opc-expandable-card summary {
+            min-height: 54px;
+            padding: 0 14px;
+            font-size: 17px;
+          }
+
+          .opc-expandable-body {
+            padding: 14px;
+          }
+        }
+
+        @media (max-width: 560px) {
+          .opc-einsatzdaten-row.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .opc-einsatzdaten-row.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+
+          .opc-einsatzdaten-row.three .opc-field-label,
+          .opc-einsatzdaten-row.two .opc-field-label {
+            font-size: 11px;
+          }
+
+          .opc-einsatzdaten-row.three input,
+          .opc-einsatzdaten-row.three select {
+            height: 50px !important;
+            min-height: 50px !important;
+            font-size: 12px !important;
+            padding-left: 8px !important;
+            padding-right: 30px !important;
           }
         }
       `}</style>

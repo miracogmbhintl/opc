@@ -13,7 +13,7 @@ import {
   opcSelectStyle,
   opcResponsiveStyle,
 } from './opc/OPCPageTop';
-import { ArrowLeft, Camera, Check, FileText, Image as ImageIcon, Save, UploadCloud } from 'lucide-react';
+import { ArrowLeft, Camera, Check, ChevronDown, FileText, Image as ImageIcon, MapPin, Save, UploadCloud, X } from 'lucide-react';
 
 type InspectionStatus = 'draft' | 'scheduled' | 'in_progress' | 'completed' | 'converted_to_quote' | 'cancelled';
 
@@ -49,6 +49,14 @@ type SiteRow = Record<string, any>;
 type ContactRow = Record<string, any>;
 type MediaRow = Record<string, any>;
 
+type ManualSiteAddress = {
+  site_name: string;
+  address_text: string;
+  postal_code: string;
+  city: string;
+  country: string;
+};
+
 type SiteInspectionDetailPageProps = {
   inspectionId: string;
 };
@@ -77,6 +85,14 @@ const emptyForm: InspectionForm = {
   estimated_hours: '',
   estimated_staff_count: '',
   scheduled_at: '',
+};
+
+const emptyManualSiteAddress: ManualSiteAddress = {
+  site_name: '',
+  address_text: '',
+  postal_code: '',
+  city: '',
+  country: 'Schweiz',
 };
 
 function clean(value: unknown) {
@@ -119,6 +135,45 @@ function buildAddressSnapshot(site?: SiteRow | null) {
     postal_code: site.postal_code || null,
     city: site.city || null,
     country: site.country || null,
+  };
+}
+
+function hasManualAddress(address: ManualSiteAddress) {
+  return Boolean(
+    clean(address.site_name) ||
+    clean(address.address_text) ||
+    clean(address.postal_code) ||
+    clean(address.city) ||
+    clean(address.country)
+  );
+}
+
+function buildInspectionAddressSnapshot(site?: SiteRow | null, manualSite?: ManualSiteAddress) {
+  if (site) return buildAddressSnapshot(site);
+
+  if (!manualSite || !hasManualAddress(manualSite)) return {};
+
+  return {
+    site_id: null,
+    site_name: clean(manualSite.site_name) || null,
+    site_type: null,
+    address_text: clean(manualSite.address_text) || null,
+    postal_code: clean(manualSite.postal_code) || null,
+    city: clean(manualSite.city) || null,
+    country: clean(manualSite.country) || null,
+    source: 'manual_inspection_address',
+  };
+}
+
+function manualAddressFromSnapshot(snapshot: any): ManualSiteAddress {
+  if (!snapshot || typeof snapshot !== 'object') return emptyManualSiteAddress;
+
+  return {
+    site_name: clean(snapshot.site_name),
+    address_text: clean(snapshot.address_text),
+    postal_code: clean(snapshot.postal_code),
+    city: clean(snapshot.city),
+    country: clean(snapshot.country) || 'Schweiz',
   };
 }
 
@@ -174,6 +229,9 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
   const [form, setForm] = useState<InspectionForm>(emptyForm);
   const [client, setClient] = useState<ClientRow | null>(null);
   const [site, setSite] = useState<SiteRow | null>(null);
+  const [manualSiteAddress, setManualSiteAddress] = useState<ManualSiteAddress>(emptyManualSiteAddress);
+  const [showAddressPopup, setShowAddressPopup] = useState(false);
+  const [showMoreNotes, setShowMoreNotes] = useState(false);
   const [contact, setContact] = useState<ContactRow | null>(null);
   const [mediaRows, setMediaRows] = useState<MediaRow[]>([]);
   const [existingQuoteId, setExistingQuoteId] = useState<string | null>(null);
@@ -209,6 +267,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         if (!clientId) throw new Error('Für eine neue Besichtigung fehlt die client_id. Bitte über die Kundenseite starten.');
 
         setForm({ ...emptyForm, client_id: clientId, client_site_id: siteId, contact_id: contactId, inquiry_id: inquiryId });
+        setManualSiteAddress(emptyManualSiteAddress);
         await loadReferences(clientId, siteId, contactId);
         return;
       }
@@ -244,6 +303,8 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         scheduled_at: isoToDateTimeLocal(data.scheduled_at),
       };
 
+      const addressSnapshot = data.address_snapshot && typeof data.address_snapshot === 'object' ? data.address_snapshot : null;
+      setManualSiteAddress(!data.client_site_id ? manualAddressFromSnapshot(addressSnapshot) : emptyManualSiteAddress);
       setForm(nextForm);
       await Promise.all([
         loadReferences(data.client_id, data.client_site_id, data.contact_id),
@@ -373,7 +434,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         bathroom_count: toIntOrNull(form.bathroom_count),
         floor_level: clean(form.floor_level) || null,
         has_elevator: form.has_elevator === '' ? null : form.has_elevator === 'true',
-        address_snapshot: buildAddressSnapshot(site),
+        address_snapshot: buildInspectionAddressSnapshot(site, manualSiteAddress),
         contact_snapshot: buildContactSnapshot(contact),
         inquiry_snapshot: {},
         access_notes: clean(form.access_notes) || null,
@@ -389,6 +450,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         completed_at: status === 'completed' && form.status !== 'completed' ? new Date().toISOString() : undefined,
         metadata: {
           source: isNew ? 'manual_from_client' : 'inspection_detail_page',
+          manual_inspection_address: !site && hasManualAddress(manualSiteAddress),
         },
         updated_at: new Date().toISOString(),
       };
@@ -593,6 +655,14 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
   }
 
   const mediaPreviewRows = useMemo(() => mediaRows.slice(0, 12), [mediaRows]);
+  const hasInspectionAddress = Boolean(site) || hasManualAddress(manualSiteAddress);
+  const currentSiteLabel = site
+    ? getSiteLabel(site)
+    : hasManualAddress(manualSiteAddress)
+      ? [manualSiteAddress.site_name, manualSiteAddress.address_text, manualSiteAddress.postal_code, manualSiteAddress.city, manualSiteAddress.country]
+        .filter(Boolean)
+        .join(' · ')
+      : 'Kein Standort';
 
   if (loading) {
     return (
@@ -606,34 +676,77 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={isNew ? '/besichtigung/neu' : `/besichtigung/${inspectionId}`} fullWidth hideTopBar>
       <OPCPageShell>
         <div style={topBarStyle} className="opc-mobile-topbar">
-          <a href={`${baseUrl}/besichtigungen`} className="opc-mobile-back" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+          <a href={`${baseUrl}/besichtigungen`} className="opc-mobile-back opc-top-pill" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
             <ArrowLeft size={16} />
             Zurück
           </a>
 
-          <div style={actionRowStyle} className="opc-mobile-action-row">
-            <button type="button" disabled={saving} onClick={() => saveInspection()} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
-              <Save size={16} />
-              {saving ? 'Speichert...' : 'Speichern'}
-            </button>
+          <button type="button" disabled={saving} onClick={() => saveInspection()} className="opc-top-pill" style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+            <Save size={16} />
+            {saving ? 'Speichert...' : 'Speichern'}
+          </button>
 
-            {canOpenOrCreateQuote && (
-              <button type="button" disabled={creatingQuote} onClick={createQuoteFromInspection} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
-                <FileText size={16} />
-                {creatingQuote ? 'Öffnet...' : existingQuoteId || form.status === 'converted_to_quote' ? 'Offerte öffnen' : 'Zur Offerte übergeben'}
-              </button>
-            )}
-          </div>
+          {canOpenOrCreateQuote && (
+            <button type="button" disabled={creatingQuote} onClick={createQuoteFromInspection} className="opc-top-pill" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <FileText size={16} />
+              {creatingQuote ? 'Öffnet...' : existingQuoteId || form.status === 'converted_to_quote' ? 'Offerte öffnen' : 'Zur Offerte übergeben'}
+            </button>
+          )}
         </div>
 
         <section style={heroStyle} className="opc-mobile-hero">
-          <div>
+          <span style={statusBadgeStyle} className="opc-inspection-status-top">{getInspectionStatusLabel(form.status)}</span>
+          <div style={{ minWidth: 0 }}>
             <p style={eyebrowStyle}>Besichtigung</p>
             <h1 style={titleStyle} className="opc-mobile-title">{isNew ? 'Neue Besichtigung' : 'Besichtigung bearbeiten'}</h1>
-            <p style={subtitleStyle}>{getClientLabel(client)} · {getSiteLabel(site)}</p>
+            <p style={subtitleStyle}>{getClientLabel(client)} · {currentSiteLabel}</p>
+            <button type="button" className="opc-address-trigger" onClick={() => setShowAddressPopup(true)}>
+              <MapPin size={15} />
+              {hasInspectionAddress ? 'Anderen Standort wählen' : '+ Adresse eintragen'}
+            </button>
           </div>
-          <span style={statusBadgeStyle}>{getInspectionStatusLabel(form.status)}</span>
         </section>
+
+        {showAddressPopup && (
+          <div className="opc-address-popup" role="dialog" aria-label="Besichtigungsadresse eintragen">
+            <div className="opc-address-popup-head">
+              <div>
+                <strong>{hasInspectionAddress ? 'Anderen Standort wählen' : 'Adresse eintragen'}</strong>
+                <span>Adresse nur für diese Besichtigung erfassen.</span>
+              </div>
+              <button type="button" onClick={() => setShowAddressPopup(false)} aria-label="Schliessen">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="opc-address-popup-grid">
+              <Field label="Standortname">
+                <input value={manualSiteAddress.site_name} onChange={(event) => setManualSiteAddress((current) => ({ ...current, site_name: event.target.value }))} style={inputStyle} placeholder="z.B. Wohnung Bianca Urs" />
+              </Field>
+              <Field label="Adresse">
+                <input value={manualSiteAddress.address_text} onChange={(event) => setManualSiteAddress((current) => ({ ...current, address_text: event.target.value }))} style={inputStyle} placeholder="Strasse und Nummer" />
+              </Field>
+              <Field label="PLZ">
+                <input value={manualSiteAddress.postal_code} onChange={(event) => setManualSiteAddress((current) => ({ ...current, postal_code: event.target.value }))} style={inputStyle} placeholder="PLZ" />
+              </Field>
+              <Field label="Ort">
+                <input value={manualSiteAddress.city} onChange={(event) => setManualSiteAddress((current) => ({ ...current, city: event.target.value }))} style={inputStyle} placeholder="Ort" />
+              </Field>
+              <Field label="Land">
+                <input value={manualSiteAddress.country} onChange={(event) => setManualSiteAddress((current) => ({ ...current, country: event.target.value }))} style={inputStyle} placeholder="Schweiz" />
+              </Field>
+            </div>
+
+            <div className="opc-address-popup-actions">
+              <button type="button" style={{ ...opcSecondaryButtonStyle, width: 'auto' }} onClick={() => setManualSiteAddress(emptyManualSiteAddress)}>
+                Zurücksetzen
+              </button>
+              <button type="button" style={{ ...opcBlackButtonStyle, width: 'auto' }} onClick={() => setShowAddressPopup(false)}>
+                Übernehmen
+              </button>
+            </div>
+          </div>
+        )}
 
         {successMessage && <div style={successStyle}><Check size={16} />{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
@@ -641,66 +754,79 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         <div style={gridStyle} className="opc-inspection-grid">
           <OPCListCard>
             <CardHeader title="Objekt & Leistung" />
-            <div style={fieldGridStyle} className="opc-inspection-field-grid">
-              <Field label="Leistung / Kategorie">
-                <input value={form.requested_service_category} onChange={(e) => updateField('requested_service_category', e.target.value)} style={inputStyle} placeholder="z.B. Endreinigung, Unterhaltsreinigung" />
-              </Field>
-              <Field label="Objektart">
-                <input value={form.property_type} onChange={(e) => updateField('property_type', e.target.value)} style={inputStyle} placeholder="Wohnung, Büro, Haus, Gewerbe" />
-              </Field>
-              <Field label="Fläche m²">
-                <input value={form.property_size_m2} onChange={(e) => updateField('property_size_m2', e.target.value)} style={inputStyle} inputMode="decimal" />
-              </Field>
-              <Field label="Zimmer">
-                <input value={form.room_count} onChange={(e) => updateField('room_count', e.target.value)} style={inputStyle} inputMode="decimal" />
-              </Field>
-              <Field label="Nasszellen">
-                <input value={form.bathroom_count} onChange={(e) => updateField('bathroom_count', e.target.value)} style={inputStyle} inputMode="numeric" />
-              </Field>
-              <Field label="Etage">
-                <input value={form.floor_level} onChange={(e) => updateField('floor_level', e.target.value)} style={inputStyle} />
-              </Field>
-              <Field label="Lift vorhanden">
-                <select value={form.has_elevator} onChange={(e) => updateField('has_elevator', e.target.value)} style={opcSelectStyle}>
-                  <option value="">Unbekannt</option>
-                  <option value="true">Ja</option>
-                  <option value="false">Nein</option>
-                </select>
-              </Field>
-              <Field label="Besichtigungstermin">
-                <input type="datetime-local" value={form.scheduled_at} onChange={(e) => updateField('scheduled_at', e.target.value)} style={inputStyle} />
-              </Field>
+            <div className="opc-inspection-field-stack">
+              <div className="opc-inspection-row two">
+                <Field label="Leistung / Kategorie">
+                  <input value={form.requested_service_category} onChange={(e) => updateField('requested_service_category', e.target.value)} style={inputStyle} placeholder="z.B. Endreinigung, Unterhaltsreinigung" />
+                </Field>
+                <Field label="Objektart">
+                  <input value={form.property_type} onChange={(e) => updateField('property_type', e.target.value)} style={inputStyle} placeholder="Wohnung, Büro, Haus, Gewerbe" />
+                </Field>
+              </div>
+
+              <div className="opc-inspection-row three">
+                <Field label="Fläche m²">
+                  <input value={form.property_size_m2} onChange={(e) => updateField('property_size_m2', e.target.value)} style={inputStyle} inputMode="decimal" />
+                </Field>
+                <Field label="Zimmer">
+                  <input value={form.room_count} onChange={(e) => updateField('room_count', e.target.value)} style={inputStyle} inputMode="decimal" />
+                </Field>
+                <Field label="Nasszellen">
+                  <input value={form.bathroom_count} onChange={(e) => updateField('bathroom_count', e.target.value)} style={inputStyle} inputMode="numeric" />
+                </Field>
+              </div>
+
+              <div className="opc-inspection-row three">
+                <Field label="Etage">
+                  <input value={form.floor_level} onChange={(e) => updateField('floor_level', e.target.value)} style={inputStyle} />
+                </Field>
+                <Field label="Lift vorhanden">
+                  <select value={form.has_elevator} onChange={(e) => updateField('has_elevator', e.target.value)} style={opcSelectStyle}>
+                    <option value="">Unbekannt</option>
+                    <option value="true">Ja</option>
+                    <option value="false">Nein</option>
+                  </select>
+                </Field>
+                <Field label="Besichtigungstermin">
+                  <input type="datetime-local" value={form.scheduled_at} onChange={(e) => updateField('scheduled_at', e.target.value)} style={inputStyle} />
+                </Field>
+              </div>
             </div>
           </OPCListCard>
 
           <OPCListCard>
             <CardHeader title="Kalkulationshilfe" />
-            <div style={fieldGridStyle} className="opc-inspection-field-grid">
-              <Field label="Geschätzte Stunden">
-                <input value={form.estimated_hours} onChange={(e) => updateField('estimated_hours', e.target.value)} style={inputStyle} inputMode="decimal" />
-              </Field>
-              <Field label="Geschätzte Mitarbeiter">
-                <input value={form.estimated_staff_count} onChange={(e) => updateField('estimated_staff_count', e.target.value)} style={inputStyle} inputMode="numeric" />
-              </Field>
-              <Field label="Status">
-                <select value={form.status} onChange={(e) => updateField('status', e.target.value as InspectionStatus)} style={opcSelectStyle}>
-                  <option value="draft">Entwurf</option>
-                  <option value="scheduled">Geplant</option>
-                  <option value="in_progress">In Arbeit</option>
-                  <option value="completed">Abgeschlossen</option>
-                  <option value="converted_to_quote">In Offerte übergeben</option>
-                  <option value="cancelled">Storniert</option>
-                </select>
-              </Field>
-              <Field label="Besichtigungsart">
-                <select value={form.inspection_type} onChange={(e) => updateField('inspection_type', e.target.value)} style={opcSelectStyle}>
-                  <option value="onsite">Vor Ort</option>
-                  <option value="phone">Telefon</option>
-                  <option value="whatsapp">WhatsApp</option>
-                  <option value="email">E-Mail</option>
-                  <option value="internal">Intern</option>
-                </select>
-              </Field>
+            <div className="opc-inspection-field-stack">
+              <div className="opc-inspection-row two">
+                <Field label="Geschätzte Stunden">
+                  <input value={form.estimated_hours} onChange={(e) => updateField('estimated_hours', e.target.value)} style={inputStyle} inputMode="decimal" />
+                </Field>
+                <Field label="Geschätzte Mitarbeiter">
+                  <input value={form.estimated_staff_count} onChange={(e) => updateField('estimated_staff_count', e.target.value)} style={inputStyle} inputMode="numeric" />
+                </Field>
+              </div>
+
+              <div className="opc-inspection-row two">
+                <Field label="Status">
+                  <select value={form.status} onChange={(e) => updateField('status', e.target.value as InspectionStatus)} style={opcSelectStyle}>
+                    <option value="draft">Entwurf</option>
+                    <option value="scheduled">Geplant</option>
+                    <option value="in_progress">In Arbeit</option>
+                    <option value="completed">Abgeschlossen</option>
+                    <option value="converted_to_quote">In Offerte übergeben</option>
+                    <option value="cancelled">Storniert</option>
+                  </select>
+                </Field>
+                <Field label="Besichtigungsart">
+                  <select value={form.inspection_type} onChange={(e) => updateField('inspection_type', e.target.value)} style={opcSelectStyle}>
+                    <option value="onsite">Vor Ort</option>
+                    <option value="phone">Telefon</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="email">E-Mail</option>
+                    <option value="internal">Intern</option>
+                  </select>
+                </Field>
+              </div>
             </div>
           </OPCListCard>
         </div>
@@ -708,14 +834,24 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         <section style={{ marginTop: 22 }}>
           <OPCListCard>
             <CardHeader title="Besichtigungsnotizen" />
-            <div style={notesGridStyle} className="opc-inspection-notes">
-              <TextArea label="Zugang" value={form.access_notes} onChange={(value) => updateField('access_notes', value)} />
-              <TextArea label="Parken" value={form.parking_notes} onChange={(value) => updateField('parking_notes', value)} />
-              <TextArea label="Schlüssel / Zutritt" value={form.key_handover_notes} onChange={(value) => updateField('key_handover_notes', value)} />
-              <TextArea label="Objektzustand" value={form.property_condition_notes} onChange={(value) => updateField('property_condition_notes', value)} />
-              <TextArea label="Risiken / Besonderheiten" value={form.risk_notes} onChange={(value) => updateField('risk_notes', value)} />
-              <TextArea label="Interne Notizen" value={form.internal_notes} onChange={(value) => updateField('internal_notes', value)} />
-              <TextArea label="Estimator-Notizen" value={form.estimator_notes} onChange={(value) => updateField('estimator_notes', value)} wide />
+            <div className="opc-notes-compact-body">
+              <TextArea label="Auftragsnotiz" value={form.estimator_notes} onChange={(value) => updateField('estimator_notes', value)} wide />
+
+              <button type="button" className="opc-notes-toggle" onClick={() => setShowMoreNotes((current) => !current)}>
+                <ChevronDown size={16} className={showMoreNotes ? 'open' : ''} />
+                {showMoreNotes ? 'Weniger Notizen' : 'Weitere Notizen'}
+              </button>
+
+              {showMoreNotes && (
+                <div className="opc-inspection-notes-more">
+                  <TextArea label="Zugang" value={form.access_notes} onChange={(value) => updateField('access_notes', value)} />
+                  <TextArea label="Parken" value={form.parking_notes} onChange={(value) => updateField('parking_notes', value)} />
+                  <TextArea label="Schlüssel / Zutritt" value={form.key_handover_notes} onChange={(value) => updateField('key_handover_notes', value)} />
+                  <TextArea label="Objektzustand" value={form.property_condition_notes} onChange={(value) => updateField('property_condition_notes', value)} />
+                  <TextArea label="Risiken / Besonderheiten" value={form.risk_notes} onChange={(value) => updateField('risk_notes', value)} />
+                  <TextArea label="Interne Notizen" value={form.internal_notes} onChange={(value) => updateField('internal_notes', value)} />
+                </div>
+              )}
             </div>
           </OPCListCard>
         </section>
@@ -764,21 +900,204 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
         <style>{`
           ${opcResponsiveStyle}
+
+          .opc-mobile-topbar {
+            justify-content: flex-start !important;
+            align-items: center !important;
+            gap: 10px !important;
+            flex-wrap: wrap !important;
+            margin-bottom: 16px !important;
+          }
+
+          .opc-top-pill {
+            min-height: 42px !important;
+            padding: 0 16px !important;
+            border-radius: 16px !important;
+          }
+
+          .opc-mobile-hero {
+            position: relative !important;
+            padding-right: 130px !important;
+            align-items: flex-start !important;
+          }
+
+          .opc-inspection-status-top {
+            position: absolute !important;
+            top: 18px !important;
+            right: 18px !important;
+          }
+
+          .opc-address-trigger {
+            margin-top: 14px;
+            min-height: 38px;
+            border-radius: 999px;
+            border: 1px solid ${OPC_BRAND.border};
+            background: #FFFFFF;
+            color: ${OPC_BRAND.text};
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 0 14px;
+            font-family: ${OPC_PAGE_FONT};
+            font-size: 13px;
+            font-weight: 760;
+            cursor: pointer;
+          }
+
+          .opc-address-popup {
+            margin: -6px 0 22px;
+            padding: 16px;
+            background: #FFFFFF;
+            border: 1px solid ${OPC_BRAND.border};
+            border-radius: 18px;
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+          }
+
+          .opc-address-popup-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 14px;
+            margin-bottom: 14px;
+          }
+
+          .opc-address-popup-head strong,
+          .opc-address-popup-head span {
+            display: block;
+          }
+
+          .opc-address-popup-head strong {
+            color: ${OPC_BRAND.text};
+            font-size: 15px;
+            font-weight: 820;
+            letter-spacing: -0.02em;
+          }
+
+          .opc-address-popup-head span {
+            margin-top: 4px;
+            color: ${OPC_BRAND.muted};
+            font-size: 12px;
+            font-weight: 650;
+          }
+
+          .opc-address-popup-head button {
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            border: 1px solid ${OPC_BRAND.border};
+            background: #FFFFFF;
+            color: ${OPC_BRAND.text};
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+          }
+
+          .opc-address-popup-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+          }
+
+          .opc-address-popup-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 14px;
+            flex-wrap: wrap;
+          }
+
+          .opc-inspection-field-stack {
+            padding: 18px 20px 20px;
+            display: grid;
+            gap: 14px;
+          }
+
+          .opc-inspection-row {
+            display: grid;
+            gap: 12px;
+            align-items: start;
+          }
+
+          .opc-inspection-row.two {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-inspection-row.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+          }
+
+          .opc-inspection-row input,
+          .opc-inspection-row select,
+          .opc-address-popup input {
+            height: 46px !important;
+            min-height: 46px !important;
+            border-radius: 14px !important;
+            font-size: 14px !important;
+            font-weight: 650 !important;
+          }
+
+          .opc-notes-compact-body {
+            padding: 18px 20px 20px;
+          }
+
+          .opc-notes-toggle {
+            margin: 10px auto 0;
+            min-height: 34px;
+            border: 0;
+            background: transparent;
+            color: ${OPC_BRAND.muted};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            font-family: ${OPC_PAGE_FONT};
+            font-size: 13px;
+            font-weight: 760;
+            cursor: pointer;
+          }
+
+          .opc-notes-toggle svg {
+            transition: transform 0.18s ease;
+          }
+
+          .opc-notes-toggle svg.open {
+            transform: rotate(180deg);
+          }
+
+          .opc-inspection-notes-more {
+            margin-top: 14px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+          }
           @media (max-width: 980px) {
-            .opc-inspection-grid, .opc-inspection-field-grid, .opc-inspection-notes { grid-template-columns: 1fr !important; }
+            .opc-inspection-grid { grid-template-columns: 1fr !important; }
           }
 
           @media (max-width: 760px) {
-            .opc-mobile-topbar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
-            .opc-mobile-action-row { display: grid !important; grid-template-columns: 1fr !important; width: 100% !important; }
-            .opc-mobile-action-row > *, .opc-mobile-back { width: 100% !important; }
-            .opc-mobile-hero { flex-direction: column !important; padding: 18px !important; border-radius: 18px !important; }
-            .opc-mobile-title { font-size: 34px !important; line-height: 0.96 !important; overflow-wrap: anywhere !important; }
-            .opc-inspection-grid, .opc-inspection-field-grid, .opc-inspection-notes { grid-template-columns: 1fr !important; gap: 14px !important; }
-            .opc-inspection-field-grid, .opc-inspection-notes { padding: 16px !important; }
+            .opc-mobile-topbar { justify-content: flex-start !important; align-items: center !important; gap: 10px !important; }
+            .opc-mobile-back { width: auto !important; }
+            .opc-mobile-hero { padding: 18px 120px 18px 18px !important; border-radius: 18px !important; }
+            .opc-mobile-title { font-size: 32px !important; line-height: 0.98 !important; overflow-wrap: anywhere !important; }
+            .opc-inspection-grid { grid-template-columns: 1fr !important; gap: 14px !important; }
+            .opc-inspection-field-stack { padding: 16px !important; gap: 12px !important; }
+            .opc-inspection-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+            .opc-inspection-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 8px !important; }
+            .opc-inspection-row input, .opc-inspection-row select { font-size: 12px !important; padding-left: 8px !important; padding-right: 8px !important; }
+            .opc-address-popup-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+            .opc-inspection-notes-more { grid-template-columns: 1fr !important; gap: 12px !important; }
             .opc-inspection-media-header { flex-direction: column !important; align-items: stretch !important; padding: 16px !important; }
             .opc-inspection-media-header label { width: 100% !important; }
             .opc-inspection-media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; padding: 16px !important; gap: 10px !important; }
+          }
+
+          @media (max-width: 430px) {
+            .opc-inspection-row.three { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+            .opc-inspection-row.three input, .opc-inspection-row.three select { font-size: 11px !important; }
+            .opc-mobile-hero { padding-right: 96px !important; }
+            .opc-inspection-status-top { right: 14px !important; top: 14px !important; }
           }
         `}</style>
       </OPCPageShell>

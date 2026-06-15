@@ -94,15 +94,16 @@ const statusLabels: Record<string, string> = {
 const filePillStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
+  justifyContent: 'center',
   gap: '5px',
-  height: '26px',
-  padding: '0 9px',
+  minHeight: '28px',
+  padding: '0 10px',
   borderRadius: '999px',
   border: `1px solid ${BRAND.border}`,
   background: '#FFFFFF',
   color: BRAND.muted,
-  fontSize: '11px',
-  fontWeight: 720,
+  fontSize: '12px',
+  fontWeight: 760,
   whiteSpace: 'nowrap',
 };
 
@@ -380,9 +381,20 @@ function hasMissingPhotos(report: ReportRow) {
 
 function getLocationText(report: ReportRow) {
   const addressLine = [report.addressText, report.postalCode, report.city].filter(Boolean).join(', ');
+  const siteName = String(report.siteName || '').trim();
 
-  if (report.siteName && addressLine) return `${report.siteName} · ${addressLine}`;
-  if (report.siteName) return report.siteName;
+  if (siteName && addressLine) {
+    const cleanSite = siteName.toLowerCase();
+    const cleanAddress = addressLine.toLowerCase();
+
+    if (cleanAddress.includes(cleanSite) || cleanSite.includes(String(report.addressText || '').toLowerCase())) {
+      return addressLine;
+    }
+
+    return `${siteName} · ${addressLine}`;
+  }
+
+  if (siteName) return siteName;
 
   return addressLine || 'Adresse nicht hinterlegt';
 }
@@ -397,36 +409,8 @@ function getReportUpdateText(report: ReportRow) {
 }
 
 function StatusBadge({ report }: { report: ReportRow }) {
-  const group = getStatusGroup(report.reportStatus);
-
-  const style =
-    group === 'sent_to_client'
-      ? { bg: '#F9FAFB', text: BRAND.black, border: BRAND.borderStrong }
-      : group === 'approved'
-        ? { bg: '#F0FDF4', text: BRAND.green, border: '#BBF7D0' }
-        : group === 'review'
-          ? { bg: '#FFFBEB', text: BRAND.amber, border: '#FDE68A' }
-          : { bg: '#F9FAFB', text: BRAND.muted, border: BRAND.border };
-
   return (
-    <span
-      className="opc-report-status-badge"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: '118px',
-        height: '28px',
-        padding: '0 12px',
-        borderRadius: '999px',
-        border: `1px solid ${style.border}`,
-        background: style.bg,
-        color: style.text,
-        fontSize: '12px',
-        fontWeight: 760,
-        whiteSpace: 'nowrap',
-      }}
-    >
+    <span className="opc-report-status-badge">
       {formatStatus(report.reportStatus, report.frontendStatusLabel)}
     </span>
   );
@@ -436,24 +420,11 @@ function MetricCard({
   label,
   value,
   icon,
-  tone = 'neutral',
 }: {
   label: string;
   value: number;
   icon: ReactNode;
-  tone?: 'neutral' | 'danger' | 'warning' | 'success' | 'dark';
 }) {
-  const valueColor =
-    tone === 'danger'
-      ? BRAND.red
-      : tone === 'warning'
-        ? BRAND.amber
-        : tone === 'success'
-          ? BRAND.green
-          : tone === 'dark'
-            ? BRAND.black
-            : BRAND.text;
-
   return (
     <div
       className="opc-reports-metric-card"
@@ -467,50 +438,12 @@ function MetricCard({
         gap: '14px',
       }}
     >
-      <div>
-        <div
-          className="opc-reports-metric-value"
-          style={{
-            fontSize: '25px',
-            lineHeight: 1,
-            fontWeight: 820,
-            letterSpacing: '-0.04em',
-            color: valueColor,
-            marginBottom: '10px',
-          }}
-        >
-          {value}
-        </div>
-
-        <div
-          className="opc-reports-metric-label"
-          style={{
-            fontSize: '13px',
-            fontWeight: 720,
-            color: BRAND.muted,
-          }}
-        >
-          {label}
-        </div>
+      <div style={{ minWidth: 0 }}>
+        <div className="opc-reports-metric-value">{value}</div>
+        <div className="opc-reports-metric-label">{label}</div>
       </div>
 
-      <div
-        className="opc-reports-metric-icon"
-        style={{
-          width: '38px',
-          height: '38px',
-          borderRadius: '13px',
-          border: `1px solid ${BRAND.border}`,
-          background: '#FAFAFA',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: BRAND.black,
-          flexShrink: 0,
-        }}
-      >
-        {icon}
-      </div>
+      <div className="opc-reports-metric-icon">{icon}</div>
     </div>
   );
 }
@@ -567,8 +500,6 @@ function ReportCard({ report }: { report: ReportRow }) {
               {getLocationText(report)}
             </span>
           </div>
-
-          {report.reportSummary ? <p className="opc-report-summary-text">{report.reportSummary}</p> : null}
         </div>
 
         <div className="opc-report-card-side">
@@ -759,24 +690,9 @@ export default function BerichteDateienPage() {
 
         <div className="opc-reports-metrics">
           <MetricCard value={metrics.openReports} label="Berichte offen" icon={<FileText size={17} />} />
-          <MetricCard
-            value={metrics.reviewReports}
-            label="Zur Freigabe"
-            icon={<Clock3 size={17} />}
-            tone={metrics.reviewReports > 0 ? 'warning' : 'neutral'}
-          />
-          <MetricCard
-            value={metrics.approvedReports}
-            label="Freigegeben"
-            icon={<CheckCircle2 size={17} />}
-            tone="success"
-          />
-          <MetricCard
-            value={metrics.missingPhotos}
-            label="Fehlende Fotos"
-            icon={<ImageIcon size={17} />}
-            tone={metrics.missingPhotos > 0 ? 'danger' : 'neutral'}
-          />
+          <MetricCard value={metrics.reviewReports} label="Zur Freigabe" icon={<Clock3 size={17} />} />
+          <MetricCard value={metrics.approvedReports} label="Freigegeben" icon={<CheckCircle2 size={17} />} />
+          <MetricCard value={metrics.missingPhotos} label="Fehlende Fotos" icon={<ImageIcon size={17} />} />
         </div>
 
         <section className="opc-reports-filter-panel" style={cardStyle}>
@@ -789,70 +705,70 @@ export default function BerichteDateienPage() {
             />
           </div>
 
-          <div className="opc-reports-date-picker">
-            <button
-              type="button"
-              className={dateMenuOpen ? 'active' : ''}
-              onClick={() => setDateMenuOpen((current) => !current)}
-              aria-expanded={dateMenuOpen}
-            >
-              <CalendarDays size={16} />
-              <span>Zeitraum: {getReportDateFilterLabel(dateFilter, customDateStart, customDateEnd)}</span>
-              <ChevronDown size={16} />
-            </button>
+          <div className="opc-reports-filter-grid">
+            <div className="opc-reports-date-picker">
+              <button
+                type="button"
+                className={dateMenuOpen ? 'active' : ''}
+                onClick={() => setDateMenuOpen((current) => !current)}
+                aria-expanded={dateMenuOpen}
+              >
+                <CalendarDays size={16} />
+                <span>{getReportDateFilterLabel(dateFilter, customDateStart, customDateEnd)}</span>
+                <ChevronDown size={16} />
+              </button>
 
-            {dateMenuOpen ? (
-              <div className="opc-reports-date-menu">
-                {(['all', 'today', 'yesterday', 'week', 'month', 'last30'] as ReportDateFilter[]).map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={dateFilter === option ? 'active' : ''}
-                    onClick={() => {
-                      setDateFilter(option);
-                      setDateMenuOpen(false);
-                    }}
-                  >
-                    {reportDateFilterLabels[option]}
-                  </button>
-                ))}
-
-                <button
-                  type="button"
-                  className={dateFilter === 'custom' ? 'active' : ''}
-                  onClick={() => setDateFilter('custom')}
-                >
-                  Eigenes Datum
-                </button>
-
-                {dateFilter === 'custom' ? (
-                  <div className="opc-reports-date-menu-custom">
-                    <input
-                      type="date"
-                      value={customDateStart}
-                      onChange={(event) => {
-                        setCustomDateStart(event.target.value);
-                        setDateFilter('custom');
+              {dateMenuOpen ? (
+                <div className="opc-reports-date-menu">
+                  {(['all', 'today', 'yesterday', 'week', 'month', 'last30'] as ReportDateFilter[]).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={dateFilter === option ? 'active' : ''}
+                      onClick={() => {
+                        setDateFilter(option);
+                        setDateMenuOpen(false);
                       }}
-                    />
-                    <input
-                      type="date"
-                      value={customDateEnd}
-                      onChange={(event) => {
-                        setCustomDateEnd(event.target.value);
-                        setDateFilter('custom');
-                      }}
-                    />
-                    <button type="button" onClick={() => setDateMenuOpen(false)}>
-                      Anwenden
+                    >
+                      {reportDateFilterLabels[option]}
                     </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+                  ))}
 
-          <div className="opc-reports-select-row">
+                  <button
+                    type="button"
+                    className={dateFilter === 'custom' ? 'active' : ''}
+                    onClick={() => setDateFilter('custom')}
+                  >
+                    Eigenes Datum
+                  </button>
+
+                  {dateFilter === 'custom' ? (
+                    <div className="opc-reports-date-menu-custom">
+                      <input
+                        type="date"
+                        value={customDateStart}
+                        onChange={(event) => {
+                          setCustomDateStart(event.target.value);
+                          setDateFilter('custom');
+                        }}
+                      />
+                      <input
+                        type="date"
+                        value={customDateEnd}
+                        onChange={(event) => {
+                          setCustomDateEnd(event.target.value);
+                          setDateFilter('custom');
+                        }}
+                      />
+                      <button type="button" onClick={() => setDateMenuOpen(false)}>
+                        Anwenden
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
               <option value="all">Alle Status</option>
               <option value="open">Offen</option>
@@ -894,63 +810,15 @@ export default function BerichteDateienPage() {
       <style>{`
         .opc-reports-page {
           padding: 0 0 140px;
+          font-family: ${pageFont} !important;
+          color: ${BRAND.text};
+          -webkit-font-smoothing: antialiased;
+          text-rendering: geometricPrecision;
         }
 
         .opc-reports-page * {
           box-sizing: border-box;
-        }
-
-        .opc-reports-hero {
-          padding: 24px;
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 18px;
-          margin-bottom: 14px;
-        }
-
-        .opc-reports-hero h1 {
-          margin: 0;
-          color: ${BRAND.text};
-          font-size: 31px;
-          line-height: 1.05;
-          letter-spacing: -0.045em;
-          font-weight: 860;
-        }
-
-        .opc-reports-hero-actions {
-          display: grid;
-          grid-template-columns: repeat(2, max-content);
-          gap: 10px;
-          justify-content: flex-end;
-          align-items: center;
-        }
-
-        .opc-reports-action,
-        .opc-report-action {
-          min-height: 42px;
-          border-radius: 13px;
-          border: 1px solid ${BRAND.border};
-          background: #FFFFFF;
-          color: ${BRAND.text};
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          padding: 0 14px;
-          font-size: 13px;
-          font-weight: 760;
-          font-family: ${pageFont};
-          text-decoration: none;
-          cursor: pointer;
-          white-space: nowrap;
-        }
-
-        .opc-reports-action.dark,
-        .opc-report-action.dark {
-          background: ${BRAND.black};
-          border-color: ${BRAND.black};
-          color: #FFFFFF;
+          font-family: inherit !important;
         }
 
         .opc-reports-error {
@@ -971,23 +839,59 @@ export default function BerichteDateienPage() {
           margin-bottom: 14px;
         }
 
+        .opc-reports-metric-card {
+          min-height: 96px !important;
+          padding: 18px !important;
+          border-radius: 20px !important;
+          box-shadow: 0 1px 2px rgba(15, 17, 21, 0.04) !important;
+        }
+
+        .opc-reports-metric-value {
+          font-size: 25px !important;
+          line-height: 1 !important;
+          font-weight: 820 !important;
+          letter-spacing: -0.04em !important;
+          color: ${BRAND.text};
+          margin-bottom: 10px;
+        }
+
+        .opc-reports-metric-label {
+          font-size: 13px !important;
+          font-weight: 720 !important;
+          line-height: 1.2 !important;
+          color: ${BRAND.muted};
+        }
+
+        .opc-reports-metric-icon {
+          width: 38px;
+          height: 38px;
+          border-radius: 13px;
+          border: 1px solid ${BRAND.border};
+          background: #FAFAFA;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: ${BRAND.black};
+          flex-shrink: 0;
+        }
+
         .opc-reports-filter-panel {
           width: 100%;
           max-width: 100%;
           min-width: 0;
           padding: 16px;
-          display: flex;
-          flex-wrap: wrap;
+          display: grid;
+          grid-template-columns: 1fr;
           gap: 12px;
-          align-items: center;
+          align-items: stretch;
           margin-bottom: 18px;
           overflow: visible;
         }
 
         .opc-reports-search {
-          flex: 1 1 260px;
+          width: 100%;
           min-width: 0;
-          height: 44px;
+          height: 46px;
           border: 1px solid ${BRAND.border};
           border-radius: 14px;
           background: #FFFFFF;
@@ -1004,21 +908,34 @@ export default function BerichteDateienPage() {
           border: 0;
           outline: 0;
           color: ${BRAND.text};
-          font-size: 14px;
-          font-weight: 650;
-          font-family: ${pageFont};
+          font-size: 14px !important;
+          font-weight: 650 !important;
         }
 
+        .opc-reports-search input::placeholder {
+          color: #9CA3AF;
+          font-weight: 700;
+        }
+
+        .opc-reports-filter-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 8px;
+          align-items: stretch;
+          width: 100%;
+          min-width: 0;
+        }
 
         .opc-reports-date-picker {
           position: relative;
-          flex: 0 1 260px;
-          min-width: 220px;
+          grid-column: 1 / -1;
+          min-width: 0;
         }
 
-        .opc-reports-date-picker > button {
+        .opc-reports-date-picker > button,
+        .opc-reports-filter-grid select {
           width: 100%;
-          height: 44px;
+          height: 46px;
           min-width: 0;
           border: 1px solid ${BRAND.border};
           border-radius: 14px;
@@ -1029,11 +946,11 @@ export default function BerichteDateienPage() {
           align-items: center;
           justify-content: space-between;
           gap: 8px;
-          font-size: 13px;
-          font-weight: 800;
-          font-family: ${pageFont};
+          font-size: 13px !important;
+          font-weight: 820 !important;
           cursor: pointer;
           white-space: nowrap;
+          outline: none;
         }
 
         .opc-reports-date-picker > button span {
@@ -1106,82 +1023,6 @@ export default function BerichteDateienPage() {
           outline: 0;
         }
 
-        .opc-reports-select-row {
-          flex: 1 1 390px;
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 12px;
-          min-width: 0;
-        }
-
-        .opc-reports-date-buttons {
-          flex: 1 1 300px;
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 8px;
-          min-width: 0;
-        }
-
-        .opc-reports-date-buttons button {
-          height: 44px;
-          min-width: 0;
-          border: 1px solid ${BRAND.border};
-          border-radius: 14px;
-          background: #FFFFFF;
-          color: ${BRAND.muted};
-          padding: 0 12px;
-          font-size: 13px;
-          font-weight: 820;
-          font-family: ${pageFont};
-          cursor: pointer;
-          white-space: nowrap;
-        }
-
-        .opc-reports-date-buttons button.active {
-          background: ${BRAND.black};
-          border-color: ${BRAND.black};
-          color: #FFFFFF;
-        }
-
-        .opc-reports-custom-date-row {
-          flex: 1 1 250px;
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          gap: 8px;
-          min-width: 0;
-        }
-
-        .opc-reports-custom-date-row input {
-          height: 44px;
-          border: 1px solid ${BRAND.border};
-          border-radius: 14px;
-          background: #FFFFFF;
-          color: ${BRAND.text};
-          padding: 0 12px;
-          font-size: 13px;
-          font-weight: 760;
-          font-family: ${pageFont};
-          outline: 0;
-          width: 100%;
-          min-width: 0;
-        }
-
-        .opc-reports-filter-panel select {
-          flex: 1 1 190px;
-          height: 44px;
-          border: 1px solid ${BRAND.border};
-          border-radius: 14px;
-          background: #FFFFFF;
-          color: ${BRAND.text};
-          padding: 0 12px;
-          font-size: 13px;
-          font-weight: 760;
-          font-family: ${pageFont};
-          outline: 0;
-          width: 100%;
-          min-width: 0;
-        }
-
         .opc-reports-list {
           display: flex;
           flex-direction: column;
@@ -1190,6 +1031,10 @@ export default function BerichteDateienPage() {
 
         .opc-report-card {
           padding: 18px;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          overflow: hidden;
         }
 
         .opc-report-card-main {
@@ -1197,15 +1042,18 @@ export default function BerichteDateienPage() {
           grid-template-columns: minmax(0, 1fr) auto;
           gap: 18px;
           align-items: start;
+          min-width: 0;
         }
 
         .opc-report-card h3 {
           margin: 0;
           color: ${BRAND.text};
-          font-size: 20px;
-          line-height: 1.18;
-          letter-spacing: -0.04em;
-          font-weight: 860;
+          font-size: 20px !important;
+          line-height: 1.18 !important;
+          letter-spacing: -0.04em !important;
+          font-weight: 860 !important;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .opc-report-meta {
@@ -1214,23 +1062,22 @@ export default function BerichteDateienPage() {
           gap: 8px 14px;
           margin-top: 9px;
           color: ${BRAND.muted};
-          font-size: 13px;
-          line-height: 1.35;
-          font-weight: 650;
+          font-size: 13px !important;
+          line-height: 1.35 !important;
+          font-weight: 650 !important;
+          min-width: 0;
         }
 
         .opc-report-meta span {
           display: inline-flex;
           align-items: center;
           gap: 5px;
+          min-width: 0;
+          max-width: 100%;
         }
 
-        .opc-report-summary-text {
-          margin: 10px 0 0;
-          color: ${BRAND.muted};
-          font-size: 13px;
-          line-height: 1.45;
-          font-weight: 620;
+        .opc-report-meta span svg {
+          flex: 0 0 auto;
         }
 
         .opc-report-card-side {
@@ -1242,8 +1089,25 @@ export default function BerichteDateienPage() {
 
         .opc-report-card-side > span {
           color: ${BRAND.muted};
-          font-size: 12px;
-          font-weight: 720;
+          font-size: 12px !important;
+          font-weight: 720 !important;
+          line-height: 1.35 !important;
+          white-space: nowrap;
+        }
+
+        .opc-report-status-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 98px !important;
+          height: 28px !important;
+          padding: 0 12px !important;
+          border-radius: 999px;
+          border: 1px solid ${BRAND.border};
+          background: #F9FAFB;
+          color: ${BRAND.muted};
+          font-size: 12px !important;
+          font-weight: 760 !important;
           white-space: nowrap;
         }
 
@@ -1255,13 +1119,42 @@ export default function BerichteDateienPage() {
           display: flex;
           gap: 8px;
           flex-wrap: wrap;
+          min-width: 0;
+          font-size: 11px !important;
+          font-weight: 650 !important;
         }
 
         .opc-report-card-actions {
-          display: flex;
-          flex-wrap: wrap;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
           margin-top: 16px;
+        }
+
+        .opc-report-action {
+          width: 100%;
+          min-height: 42px;
+          border-radius: 13px;
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 0 14px;
+          font-size: 13px !important;
+          font-weight: 760 !important;
+          line-height: 1 !important;
+          text-decoration: none;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-report-action.dark {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
         }
 
         .opc-reports-empty {
@@ -1283,51 +1176,24 @@ export default function BerichteDateienPage() {
           color: ${BRAND.muted};
         }
 
-        @media (max-width: 1280px) {
-          .opc-reports-filter-panel {
-            align-items: stretch;
-          }
-
-          .opc-reports-date-picker,
-          .opc-reports-select-row {
-            flex: 1 1 100%;
-          }
-        }
-
         @media (max-width: 720px) {
           .opc-reports-page {
             padding-bottom: 110px;
           }
 
-          .opc-reports-hero {
-            grid-template-columns: 1fr;
-            align-items: stretch;
-            padding: 18px;
-          }
-
-          .opc-reports-hero h1 {
-            font-size: 25px;
-          }
-
-          .opc-reports-hero-actions {
+          .opc-reports-metrics {
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            width: 100%;
+            gap: 12px;
+            margin-bottom: 14px;
           }
 
-          .opc-reports-action {
-            width: 100%;
-          }
-
-          .opc-report-card-actions {
-            flex-direction: column;
-          }
-
-          .opc-report-action {
-            width: 100%;
+          .opc-reports-filter-panel {
+            padding: 16px !important;
           }
 
           .opc-report-card-main {
             grid-template-columns: 1fr;
+            gap: 12px;
           }
 
           .opc-report-card-side {
@@ -1335,11 +1201,27 @@ export default function BerichteDateienPage() {
           }
 
           .opc-report-card {
-            padding: 15px;
+            padding: 18px;
           }
 
           .opc-report-card h3 {
-            font-size: 18px;
+            font-size: 20px !important;
+          }
+
+          .opc-report-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 14px;
+            font-size: 13px !important;
+          }
+
+          .opc-report-meta span {
+            overflow-wrap: anywhere;
+          }
+
+          .opc-report-card-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
           }
         }
       `}</style>

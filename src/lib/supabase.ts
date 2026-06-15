@@ -21,7 +21,8 @@ export function getSupabase(runtimeEnv?: Record<string, string>) {
     auth: {
       autoRefreshToken: true,
       persistSession: true,
-      detectSessionInUrl: true
+      detectSessionInUrl: true,
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     }
   });
   

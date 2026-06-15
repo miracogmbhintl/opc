@@ -27,6 +27,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { safeNavigate } from '../lib/opc-navigation-guard';
 
 interface MirakaSidebarProps {
   role: string;
@@ -302,7 +303,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       window.sessionStorage.removeItem('mco_auth_target');
       window.sessionStorage.removeItem('mco_auth_ready');
 
-      window.location.href = buildUrl(routes.login);
+      safeNavigate(buildUrl(routes.login), { replace: true });
     }
   }
 
@@ -613,6 +614,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         >
           <a
             href={buildUrl(routes.dashboard)}
+            data-astro-prefetch="false"
             title="Orange Pro Clean GmbH"
             style={{
               display: 'flex',
@@ -714,6 +716,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
               <a
                 key={item.key}
                 href={item.href}
+                data-astro-prefetch="false"
                 title={isCollapsed ? item.label : undefined}
                 style={{
                   ...desktopButtonBaseStyle,

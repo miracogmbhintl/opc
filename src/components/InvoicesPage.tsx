@@ -4,6 +4,7 @@ import { baseUrl } from '../lib/base-url';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import { OPCPageShell, opcResponsiveStyle } from './opc/OPCPageTop';
 import {
+  AlertTriangle,
   Building2,
   CalendarDays,
   CheckCircle2,
@@ -15,19 +16,22 @@ import {
   WalletCards,
 } from 'lucide-react';
 
-type QuoteRow = {
+type InvoiceRow = {
   id: string;
-  quote_number?: string | null;
+  invoice_number?: string | null;
   client_id?: string | null;
   client_site_id?: string | null;
-  inspection_id?: string | null;
+  quote_id?: string | null;
   status?: string | null;
   title?: string | null;
-  quote_type?: string | null;
+  invoice_type?: string | null;
   issue_date?: string | null;
-  valid_until?: string | null;
+  due_date?: string | null;
   total_chf?: number | string | null;
+  balance_chf?: number | string | null;
+  paid_chf?: number | string | null;
   created_at?: string | null;
+  client_snapshot?: Record<string, any> | null;
 };
 
 type ClientRow = {
@@ -54,7 +58,7 @@ type SiteRow = {
   country?: string | null;
 };
 
-type StatusFilter = 'all' | 'draft' | 'ready' | 'sent' | 'accepted' | 'converted_to_job' | 'invoiced';
+type StatusFilter = 'all' | 'draft' | 'ready' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled';
 
 const BRAND = {
   text: '#111827',
@@ -76,13 +80,11 @@ const statusLabels: Record<string, string> = {
   draft: 'Entwurf',
   ready: 'Bereit',
   sent: 'Gesendet',
-  viewed: 'Gesehen',
-  accepted: 'Angenommen',
-  declined: 'Abgelehnt',
-  expired: 'Abgelaufen',
+  paid: 'Bezahlt',
+  partially_paid: 'Teilweise bezahlt',
+  overdue: 'Überfällig',
   cancelled: 'Storniert',
-  converted_to_job: 'Einsatz erstellt',
-  invoiced: 'Verrechnet',
+  void: 'Ungültig',
 };
 
 const cardStyle: CSSProperties = {
@@ -122,9 +124,27 @@ function getClientKey(client: ClientRow) {
   return client.client_id || client.id || '';
 }
 
-function getClientName(client?: ClientRow) {
-  if (!client) return 'Unbekannter Kunde';
-  return client.billing_name || client.company_name || client.full_name || client.email || client.billing_email || 'Unbekannter Kunde';
+function getSnapshotValue(invoice: InvoiceRow, keys: string[]) {
+  const snapshot = invoice.client_snapshot || {};
+
+  for (const key of keys) {
+    const value = snapshot[key];
+    if (value !== null && value !== undefined && String(value).trim() !== '') return String(value);
+  }
+
+  return '';
+}
+
+function getClientName(client?: ClientRow, invoice?: InvoiceRow) {
+  if (client) {
+    return client.billing_name || client.company_name || client.full_name || client.email || client.billing_email || 'Unbekannter Kunde';
+  }
+
+  if (invoice) {
+    return getSnapshotValue(invoice, ['billing_name', 'company_name', 'full_name', 'name', 'email']) || 'Unbekannter Kunde';
+  }
+
+  return 'Unbekannter Kunde';
 }
 
 function getClientNumber(client?: ClientRow, fallbackClientId?: string | null) {
@@ -156,11 +176,11 @@ function getStatusLabel(status?: string | null) {
 function getStatusTone(status?: string | null) {
   const key = normalize(status);
 
-  if (['accepted', 'converted_to_job', 'invoiced'].includes(key)) {
+  if (key === 'paid') {
     return { bg: '#F3F4F6', text: BRAND.text, border: BRAND.border };
   }
 
-  if (['sent', 'viewed', 'ready'].includes(key)) {
+  if (['sent', 'partially_paid', 'ready'].includes(key)) {
     return { bg: '#ECFEFF', text: BRAND.blue, border: '#A5F3FC' };
   }
 
@@ -168,7 +188,7 @@ function getStatusTone(status?: string | null) {
     return { bg: '#FFFBEB', text: BRAND.amber, border: '#FDE68A' };
   }
 
-  if (['declined', 'expired', 'cancelled'].includes(key)) {
+  if (['overdue', 'cancelled', 'void'].includes(key)) {
     return { bg: '#FEF2F2', text: BRAND.red, border: '#FECACA' };
   }
 
@@ -179,7 +199,7 @@ function StatusBadge({ status }: { status?: string | null }) {
   const tone = getStatusTone(status);
 
   return (
-    <span className="opc-quotes-status-badge" style={{ background: tone.bg, color: tone.text, borderColor: tone.border }}>
+    <span className="opc-invoices-status-badge" style={{ background: tone.bg, color: tone.text, borderColor: tone.border }}>
       {getStatusLabel(status)}
     </span>
   );
@@ -194,49 +214,52 @@ function MetricCard({
   value: string | number;
   label: string;
   icon: ReactNode;
-  tone?: 'neutral' | 'success' | 'warning' | 'dark';
+  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'dark';
 }) {
   const valueColor =
     tone === 'success'
       ? BRAND.green
       : tone === 'warning'
         ? BRAND.amber
-        : tone === 'dark'
-          ? BRAND.black
-          : BRAND.text;
+        : tone === 'danger'
+          ? BRAND.red
+          : tone === 'dark'
+            ? BRAND.black
+            : BRAND.text;
 
   return (
-    <div className="opc-quotes-metric-card" style={cardStyle}>
+    <div className="opc-invoices-metric-card" style={cardStyle}>
       <div style={{ minWidth: 0 }}>
-        <div className="opc-quotes-metric-value" style={{ color: valueColor }}>
+        <div className="opc-invoices-metric-value" style={{ color: valueColor }}>
           {value}
         </div>
-        <div className="opc-quotes-metric-label">{label}</div>
+        <div className="opc-invoices-metric-label">{label}</div>
       </div>
-      <div className="opc-quotes-metric-icon">{icon}</div>
+      <div className="opc-invoices-metric-icon">{icon}</div>
     </div>
   );
 }
 
-function QuoteCard({ quote, client, site }: { quote: QuoteRow; client?: ClientRow; site?: SiteRow }) {
-  const clientName = getClientName(client);
-  const clientNumber = getClientNumber(client, quote.client_id);
+function InvoiceCard({ invoice, client, site }: { invoice: InvoiceRow; client?: ClientRow; site?: SiteRow }) {
+  const clientName = getClientName(client, invoice);
+  const clientNumber = getClientNumber(client, invoice.client_id);
   const siteName = getSiteName(site);
-  const total = formatMoney(quote.total_chf);
-  const issueDate = formatDate(quote.issue_date || quote.created_at);
-  const validUntil = quote.valid_until ? formatDate(quote.valid_until) : '';
+  const total = formatMoney(invoice.total_chf);
+  const balance = formatMoney(invoice.balance_chf);
+  const issueDate = formatDate(invoice.issue_date || invoice.created_at);
+  const dueDate = invoice.due_date ? formatDate(invoice.due_date) : '';
 
   return (
-    <article className="opc-quote-card" style={cardStyle}>
-      <a href={`${baseUrl}/offerte/${quote.id}`} className="opc-quote-card-link" data-astro-prefetch="false">
-        <div className="opc-quote-card-main">
+    <article className="opc-invoice-card" style={cardStyle}>
+      <a href={`${baseUrl}/rechnung/${invoice.id}`} className="opc-invoice-card-link" data-astro-prefetch="false">
+        <div className="opc-invoice-card-main">
           <div style={{ minWidth: 0 }}>
-            <div className="opc-quote-client-number">{clientNumber}</div>
-            <h3>{quote.title || quote.quote_number || 'Offerte'}</h3>
-            <div className="opc-quote-meta">
+            <div className="opc-invoice-client-number">{clientNumber}</div>
+            <h3>{invoice.title || invoice.invoice_number || 'Rechnung'}</h3>
+            <div className="opc-invoice-meta">
               <span>
                 <FileText size={14} />
-                {quote.quote_number || 'Ohne Nummer'}
+                {invoice.invoice_number || 'Ohne Nummer'}
               </span>
               <span>
                 <Building2 size={14} />
@@ -245,14 +268,15 @@ function QuoteCard({ quote, client, site }: { quote: QuoteRow; client?: ClientRo
               <span>{siteName}</span>
               <span>
                 <CalendarDays size={14} />
-                {issueDate}{validUntil ? ` · gültig bis ${validUntil}` : ''}
+                {issueDate}{dueDate ? ` · fällig bis ${dueDate}` : ''}
               </span>
             </div>
           </div>
 
-          <div className="opc-quote-card-side">
-            <StatusBadge status={quote.status} />
+          <div className="opc-invoice-card-side">
+            <StatusBadge status={invoice.status} />
             <strong>{total}</strong>
+            <span>Offen: {balance}</span>
           </div>
         </div>
       </a>
@@ -260,8 +284,8 @@ function QuoteCard({ quote, client, site }: { quote: QuoteRow; client?: ClientRo
   );
 }
 
-export default function QuotesPage() {
-  const [quotes, setQuotes] = useState<QuoteRow[]>([]);
+export default function InvoicesPage() {
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [clientMap, setClientMap] = useState<Map<string, ClientRow>>(new Map());
   const [siteMap, setSiteMap] = useState<Map<string, SiteRow>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -273,10 +297,10 @@ export default function QuotesPage() {
   useEffect(() => {
     if (didLoadRef.current) return;
     didLoadRef.current = true;
-    void loadQuotes();
+    void loadInvoices();
   }, []);
 
-  async function loadQuotes() {
+  async function loadInvoices() {
     setLoading(true);
     setErrorMessage('');
 
@@ -284,15 +308,15 @@ export default function QuotesPage() {
       if (!supabase) throw new Error('Supabase ist nicht verfügbar.');
 
       const { data, error } = await supabase
-        .from('opc_quotes')
+        .from('opc_invoices')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(250);
 
       if (error) throw error;
 
-      const rows = (data || []) as QuoteRow[];
-      setQuotes(rows);
+      const rows = (data || []) as InvoiceRow[];
+      setInvoices(rows);
 
       const clientIds = Array.from(new Set(rows.map((row) => row.client_id).filter(Boolean))) as string[];
       const siteIds = Array.from(new Set(rows.map((row) => row.client_site_id).filter(Boolean))) as string[];
@@ -347,68 +371,68 @@ export default function QuotesPage() {
         ),
       );
     } catch (error: any) {
-      setErrorMessage(error?.message || 'Offerten konnten nicht geladen werden.');
+      setErrorMessage(error?.message || 'Rechnungen konnten nicht geladen werden.');
     } finally {
       setLoading(false);
     }
   }
 
-  const filteredQuotes = useMemo(() => {
+  const filteredInvoices = useMemo(() => {
     const query = normalize(searchQuery);
 
-    return quotes.filter((quote) => {
-      const client = quote.client_id ? clientMap.get(quote.client_id) : undefined;
-      const site = quote.client_site_id ? siteMap.get(quote.client_site_id) : undefined;
-      const matchesStatus = statusFilter === 'all' || normalize(quote.status) === statusFilter;
+    return invoices.filter((invoice) => {
+      const client = invoice.client_id ? clientMap.get(invoice.client_id) : undefined;
+      const site = invoice.client_site_id ? siteMap.get(invoice.client_site_id) : undefined;
+      const matchesStatus = statusFilter === 'all' || normalize(invoice.status) === statusFilter;
       const haystack = normalize([
-        quote.quote_number,
-        quote.title,
-        quote.quote_type,
-        getClientNumber(client, quote.client_id),
-        getClientName(client),
+        invoice.invoice_number,
+        invoice.title,
+        invoice.invoice_type,
+        getClientNumber(client, invoice.client_id),
+        getClientName(client, invoice),
         getSiteName(site),
       ].join(' '));
 
       return matchesStatus && (!query || haystack.includes(query));
     });
-  }, [quotes, clientMap, siteMap, searchQuery, statusFilter]);
+  }, [invoices, clientMap, siteMap, searchQuery, statusFilter]);
 
-  const sentCount = useMemo(() => quotes.filter((quote) => ['sent', 'viewed'].includes(normalize(quote.status))).length, [quotes]);
-  const acceptedCount = useMemo(() => quotes.filter((quote) => ['accepted', 'converted_to_job', 'invoiced'].includes(normalize(quote.status))).length, [quotes]);
-  const openCount = useMemo(() => quotes.filter((quote) => ['draft', 'ready'].includes(normalize(quote.status))).length, [quotes]);
-  const totalPipeline = useMemo(() => quotes.reduce((sum, quote) => sum + Number(quote.total_chf || 0), 0), [quotes]);
+  const sentCount = useMemo(() => invoices.filter((invoice) => normalize(invoice.status) === 'sent').length, [invoices]);
+  const paidCount = useMemo(() => invoices.filter((invoice) => normalize(invoice.status) === 'paid').length, [invoices]);
+  const overdueCount = useMemo(() => invoices.filter((invoice) => normalize(invoice.status) === 'overdue').length, [invoices]);
+  const openBalance = useMemo(() => invoices.reduce((sum, invoice) => sum + Number(invoice.balance_chf || 0), 0), [invoices]);
 
   return (
-    <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/offerten" fullWidth hideTopBar>
+    <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/rechnung" fullWidth hideTopBar>
       <OPCPageShell>
-        <div className="opc-quotes-page" style={{ fontFamily: pageFont }}>
-          <div className="opc-quotes-metrics">
-            <MetricCard value={quotes.length} label="Offerten" icon={<FileText size={18} />} tone="dark" />
-            <MetricCard value={openCount} label="Offen" icon={<CalendarDays size={18} />} tone="warning" />
+        <div className="opc-invoices-page" style={{ fontFamily: pageFont }}>
+          <div className="opc-invoices-metrics">
+            <MetricCard value={invoices.length} label="Rechnungen" icon={<FileText size={18} />} tone="dark" />
             <MetricCard value={sentCount} label="Gesendet" icon={<Send size={18} />} />
-            <MetricCard value={acceptedCount} label="Angenommen" icon={<CheckCircle2 size={18} />} tone="success" />
+            <MetricCard value={paidCount} label="Bezahlt" icon={<CheckCircle2 size={18} />} tone="success" />
+            <MetricCard value={overdueCount} label="Überfällig" icon={<AlertTriangle size={18} />} tone={overdueCount > 0 ? 'danger' : 'neutral'} />
           </div>
 
-          <section className="opc-quotes-filter-panel" style={cardStyle}>
-            <div className="opc-quotes-filter-actions">
+          <section className="opc-invoices-filter-panel" style={cardStyle}>
+            <div className="opc-invoices-filter-actions">
               <a href={`${baseUrl}/kunden`} className="opc-filter-button light" data-astro-prefetch="false">
                 <UserRound size={16} />
                 Kunde auswählen
               </a>
 
-              <a href={`${baseUrl}/offerte/neu`} className="opc-filter-button dark" data-astro-prefetch="false">
+              <a href={`${baseUrl}/rechnung/neu`} className="opc-filter-button dark" data-astro-prefetch="false">
                 <Plus size={16} />
-                Neue Offerte
+                Neue Rechnung
               </a>
             </div>
 
-            <div className="opc-quotes-search-row">
-              <div className="opc-quotes-search">
+            <div className="opc-invoices-search-row">
+              <div className="opc-invoices-search">
                 <Search size={17} />
                 <input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Offerte, Kunde, Kundennummer, Adresse suchen"
+                  placeholder="Rechnung, Kunde, Kundennummer, Adresse suchen"
                 />
               </div>
 
@@ -417,31 +441,32 @@ export default function QuotesPage() {
                 <option value="draft">Entwurf</option>
                 <option value="ready">Bereit</option>
                 <option value="sent">Gesendet</option>
-                <option value="accepted">Angenommen</option>
-                <option value="converted_to_job">Einsatz erstellt</option>
-                <option value="invoiced">Verrechnet</option>
+                <option value="paid">Bezahlt</option>
+                <option value="partially_paid">Teilweise bezahlt</option>
+                <option value="overdue">Überfällig</option>
+                <option value="cancelled">Storniert</option>
               </select>
             </div>
 
-            <div className="opc-quotes-pipeline-hint">
+            <div className="opc-invoices-balance-hint">
               <WalletCards size={15} />
-              Pipeline gesamt: <strong>{formatMoney(totalPipeline)}</strong>
+              Offener Betrag: <strong>{formatMoney(openBalance)}</strong>
             </div>
           </section>
 
-          {errorMessage ? <div className="opc-quotes-error">{errorMessage}</div> : null}
+          {errorMessage ? <div className="opc-invoices-error">{errorMessage}</div> : null}
 
           {loading ? (
-            <div className="opc-quotes-empty" style={cardStyle}>Offerten werden geladen.</div>
-          ) : filteredQuotes.length === 0 ? (
-            <div className="opc-quotes-empty" style={cardStyle}>Keine Offerten gefunden.</div>
+            <div className="opc-invoices-empty" style={cardStyle}>Rechnungen werden geladen.</div>
+          ) : filteredInvoices.length === 0 ? (
+            <div className="opc-invoices-empty" style={cardStyle}>Keine Rechnungen gefunden.</div>
           ) : (
-            <div className="opc-quotes-list">
-              {filteredQuotes.map((quote) => {
-                const client = quote.client_id ? clientMap.get(quote.client_id) : undefined;
-                const site = quote.client_site_id ? siteMap.get(quote.client_site_id) : undefined;
+            <div className="opc-invoices-list">
+              {filteredInvoices.map((invoice) => {
+                const client = invoice.client_id ? clientMap.get(invoice.client_id) : undefined;
+                const site = invoice.client_site_id ? siteMap.get(invoice.client_site_id) : undefined;
 
-                return <QuoteCard key={quote.id} quote={quote} client={client} site={site} />;
+                return <InvoiceCard key={invoice.id} invoice={invoice} client={client} site={site} />;
               })}
             </div>
           )}
@@ -450,23 +475,23 @@ export default function QuotesPage() {
         <style>{`
           ${opcResponsiveStyle}
 
-          .opc-quotes-page {
+          .opc-invoices-page {
             padding: 0 0 140px;
             color: ${BRAND.text};
           }
 
-          .opc-quotes-page * {
+          .opc-invoices-page * {
             box-sizing: border-box;
           }
 
-          .opc-quotes-metrics {
+          .opc-invoices-metrics {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
             margin-bottom: 14px;
           }
 
-          .opc-quotes-metric-card {
+          .opc-invoices-metric-card {
             min-height: 96px;
             padding: 18px;
             display: flex;
@@ -475,7 +500,7 @@ export default function QuotesPage() {
             gap: 14px;
           }
 
-          .opc-quotes-metric-value {
+          .opc-invoices-metric-value {
             font-size: 25px;
             line-height: 1;
             font-weight: 820;
@@ -483,13 +508,13 @@ export default function QuotesPage() {
             margin-bottom: 10px;
           }
 
-          .opc-quotes-metric-label {
+          .opc-invoices-metric-label {
             font-size: 13px;
             font-weight: 720;
             color: ${BRAND.muted};
           }
 
-          .opc-quotes-metric-icon {
+          .opc-invoices-metric-icon {
             width: 38px;
             height: 38px;
             border-radius: 13px;
@@ -502,7 +527,7 @@ export default function QuotesPage() {
             flex-shrink: 0;
           }
 
-          .opc-quotes-filter-panel {
+          .opc-invoices-filter-panel {
             width: 100%;
             max-width: 100%;
             min-width: 0;
@@ -514,7 +539,7 @@ export default function QuotesPage() {
             overflow: visible;
           }
 
-          .opc-quotes-filter-actions {
+          .opc-invoices-filter-actions {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 8px;
@@ -547,14 +572,14 @@ export default function QuotesPage() {
             color: #FFFFFF;
           }
 
-          .opc-quotes-search-row {
+          .opc-invoices-search-row {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(0, 220px);
             gap: 8px;
             align-items: stretch;
           }
 
-          .opc-quotes-search {
+          .opc-invoices-search {
             min-width: 0;
             height: 46px;
             border: 1px solid ${BRAND.border};
@@ -567,7 +592,7 @@ export default function QuotesPage() {
             color: ${BRAND.muted};
           }
 
-          .opc-quotes-search input {
+          .opc-invoices-search input {
             width: 100%;
             min-width: 0;
             border: 0;
@@ -578,7 +603,7 @@ export default function QuotesPage() {
             font-family: ${pageFont};
           }
 
-          .opc-quotes-search-row select {
+          .opc-invoices-search-row select {
             width: 100%;
             min-width: 0;
             height: 46px;
@@ -593,7 +618,7 @@ export default function QuotesPage() {
             outline: 0;
           }
 
-          .opc-quotes-pipeline-hint {
+          .opc-invoices-balance-hint {
             min-height: 42px;
             border-radius: 14px;
             border: 1px solid #F3F4F6;
@@ -607,12 +632,12 @@ export default function QuotesPage() {
             font-weight: 720;
           }
 
-          .opc-quotes-pipeline-hint strong {
+          .opc-invoices-balance-hint strong {
             color: ${BRAND.text};
             font-weight: 840;
           }
 
-          .opc-quotes-error {
+          .opc-invoices-error {
             border: 1px solid #FECACA;
             background: #FEF2F2;
             color: ${BRAND.red};
@@ -623,32 +648,32 @@ export default function QuotesPage() {
             margin-bottom: 14px;
           }
 
-          .opc-quotes-list {
+          .opc-invoices-list {
             display: flex;
             flex-direction: column;
             gap: 12px;
           }
 
-          .opc-quote-card {
+          .opc-invoice-card {
             padding: 0;
             overflow: hidden;
           }
 
-          .opc-quote-card-link {
+          .opc-invoice-card-link {
             display: block;
             color: ${BRAND.text};
             text-decoration: none;
             padding: 18px;
           }
 
-          .opc-quote-card-main {
+          .opc-invoice-card-main {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
             gap: 18px;
             align-items: start;
           }
 
-          .opc-quote-client-number {
+          .opc-invoice-client-number {
             margin-bottom: 6px;
             color: ${BRAND.muted};
             font-size: 12px;
@@ -658,7 +683,7 @@ export default function QuotesPage() {
             letter-spacing: 0.02em;
           }
 
-          .opc-quote-card h3 {
+          .opc-invoice-card h3 {
             margin: 0;
             color: ${BRAND.text};
             font-size: 20px;
@@ -667,7 +692,7 @@ export default function QuotesPage() {
             font-weight: 860;
           }
 
-          .opc-quote-meta {
+          .opc-invoice-meta {
             display: flex;
             flex-wrap: wrap;
             gap: 8px 14px;
@@ -678,7 +703,7 @@ export default function QuotesPage() {
             font-weight: 650;
           }
 
-          .opc-quote-meta span {
+          .opc-invoice-meta span {
             display: inline-flex;
             align-items: center;
             gap: 5px;
@@ -687,21 +712,28 @@ export default function QuotesPage() {
             overflow-wrap: anywhere;
           }
 
-          .opc-quote-card-side {
+          .opc-invoice-card-side {
             display: flex;
             flex-direction: column;
             align-items: flex-end;
             gap: 8px;
           }
 
-          .opc-quote-card-side strong {
+          .opc-invoice-card-side strong {
             color: ${BRAND.text};
             font-size: 13px;
             font-weight: 840;
             white-space: nowrap;
           }
 
-          .opc-quotes-status-badge {
+          .opc-invoice-card-side span:last-child {
+            color: ${BRAND.muted};
+            font-size: 12px;
+            font-weight: 720;
+            white-space: nowrap;
+          }
+
+          .opc-invoices-status-badge {
             min-height: 30px;
             min-width: 132px;
             padding: 0 12px;
@@ -715,7 +747,7 @@ export default function QuotesPage() {
             white-space: nowrap;
           }
 
-          .opc-quotes-empty {
+          .opc-invoices-empty {
             min-height: 120px;
             display: flex;
             align-items: center;
@@ -728,29 +760,29 @@ export default function QuotesPage() {
           }
 
           @media (max-width: 760px) {
-            .opc-quotes-page {
+            .opc-invoices-page {
               padding-bottom: 110px;
             }
 
-            .opc-quotes-metrics {
+            .opc-invoices-metrics {
               grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
               gap: 10px;
             }
 
-            .opc-quotes-metric-card {
+            .opc-invoices-metric-card {
               min-height: 86px;
               padding: 15px;
             }
 
-            .opc-quotes-metric-value {
+            .opc-invoices-metric-value {
               font-size: 23px;
             }
 
-            .opc-quotes-search-row {
+            .opc-invoices-search-row {
               grid-template-columns: 1fr;
             }
 
-            .opc-quotes-filter-actions {
+            .opc-invoices-filter-actions {
               grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
@@ -760,19 +792,19 @@ export default function QuotesPage() {
               padding: 0 8px;
             }
 
-            .opc-quote-card-main {
+            .opc-invoice-card-main {
               grid-template-columns: 1fr;
             }
 
-            .opc-quote-card-side {
+            .opc-invoice-card-side {
               align-items: flex-start;
             }
 
-            .opc-quote-card-link {
+            .opc-invoice-card-link {
               padding: 15px;
             }
 
-            .opc-quote-card h3 {
+            .opc-invoice-card h3 {
               font-size: 18px;
             }
           }

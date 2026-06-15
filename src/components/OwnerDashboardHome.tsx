@@ -525,21 +525,23 @@ function MetricCard({
   href: string;
   tone?: 'neutral' | 'danger' | 'dark';
 }) {
-  const valueColor = tone === 'danger' ? BRAND.red : BRAND.text;
+  void tone;
+  const valueColor = BRAND.text;
 
   return (
     <button
       type="button"
       onClick={() => navigateTo(href)}
       className="opc-dashboard-metric-card"
+      aria-label={`${label}: ${value}. ${subline}`}
       style={{
         ...cardStyle,
-        minHeight: '112px',
-        padding: '20px',
+        minHeight: '96px',
+        padding: '18px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '16px',
+        gap: '14px',
         width: '100%',
         textAlign: 'left',
         fontFamily: pageFont,
@@ -557,12 +559,12 @@ function MetricCard({
       <div style={{ minWidth: 0 }}>
         <div
           style={{
-            fontSize: '26px',
+            fontSize: '25px',
             lineHeight: 1,
             fontWeight: 820,
             letterSpacing: '-0.04em',
             color: valueColor,
-            marginBottom: '12px',
+            marginBottom: '10px',
             whiteSpace: 'nowrap',
           }}
         >
@@ -583,6 +585,7 @@ function MetricCard({
         <div
           className="opc-dashboard-metric-subline"
           style={{
+            display: 'none',
             marginTop: '4px',
             fontSize: '12px',
             fontWeight: 620,
@@ -666,7 +669,7 @@ function JobCard({ job }: { job: ServiceJob }) {
         border: `1px solid ${BRAND.border}`,
         borderRadius: '20px',
         background: '#FFFFFF',
-        padding: '20px 22px',
+        padding: '18px',
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr) auto',
         gap: '18px',
@@ -689,11 +692,11 @@ function JobCard({ job }: { job: ServiceJob }) {
           className="opc-dashboard-job-title"
           style={{
             fontSize: '20px',
-            fontWeight: 820,
+            fontWeight: 860,
             color: BRAND.text,
             letterSpacing: '-0.04em',
-            lineHeight: 1.2,
-            marginBottom: '10px',
+            lineHeight: 1.18,
+            marginBottom: '9px',
           }}
         >
           {getJobCardTitle(job)}
@@ -703,11 +706,12 @@ function JobCard({ job }: { job: ServiceJob }) {
           className="opc-dashboard-job-details"
           style={{
             color: BRAND.muted,
-            fontSize: '16px',
-            fontWeight: 720,
-            lineHeight: 1.45,
-            display: 'grid',
-            gap: '5px',
+            fontSize: '13px',
+            fontWeight: 650,
+            lineHeight: 1.35,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '8px 14px',
           }}
         >
           {details.map((detail) => (
@@ -1110,7 +1114,7 @@ export default function OwnerDashboardHome() {
   }
 
   return (
-    <div className="opc-dashboard-page">
+    <div className="opc-dashboard-page" style={{ fontFamily: pageFont }}>
       <div className="opc-mobile-dashboard-action-wrap">
         <button
           type="button"
@@ -1149,12 +1153,12 @@ export default function OwnerDashboardHome() {
         }}
         className="opc-dashboard-grid"
       >
-        <main style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
+        <main style={{ display: 'flex', flexDirection: 'column', gap: '14px', minWidth: 0 }}>
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-              gap: '14px',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gap: '12px',
             }}
             className="opc-metric-grid"
           >
@@ -1252,9 +1256,9 @@ export default function OwnerDashboardHome() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                minHeight: '36px',
-                padding: '0 14px',
-                borderRadius: '999px',
+                minHeight: '42px',
+                padding: '0 16px',
+                borderRadius: '13px',
                 background: '#FFFFFF',
                 border: `1px solid ${BRAND.border}`,
                 color: BRAND.muted,
@@ -1283,7 +1287,7 @@ export default function OwnerDashboardHome() {
           )}
         </main>
 
-        <aside style={{ display: 'flex', flexDirection: 'column', gap: '20px', minWidth: 0 }}>
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: '14px', minWidth: 0 }}>
           <section style={{ ...cardStyle, padding: '20px' }}>
             <h2 style={{ ...sectionTitleStyle, marginBottom: '16px' }}>Schnellaktionen</h2>
 
@@ -1366,11 +1370,21 @@ export default function OwnerDashboardHome() {
         .opc-dashboard-page {
           padding: 0 0 140px;
           color: ${BRAND.text};
-          font-family: ${pageFont};
+          font-family: ${pageFont} !important;
         }
 
+        .opc-dashboard-page,
         .opc-dashboard-page * {
           box-sizing: border-box;
+          font-family: ${pageFont} !important;
+        }
+
+        .opc-dashboard-page button,
+        .opc-dashboard-page a,
+        .opc-dashboard-page input,
+        .opc-dashboard-page select,
+        .opc-dashboard-page textarea {
+          font-family: ${pageFont} !important;
         }
 
         .opc-mobile-dashboard-action-wrap {
@@ -1424,7 +1438,7 @@ export default function OwnerDashboardHome() {
           .opc-dashboard-list-heading {
             align-items: flex-start !important;
             flex-direction: column !important;
-            gap: 10px !important;
+            gap: 12px !important;
           }
 
           .opc-dashboard-list-heading button {
@@ -1453,7 +1467,7 @@ export default function OwnerDashboardHome() {
 
           .opc-metric-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            gap: 10px !important;
+            gap: 12px !important;
           }
 
           .opc-metric-grid > * {
@@ -1462,11 +1476,11 @@ export default function OwnerDashboardHome() {
 
           .opc-dashboard-metric-card {
             min-height: 96px !important;
-            padding: 14px !important;
+            padding: 18px !important;
           }
 
           .opc-dashboard-metric-card > div:first-child > div:first-child {
-            font-size: 22px !important;
+            font-size: 25px !important;
           }
 
           .opc-dashboard-metric-subline {
@@ -1480,8 +1494,9 @@ export default function OwnerDashboardHome() {
           }
 
           .opc-dashboard-job-title {
-            font-size: 16px !important;
-            letter-spacing: -0.025em !important;
+            font-size: 18px !important;
+            font-weight: 860 !important;
+            letter-spacing: -0.04em !important;
             margin-bottom: 8px !important;
           }
 

@@ -12,6 +12,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  FileText,
   Coffee,
   Loader2,
   LogIn,
@@ -20,10 +21,19 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  Trash2,
 } from 'lucide-react';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import {
+  createOfflineUuid,
+  enqueueOpcOfflineMutation,
+  getOpcOfflineQueueCount,
+  installOpcOfflineQueueAutoSync,
+  isOfflineNow,
+  isProbablyNetworkError,
+} from '../lib/opc-offline-action-queue';
 
 interface EinsatzDetailPageProps {
   jobId: string;
@@ -43,6 +53,37 @@ type AccessState = {
   canEdit: boolean;
   isAssigned: boolean;
 };
+
+
+type BackTarget = {
+  href: string;
+  label: string;
+  currentPath: string;
+};
+
+const defaultBackTarget: BackTarget = {
+  href: `${baseUrl}/einsaetze`,
+  label: 'Zurück zu Einsätze',
+  currentPath: '/einsaetze',
+};
+
+function resolveInitialBackTarget(): BackTarget {
+  if (typeof window === 'undefined') return defaultBackTarget;
+
+  const params = new URLSearchParams(window.location.search);
+  const from = params.get('from');
+  const calendarEventId = params.get('calendarEventId');
+
+  if (from === 'kalender' || calendarEventId) {
+    return {
+      href: `${baseUrl}/kalender`,
+      label: 'Zurück zum Kalender',
+      currentPath: '/kalender',
+    };
+  }
+
+  return defaultBackTarget;
+}
 
 type EmployeeOption = {
   id: string;
@@ -130,6 +171,16 @@ type EditDraft = {
   employee_notes: string;
   client_notes: string;
   internal_notes: string;
+};
+
+type ManualTimeDraft = {
+  employeeName: string;
+  employeeId: string;
+  assignmentId: string;
+  startedAt: string;
+  endedAt: string;
+  breakMinutes: string;
+  notes: string;
 };
 
 const BRAND = {
@@ -222,6 +273,7 @@ function normalize(value?: string | null) {
 function roleKey(role?: string | null) {
   const clean = normalize(role);
 
+  if (clean === 'godmode' || clean === 'superadmin' || clean === 'super_admin') return 'godmode';
   if (clean === 'owner' || clean === 'inhaber') return 'owner';
   if (clean === 'admin' || clean === 'administrator') return 'admin';
   if (clean === 'dispatch' || clean === 'dispatcher' || clean === 'disposition') return 'dispatch';
@@ -241,11 +293,16 @@ function isClientRole(role?: string | null) {
 
 function isOwnerOrAdminRole(role?: string | null) {
   const clean = roleKey(role);
-  return clean === 'owner' || clean === 'admin';
+  return clean === 'godmode' || clean === 'owner' || clean === 'admin';
 }
 
 function isManagerRole(role?: string | null) {
-  return ['owner', 'admin', 'dispatch', 'manager'].includes(roleKey(role));
+  return ['godmode', 'owner', 'admin', 'dispatch', 'manager'].includes(roleKey(role));
+}
+
+function canManageAdminActions(access: AccessState) {
+  if (isEmployeeRole(access.role) || isClientRole(access.role)) return false;
+  return access.canEdit || isManagerRole(access.role);
 }
 
 function formatStatus(status?: string | null) {
@@ -336,6 +393,50 @@ function fromDateTimeLocal(value: string) {
   if (Number.isNaN(date.getTime())) return null;
 
   return date.toISOString();
+}
+
+function nowDateTimeLocal() {
+  return toDateTimeLocal(new Date().toISOString());
+}
+
+function durationMinutesBetween(startLocal: string, endLocal: string, breakMinutesRaw: string | number = 0) {
+  const start = new Date(startLocal).getTime();
+  const end = new Date(endLocal).getTime();
+  const breakMinutes = Math.max(0, Number(String(breakMinutesRaw || '0').replace(',', '.')) || 0);
+
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
+
+  return Math.max(0, Math.round((end - start) / 60000) - breakMinutes);
+}
+
+function createEmptyManualTimeDraft(job: JobDetail | null, assignments: JsonArray = []): ManualTimeDraft {
+  const primary = assignments[0] || null;
+  const defaultStart = toDateTimeLocal(job?.planned_start) || nowDateTimeLocal();
+  const defaultEnd = toDateTimeLocal(job?.planned_end) || defaultStart;
+
+  return {
+    employeeName: String(primary?.employee_name || primary?.display_name || ''),
+    employeeId: String(primary?.employee_id || ''),
+    assignmentId: String(primary?.id || primary?.assignment_id || ''),
+    startedAt: defaultStart,
+    endedAt: defaultEnd,
+    breakMinutes: '0',
+    notes: '',
+  };
+}
+
+function createManualTimeDraftFromLog(log: JsonRecord): ManualTimeDraft {
+  const metadata = safeMetadata(log.metadata);
+
+  return {
+    employeeName: String(log.employee_name || log.display_name || log.staff_name || log.email || 'Mitarbeiter'),
+    employeeId: String(log.employee_id || metadata.employee_id || metadata.staff_role_id || ''),
+    assignmentId: String(log.assignment_id || ''),
+    startedAt: toDateTimeLocal(log.started_at || log.start_time || log.clock_in_at || log.created_at) || nowDateTimeLocal(),
+    endedAt: toDateTimeLocal(log.ended_at || log.end_time || log.clock_out_at || log.finished_at) || nowDateTimeLocal(),
+    breakMinutes: String(getBreakMinutes(log) || 0),
+    notes: String(log.notes || ''),
+  };
 }
 
 function asArray(value: unknown): JsonArray {
@@ -434,17 +535,47 @@ function extractManualActionNotes(raw: unknown) {
 }
 
 async function tryInsertOne(table: string, variants: JsonRecord[]) {
-  let lastError: any = null;
-
-  for (const variant of variants) {
+  const preparedVariants = variants.map((variant) => {
     const payload = compactPayload(variant);
 
+    if (table === 'opc_job_time_logs' && !payload.id) {
+      return {
+        id: createOfflineUuid(),
+        ...payload,
+      };
+    }
+
+    return payload;
+  });
+
+  if (isOfflineNow()) {
+    const queued = enqueueOpcOfflineMutation({
+      operation: 'insert',
+      table,
+      variants: preparedVariants,
+      meta: {
+        reason: 'offline_before_insert',
+        queued_at: new Date().toISOString(),
+      },
+    });
+
+    return {
+      data: preparedVariants[0] || null,
+      payload: preparedVariants[0] || {},
+      error: null,
+      queued,
+    };
+  }
+
+  let lastError: any = null;
+
+  for (const payload of preparedVariants) {
     try {
       const response = await supabase.from(table).insert(payload).select('*').limit(1);
 
       if (!response.error) {
         return {
-          data: Array.isArray(response.data) ? response.data[0] : null,
+          data: Array.isArray(response.data) ? response.data[0] : payload,
           payload,
           error: null,
         };
@@ -456,17 +587,61 @@ async function tryInsertOne(table: string, variants: JsonRecord[]) {
     }
   }
 
+  if (isProbablyNetworkError(lastError)) {
+    const queued = enqueueOpcOfflineMutation({
+      operation: 'insert',
+      table,
+      variants: preparedVariants,
+      meta: {
+        reason: 'network_error_insert',
+        queued_at: new Date().toISOString(),
+        last_error: String(lastError?.message || lastError || ''),
+      },
+    });
+
+    return {
+      data: preparedVariants[0] || null,
+      payload: preparedVariants[0] || {},
+      error: null,
+      queued,
+    };
+  }
+
   throw new Error(
     lastError?.message || `${table}: Insert konnte mit keiner Spalten-Variante erstellt werden.`,
   );
 }
 
 async function tryUpdateOne(table: string, idColumn: string, idValue: string, variants: JsonRecord[]) {
+  const preparedVariants = variants.map((variant) => compactPayload(variant));
+
+  if (isOfflineNow()) {
+    const queued = enqueueOpcOfflineMutation({
+      operation: 'update',
+      table,
+      idColumn,
+      idValue,
+      payload: preparedVariants[0] || {},
+      meta: {
+        reason: 'offline_before_update',
+        queued_at: new Date().toISOString(),
+      },
+    });
+
+    return {
+      data: {
+        [idColumn]: idValue,
+        ...(preparedVariants[0] || {}),
+      },
+      payload: preparedVariants[0] || {},
+      error: null,
+      queued,
+    };
+  }
+
   let lastError: any = null;
 
-  for (const variant of variants) {
-    const payload = compactPayload(variant);
-
+  for (const payload of preparedVariants) {
     try {
       const response = await supabase
         .from(table)
@@ -494,6 +669,31 @@ async function tryUpdateOne(table: string, idColumn: string, idValue: string, va
     }
   }
 
+  if (isProbablyNetworkError(lastError)) {
+    const queued = enqueueOpcOfflineMutation({
+      operation: 'update',
+      table,
+      idColumn,
+      idValue,
+      payload: preparedVariants[0] || {},
+      meta: {
+        reason: 'network_error_update',
+        queued_at: new Date().toISOString(),
+        last_error: String(lastError?.message || lastError || ''),
+      },
+    });
+
+    return {
+      data: {
+        [idColumn]: idValue,
+        ...(preparedVariants[0] || {}),
+      },
+      payload: preparedVariants[0] || {},
+      error: null,
+      queued,
+    };
+  }
+
   throw new Error(
     lastError?.message || `${table}: Update konnte mit keiner Spalten-Variante gespeichert werden.`,
   );
@@ -504,6 +704,22 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
     ...payload,
     updated_at: new Date().toISOString(),
   });
+
+  if (isOfflineNow()) {
+    enqueueOpcOfflineMutation({
+      operation: 'update',
+      table: 'opc_service_jobs',
+      idColumn: 'id',
+      idValue: jobId,
+      payload: clean,
+      meta: {
+        reason: 'offline_before_job_update',
+        queued_at: new Date().toISOString(),
+      },
+    });
+
+    return { id: jobId, queued: true };
+  }
 
   const attempts = [
     { table: 'opc_service_jobs', column: 'id' },
@@ -538,6 +754,23 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
     } catch (error) {
       lastError = error;
     }
+  }
+
+  if (isProbablyNetworkError(lastError)) {
+    enqueueOpcOfflineMutation({
+      operation: 'update',
+      table: 'opc_service_jobs',
+      idColumn: 'id',
+      idValue: jobId,
+      payload: clean,
+      meta: {
+        reason: 'network_error_job_update',
+        queued_at: new Date().toISOString(),
+        last_error: String(lastError?.message || lastError || ''),
+      },
+    });
+
+    return { id: jobId, queued: true };
   }
 
   if (sawWritableTable) {
@@ -821,6 +1054,58 @@ function canCompleteJob(job: JobDetail | null, activeTimeLog: JsonRecord | null)
   return Date.now() >= twentyMinutesBeforeEnd;
 }
 
+
+function isCompletedJobStatus(status?: string | null) {
+  return ['completed', 'approved', 'report_pending', 'report_approved', 'sent_to_client'].includes(normalize(status));
+}
+
+function hasExistingReport(report?: JsonRecord | null) {
+  if (!report || typeof report !== 'object') return false;
+
+  return Boolean(
+    report.id ||
+      report.report_id ||
+      report.status ||
+      report.report_title ||
+      report.report_summary ||
+      report.created_at ||
+      report.updated_at,
+  );
+}
+
+function getReportJobHref(job: JobDetail | null) {
+  if (!job?.job_id) return `${baseUrl}/berichte-dateien`;
+  return `${baseUrl}/bericht/job/${job.job_id}?from=einsatz`;
+}
+
+function minutesFromLogs(logs: JsonArray) {
+  return logs.reduce((sum, log) => {
+    const stored = Number(log.duration_minutes || log.total_minutes || 0);
+    if (Number.isFinite(stored) && stored > 0) return sum + stored;
+
+    const started = new Date(log.started_at || log.start_time || log.clock_in_at || '').getTime();
+    const ended = new Date(log.ended_at || log.end_time || log.clock_out_at || '').getTime();
+
+    if (Number.isFinite(started) && Number.isFinite(ended) && ended > started) {
+      return sum + Math.round((ended - started) / 60000);
+    }
+
+    return sum;
+  }, 0);
+}
+
+function isIgnorableDeleteError(error: any) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+
+  return (
+    code === '42P01' ||
+    code === '42703' ||
+    message.includes('does not exist') ||
+    message.includes('column') && message.includes('does not exist') ||
+    message.includes('relation') && message.includes('does not exist')
+  );
+}
 
 function buildAssignmentPayloadVariants({
   jobId,
@@ -1185,6 +1470,7 @@ function ContactButtons({ person }: { person: JsonRecord | EmployeeOption }) {
 }
 
 export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
+  const [backTarget, setBackTarget] = useState<BackTarget>(defaultBackTarget);
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [databaseError, setDatabaseError] = useState<string | null>(null);
@@ -1207,9 +1493,17 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [pendingClockIn, setPendingClockIn] = useState(false);
+  const [manualTimeFormOpen, setManualTimeFormOpen] = useState(false);
+  const [manualTimeDraft, setManualTimeDraft] = useState<ManualTimeDraft>(() => createEmptyManualTimeDraft(null));
+  const [editingTimeLogId, setEditingTimeLogId] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [pendingOfflineActions, setPendingOfflineActions] = useState(() => getOpcOfflineQueueCount());
 
   const detailStripRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setBackTarget(resolveInitialBackTarget());
+  }, []);
 
   const [access, setAccess] = useState<AccessState>({
     loading: true,
@@ -1228,10 +1522,15 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const media = useMemo(() => asArray(job?.media), [job]);
   const damageReports = useMemo(() => asArray(job?.damage_reports), [job]);
   const report = job?.report || null;
+  const canUseAdminActions = canManageAdminActions(access);
+  const canUseReportActions = canUseAdminActions;
+  const canDeleteJob = canUseAdminActions;
+  const jobCompleted = isCompletedJobStatus(job?.status);
+  const jobHasReport = hasExistingReport(report);
 
   const employeeMode = isEmployeeRole(access.role) && !access.canEdit;
   const clientMode = isClientRole(access.role);
-  const canWriteClientNotes = isOwnerOrAdminRole(access.role);
+  const canWriteClientNotes = canUseAdminActions || isOwnerOrAdminRole(access.role);
   const canSeeAllJobTimes = isOwnerOrAdminRole(access.role);
 
   const beforeMedia = useMemo(
@@ -1293,6 +1592,12 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
   const ownAssignment = useMemo(() => (job ? getPrimaryAssignee(job, access) : null), [job, access]);
   const ownAssignmentId = ownAssignment?.id || ownAssignment?.assignment_id || null;
+
+  useEffect(() => {
+    if (!manualTimeFormOpen && !editingTimeLogId) {
+      setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
+    }
+  }, [assignments, editingTimeLogId, job, manualTimeFormOpen]);
   const isJobOnBreak = Boolean(getBreakStartedAt(activeTimeLog));
   const showCompleteButton = canCompleteJob(job, activeTimeLog);
   const heroState = getJobVisualState(job, activeTimeLog);
@@ -1595,6 +1900,20 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     void loadJob(true);
   }, [loadJob]);
 
+  useEffect(() => {
+    const cleanup = installOpcOfflineQueueAutoSync(supabase, (count) => {
+      setPendingOfflineActions(count);
+
+      if (count === 0 && !isOfflineNow()) {
+        void loadJob(false);
+      }
+    });
+
+    setPendingOfflineActions(getOpcOfflineQueueCount());
+
+    return cleanup;
+  }, [loadJob]);
+
   const loadEmployees = useCallback(async () => {
     if (employeesLoaded || !access.canEdit) return;
 
@@ -1670,10 +1989,28 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     setActionError(null);
     setActionMessage(null);
 
+    const queueCountBefore = getOpcOfflineQueueCount();
+
     try {
       await callback();
+
+      const queueCountAfter = getOpcOfflineQueueCount();
+      setPendingOfflineActions(queueCountAfter);
+
+      if (queueCountAfter > queueCountBefore || isOfflineNow()) {
+        setActionMessage('Aktion lokal gespeichert. Sie wird automatisch synchronisiert, sobald die Verbindung wieder stabil ist.');
+        return;
+      }
+
       await loadJob(false);
     } catch (error: any) {
+      if (isProbablyNetworkError(error)) {
+        const queueCountAfter = getOpcOfflineQueueCount();
+        setPendingOfflineActions(queueCountAfter);
+        setActionMessage('Verbindung instabil. Die Aktion wurde lokal gesichert und wird später synchronisiert.');
+        return;
+      }
+
       setActionError(error?.message || 'Aktion konnte nicht ausgeführt werden.');
     } finally {
       setActionLoading(null);
@@ -1727,6 +2064,144 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       setSaving(false);
     }
   };
+
+  async function deleteFromTable(table: string, column: string, value: string) {
+    try {
+      const { error } = await supabase.from(table).delete().eq(column, value);
+      if (error && !isIgnorableDeleteError(error)) throw error;
+    } catch (error) {
+      if (!isIgnorableDeleteError(error)) throw error;
+    }
+  }
+
+  async function deleteServiceJobRow(jobIdToDelete: string) {
+    const { data, error } = await supabase
+      .from('opc_service_jobs')
+      .delete()
+      .eq('id', jobIdToDelete)
+      .select('id')
+      .limit(1);
+
+    if (error) throw error;
+
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error(`Einsatz wurde nicht gelöscht. Keine passende Zeile für diese Einsatz-ID gefunden: ${jobIdToDelete}.`);
+    }
+  }
+
+  async function handleCreateOrOpenReport() {
+    if (!job || !canUseReportActions || !jobCompleted) return;
+
+    if (jobHasReport) {
+      window.location.href = getReportJobHref(job);
+      return;
+    }
+
+    setActionLoading('create_report');
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const now = new Date().toISOString();
+      const totalMinutes = minutesFromLogs(timeLogs);
+      const fallbackHours = Number(job.final_hours || job.estimated_hours || 0);
+      const totalHours = totalMinutes > 0 ? Number((totalMinutes / 60).toFixed(2)) : (Number.isFinite(fallbackHours) ? fallbackHours : 0);
+
+      await tryInsertOne('opc_job_reports', [
+        {
+          job_id: job.job_id,
+          client_id: job.client_id || null,
+          client_site_id: job.client_site_id || null,
+          status: 'draft',
+          report_title: job.title || `${job.service_category || 'Einsatz'} · ${getDisplayName(job)}`,
+          report_summary: job.client_notes || job.employee_notes || job.service_description || null,
+          total_hours: totalHours,
+          total_minutes: totalMinutes,
+          before_photos: beforeMedia,
+          after_photos: afterMedia,
+          time_logs: timeLogs,
+          damage_reports: damageReports,
+          metadata: {
+            created_via: 'einsatz_detail',
+            created_by_user_id: access.userId,
+            created_by_staff_role_id: access.staffId,
+            source: 'completed_job_report_button',
+            created_at: now,
+          },
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+
+      setActionMessage('Bericht wurde erstellt. Weiterleitung wird geöffnet.');
+      window.setTimeout(() => {
+        window.location.href = getReportJobHref(job);
+      }, 250);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bericht konnte nicht erstellt werden.';
+      setActionError(`Bericht fehlgeschlagen: ${message}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleDeleteJob() {
+    if (!job || !canDeleteJob) return;
+
+    const confirmed = window.confirm(
+      `Diesen Einsatz wirklich löschen?\n\n${job.title || 'Einsatz'}\n${formatDate(job.planned_start)}\n\nEs wird nur dieser einzelne Einsatz gelöscht, nicht die ganze wiederkehrende Serie.`,
+    );
+
+    if (!confirmed) return;
+
+    setActionLoading('delete_job');
+    setActionError(null);
+    setActionMessage(null);
+
+    try {
+      const { data: calendarEvents, error: calendarError } = await supabase
+        .from('opc_calendar_events')
+        .select('id')
+        .eq('job_id', job.job_id);
+
+      if (calendarError && !isIgnorableDeleteError(calendarError)) throw calendarError;
+
+      const calendarEventIds = Array.isArray(calendarEvents)
+        ? calendarEvents.map((event) => String((event as JsonRecord).id || '')).filter(Boolean)
+        : [];
+
+      if (calendarEventIds.length) {
+        try {
+          const { error } = await supabase
+            .from('opc_calendar_event_attendees')
+            .delete()
+            .in('event_id', calendarEventIds);
+          if (error && !isIgnorableDeleteError(error)) throw error;
+        } catch (error) {
+          if (!isIgnorableDeleteError(error)) throw error;
+        }
+      }
+
+      await deleteFromTable('opc_calendar_events', 'job_id', job.job_id);
+      await deleteFromTable('opc_job_assignments', 'job_id', job.job_id);
+      await deleteFromTable('opc_job_time_logs', 'job_id', job.job_id);
+      await deleteFromTable('opc_job_media', 'job_id', job.job_id);
+      await deleteFromTable('opc_job_damage_reports', 'job_id', job.job_id);
+      await deleteFromTable('opc_job_reports', 'job_id', job.job_id);
+      await deleteFromTable('opc_reports', 'job_id', job.job_id);
+      await deleteServiceJobRow(job.job_id);
+
+      setActionMessage('Einsatz wurde gelöscht.');
+      window.setTimeout(() => {
+        window.location.href = backTarget.href || `${baseUrl}/einsaetze`;
+      }, 350);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Einsatz konnte nicht gelöscht werden.';
+      setActionError(`Löschen fehlgeschlagen: ${message}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }
 
   const syncAssignmentToCalendar = async (employee: EmployeeOption, assignmentId?: string | null) => {
     if (!job || !job.planned_start) return;
@@ -1896,6 +2371,103 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     }
   };
 
+
+  const openManualTimeForm = () => {
+    setEditingTimeLogId(null);
+    setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
+    setManualTimeFormOpen(true);
+  };
+
+  const handleEditManualTimeLog = (log: JsonRecord) => {
+    if (!canUseAdminActions) return;
+    setEditingTimeLogId(String(log.id || log.time_log_id || ''));
+    setManualTimeDraft(createManualTimeDraftFromLog(log));
+    setManualTimeFormOpen(true);
+  };
+
+  const handleCancelManualTime = () => {
+    setManualTimeFormOpen(false);
+    setEditingTimeLogId(null);
+    setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
+  };
+
+  const handleManualTimeAssignmentChange = (assignmentId: string) => {
+    const assignment = assignments.find((item) => String(item.id || item.assignment_id || '') === assignmentId) || null;
+
+    setManualTimeDraft((current) => ({
+      ...current,
+      assignmentId,
+      employeeId: assignment ? String(assignment.employee_id || '') : current.employeeId,
+      employeeName: assignment ? String(assignment.employee_name || assignment.display_name || current.employeeName || '') : current.employeeName,
+    }));
+  };
+
+  const handleSaveManualTimeLog = async () => {
+    if (!job || !canUseAdminActions) return;
+
+    const startedAt = fromDateTimeLocal(manualTimeDraft.startedAt);
+    const endedAt = fromDateTimeLocal(manualTimeDraft.endedAt);
+    const breakMinutes = Math.max(0, Number(String(manualTimeDraft.breakMinutes || '0').replace(',', '.')) || 0);
+    const durationMinutes = durationMinutesBetween(manualTimeDraft.startedAt, manualTimeDraft.endedAt, breakMinutes);
+
+    if (!startedAt || !endedAt || durationMinutes <= 0) {
+      setActionError('Manuelle Zeit ungültig. Start, Ende und Dauer müssen korrekt sein.');
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const employeeName = manualTimeDraft.employeeName.trim() || 'Mitarbeiter';
+    const payload = {
+      job_id: job.job_id,
+      assignment_id: manualTimeDraft.assignmentId || null,
+      employee_id: manualTimeDraft.employeeId || null,
+      employee_name: employeeName,
+      started_at: startedAt,
+      ended_at: endedAt,
+      duration_minutes: durationMinutes,
+      status: 'submitted',
+      notes: cleanNullable(manualTimeDraft.notes),
+      metadata: {
+        source: 'manual_admin_entry',
+        created_via: 'einsatz_detail_admin_manual_time',
+        entered_by_user_id: access.userId,
+        entered_by_name: access.displayName || access.email || 'Admin',
+        break_minutes: breakMinutes,
+        manually_entered: true,
+        updated_at: now,
+      },
+      updated_at: now,
+      created_at: now,
+    };
+
+    await runJobAction(editingTimeLogId ? 'manual_time_update' : 'manual_time_create', async () => {
+      if (editingTimeLogId) {
+        await tryUpdateOne('opc_job_time_logs', 'id', editingTimeLogId, [payload]);
+      } else {
+        await tryInsertOne('opc_job_time_logs', [payload]);
+      }
+
+      try {
+        const allMinutes = timeLogs
+          .filter((log) => String(log.id || log.time_log_id || '') !== String(editingTimeLogId || ''))
+          .reduce((sum, log) => sum + Number(log.duration_minutes || log.total_minutes || 0), 0) + durationMinutes;
+
+        await updateJobRecord({
+          final_hours: Number((allMinutes / 60).toFixed(2)),
+          actual_start: job.actual_start || startedAt,
+          actual_end: endedAt,
+        });
+      } catch {
+        // Final hours are best effort. The time log itself is the source of truth.
+      }
+
+      setManualTimeFormOpen(false);
+      setEditingTimeLogId(null);
+      setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
+      setActionMessage(editingTimeLogId ? 'Zeit wurde aktualisiert.' : 'Zeit wurde manuell erfasst.');
+    });
+  };
+
   const performClockIn = async () => {
     if (!job) return;
 
@@ -1907,16 +2479,32 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         note: actionNoteDraft.trim() || null,
       });
 
-      await tryInsertOne('opc_job_time_logs', [payload]);
+      const inserted = await tryInsertOne('opc_job_time_logs', [payload]);
+      const startedAt = String(inserted.data?.started_at || payload.started_at || new Date().toISOString());
+      const insertedLog = {
+        ...payload,
+        ...(inserted.data || {}),
+        started_at: startedAt,
+      };
 
       try {
         await updateJobRecord({
           status: 'in_progress',
-          actual_start: job.actual_start || new Date().toISOString(),
+          actual_start: job.actual_start || startedAt,
         });
       } catch {
         // Job status update is best effort.
       }
+
+      setJob((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          status: 'in_progress',
+          actual_start: current.actual_start || startedAt,
+          time_logs: [...asArray(current.time_logs), insertedLog],
+        };
+      });
 
       setActionNoteDraft('');
       setActionMessage('Einsatz gestartet.');
@@ -1994,6 +2582,42 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       } catch {
         // Job status update is best effort.
       }
+
+      setJob((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          status: 'submitted',
+          actual_end: now,
+          time_logs: asArray(current.time_logs).map((log) =>
+            String(log.id || log.time_log_id || '') === String(logId)
+              ? {
+                  ...log,
+                  ended_at: now,
+                  duration_minutes: liveMinutesFromLog(activeTimeLog),
+                  status: 'submitted',
+                  notes: nextNotes,
+                  metadata: {
+                    ...metadata,
+                    break_started_at: null,
+                    last_action: 'clock_out',
+                    submitted_at: now,
+                    submitted_by: access.userId,
+                    timeline: [
+                      ...asArray(metadata.timeline),
+                      {
+                        action: 'clock_out',
+                        at: now,
+                        by: access.userId,
+                      },
+                    ],
+                  },
+                  updated_at: now,
+                }
+              : log,
+          ),
+        };
+      });
 
       setActionNoteDraft('');
       setActionMessage('Ausgestempelt und eingereicht.');
@@ -2120,6 +2744,37 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         },
       ]);
 
+      setJob((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          time_logs: asArray(current.time_logs).map((log) =>
+            String(log.id || log.time_log_id || '') === String(logId)
+              ? {
+                  ...log,
+                  status: 'draft',
+                  notes: nextNotes,
+                  metadata: {
+                    ...metadata,
+                    break_started_at: now,
+                    last_action: 'break_start',
+                    break_started_by: access.userId,
+                    timeline: [
+                      ...asArray(metadata.timeline),
+                      {
+                        action: 'break_start',
+                        at: now,
+                        by: access.userId,
+                      },
+                    ],
+                  },
+                  updated_at: now,
+                }
+              : log,
+          ),
+        };
+      });
+
       setActionNoteDraft('');
       setActionMessage('Pause gestartet.');
     });
@@ -2173,6 +2828,39 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           updated_at: now,
         },
       ]);
+
+      setJob((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          time_logs: asArray(current.time_logs).map((log) =>
+            String(log.id || log.time_log_id || '') === String(logId)
+              ? {
+                  ...log,
+                  status: 'draft',
+                  notes: nextNotes,
+                  metadata: {
+                    ...metadata,
+                    break_started_at: null,
+                    break_minutes: nextBreakMinutes,
+                    last_action: 'break_end',
+                    break_ended_by: access.userId,
+                    break_ended_at: now,
+                    timeline: [
+                      ...asArray(metadata.timeline),
+                      {
+                        action: 'break_end',
+                        at: now,
+                        by: access.userId,
+                      },
+                    ],
+                  },
+                  updated_at: now,
+                }
+              : log,
+          ),
+        };
+      });
 
       setActionNoteDraft('');
       setActionMessage('Pause beendet.');
@@ -2384,7 +3072,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           </div>
 
           <div className="opc-time-action-buttons">
-            {!activeTimeLog ? (
+            {!activeTimeLog && !jobCompleted ? (
               <button
                 type="button"
                 onClick={() => void handleClockIn()}
@@ -2432,6 +3120,18 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
               </button>
             ) : null}
 
+            {jobCompleted && canUseReportActions ? (
+              <button
+                type="button"
+                onClick={() => void handleCreateOrOpenReport()}
+                disabled={Boolean(actionLoading)}
+                className="opc-time-secondary-button"
+              >
+                {actionLoading === 'create_report' ? <Loader2 size={17} className="spin" /> : <FileText size={17} />}
+                {jobHasReport ? 'Bericht öffnen' : 'Bericht erstellen'}
+              </button>
+            ) : null}
+
             {activeTimeLog && !showCompleteButton ? (
               <button
                 type="button"
@@ -2449,12 +3149,122 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     );
   };
 
+  const renderManualTimeForm = () => {
+    if (!manualTimeFormOpen || !canUseAdminActions) return null;
+
+    const duration = durationMinutesBetween(manualTimeDraft.startedAt, manualTimeDraft.endedAt, manualTimeDraft.breakMinutes);
+
+    return (
+      <div className="opc-manual-time-form">
+        <div className="opc-manual-time-head">
+          <div>
+            <strong>{editingTimeLogId ? 'Einzelzeit bearbeiten' : 'Arbeitszeit manuell erfassen'}</strong>
+            <span>Nur Admin, Dispatch, Owner und höhere Rollen.</span>
+          </div>
+          <button type="button" className="opc-link-button" onClick={handleCancelManualTime}>Schliessen</button>
+        </div>
+
+        <div className="opc-manual-time-grid">
+          <label>
+            Zugewiesener Mitarbeiter
+            <select
+              style={inputStyle()}
+              value={manualTimeDraft.assignmentId}
+              onChange={(event) => handleManualTimeAssignmentChange(event.target.value)}
+            >
+              <option value="">Manuell / nicht zugeordnet</option>
+              {assignments.map((assignment) => (
+                <option key={assignment.id || assignment.assignment_id} value={String(assignment.id || assignment.assignment_id)}>
+                  {assignment.employee_name || assignment.display_name || assignment.email || 'Mitarbeiter'}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Name
+            <input
+              style={inputStyle()}
+              value={manualTimeDraft.employeeName}
+              placeholder="z.B. Filip Andjekovic"
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, employeeName: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Start
+            <input
+              style={inputStyle()}
+              type="datetime-local"
+              value={manualTimeDraft.startedAt}
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, startedAt: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Ende
+            <input
+              style={inputStyle()}
+              type="datetime-local"
+              value={manualTimeDraft.endedAt}
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, endedAt: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Pause in Minuten
+            <input
+              style={inputStyle()}
+              inputMode="decimal"
+              value={manualTimeDraft.breakMinutes}
+              onChange={(event) => setManualTimeDraft((current) => ({ ...current, breakMinutes: event.target.value }))}
+            />
+          </label>
+
+          <label>
+            Berechnete Dauer
+            <input style={inputStyle()} value={formatMinutes(duration)} disabled readOnly />
+          </label>
+        </div>
+
+        <label className="opc-note-label">
+          Notiz
+          <textarea
+            style={{ ...inputStyle(), minHeight: 82, resize: 'vertical' }}
+            placeholder="Optional. Beispiel: Zeit nachträglich gemäss Mitarbeiterangabe erfasst."
+            value={manualTimeDraft.notes}
+            onChange={(event) => setManualTimeDraft((current) => ({ ...current, notes: event.target.value }))}
+          />
+        </label>
+
+        <div className="opc-manual-time-actions">
+          <button type="button" className="opc-btn opc-btn-light" onClick={handleCancelManualTime} disabled={Boolean(actionLoading)}>
+            Abbrechen
+          </button>
+          <button type="button" className="opc-btn opc-btn-dark" onClick={() => void handleSaveManualTimeLog()} disabled={Boolean(actionLoading)}>
+            {actionLoading === 'manual_time_create' || actionLoading === 'manual_time_update' ? <Loader2 size={15} className="spin" /> : <Clock3 size={15} />}
+            {editingTimeLogId ? 'Zeit aktualisieren' : 'Zeit speichern'}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   const renderTimeEntriesCard = () => {
     if (clientMode) return null;
 
     return (
       <section className="opc-section-card" style={cardStyle}>
-        <SectionHeader title="Zeiterfassung" />
+        <SectionHeader
+          title="Zeiterfassung"
+          action={
+            canUseAdminActions ? (
+              <button type="button" className="opc-link-button" onClick={openManualTimeForm}>
+                + Zeit manuell erfassen
+              </button>
+            ) : null
+          }
+        />
 
         {visibleTimeLogs.length === 0 ? (
           <div className="opc-empty-box">Keine sichtbaren Zeiten vorhanden.</div>
@@ -2482,8 +3292,13 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                     <div className="opc-date-cell">{formatMinutes(getBreakMinutes(log))}</div>
                     <div className="opc-date-cell">{formatMinutes(total)}</div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <div className="opc-time-row-actions">
                       <StatusBadge status={onBreak ? 'on_break' : isActive ? 'open' : log.status} />
+                      {canUseAdminActions ? (
+                        <button type="button" className="opc-mini-action" onClick={() => handleEditManualTimeLog(log)}>
+                          Bearbeiten
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -2512,12 +3327,20 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                       <span>Total: {formatMinutes(total)}</span>
                       <span>Pause: {formatMinutes(getBreakMinutes(log))}</span>
                     </div>
+
+                    {canUseAdminActions ? (
+                      <button type="button" className="opc-mini-action opc-mini-action-mobile" onClick={() => handleEditManualTimeLog(log)}>
+                        Einzelzeit bearbeiten
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}
             </div>
           </>
         )}
+
+        {renderManualTimeForm()}
       </section>
     );
   };
@@ -2633,7 +3456,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           </div>
         </div>
 
-        <div className={mode === 'admin' ? 'opc-hero-button-bar two' : 'opc-hero-button-bar one'}>
+        <div className={mode === 'admin' && canUseAdminActions ? 'opc-hero-button-bar admin' : 'opc-hero-button-bar one'}>
           <a className="opc-btn opc-btn-light" href={getMapsUrl(job)} target="_blank" rel="noreferrer">
             <MapPin size={16} />
             Navigation
@@ -2649,6 +3472,30 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
               }}
             >
               {editMode ? 'Bearbeitung schliessen' : 'Einsatz bearbeiten'}
+            </button>
+          ) : null}
+
+          {mode === 'admin' && canUseReportActions && jobCompleted ? (
+            <button
+              type="button"
+              className="opc-btn opc-btn-light"
+              disabled={Boolean(actionLoading)}
+              onClick={() => void handleCreateOrOpenReport()}
+            >
+              {actionLoading === 'create_report' ? <Loader2 size={16} className="spin" /> : <FileText size={16} />}
+              {jobHasReport ? 'Bericht öffnen' : 'Bericht erstellen'}
+            </button>
+          ) : null}
+
+          {mode === 'admin' && canDeleteJob ? (
+            <button
+              type="button"
+              className="opc-btn opc-btn-danger"
+              disabled={Boolean(actionLoading)}
+              onClick={() => void handleDeleteJob()}
+            >
+              {actionLoading === 'delete_job' ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
+              Einsatz löschen
             </button>
           ) : null}
         </div>
@@ -2918,7 +3765,22 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
             {renderNotesCard()}
 
             <section className="opc-section-card" style={cardStyle}>
-              <SectionHeader title="Bericht & Hinweise" />
+              <SectionHeader
+                title="Bericht & Hinweise"
+                action={
+                  canUseReportActions && jobCompleted ? (
+                    <button
+                      type="button"
+                      className="opc-btn opc-btn-light opc-section-action-btn"
+                      disabled={Boolean(actionLoading)}
+                      onClick={() => void handleCreateOrOpenReport()}
+                    >
+                      {actionLoading === 'create_report' ? <Loader2 size={15} className="spin" /> : <FileText size={15} />}
+                      {jobHasReport ? 'Bericht öffnen' : 'Bericht erstellen'}
+                    </button>
+                  ) : null
+                }
+              />
 
               <div className="opc-two-col">
                 <div>
@@ -2939,7 +3801,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                       <MiniField label="Zusammenfassung" value={report.report_summary} />
                     </div>
                   ) : (
-                    <div className="opc-empty-box">Noch kein Bericht vorhanden.</div>
+                    <div className="opc-empty-box">Noch kein Bericht vorhanden.{canUseReportActions && jobCompleted ? ' Über den Button kann ein Bericht erstellt werden.' : ''}</div>
                   )}
                 </div>
               </div>
@@ -3048,13 +3910,13 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     <MirakaDashboardShell
       title="Einsatzdetails"
       requiredRole={['owner', 'admin', 'dispatch', 'employee', 'client']}
-      currentPath="/einsaetze"
+      currentPath={backTarget.currentPath}
       hideTopBar={false}
       fullWidth={false}
     >
       <div className="opc-page" style={{ fontFamily: pageFont }}>
-        <a href={`${baseUrl}/einsaetze`} className="opc-back-link">
-          ← Zurück zu Einsätze
+        <a href={backTarget.href} className="opc-back-link">
+          ← {backTarget.label}
         </a>
 
         {loading && !job && <div className="opc-loading-card">Einsatz wird geladen.</div>}
@@ -3065,6 +3927,11 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           <>
             {actionError ? <div className="opc-error-card">{actionError}</div> : null}
             {actionMessage ? <div className="opc-action-message">{actionMessage}</div> : null}
+            {pendingOfflineActions > 0 ? (
+              <div className="opc-warning-card">
+                {pendingOfflineActions} Aktion{pendingOfflineActions === 1 ? '' : 'en'} lokal gespeichert. Synchronisation läuft automatisch bei stabiler Verbindung.
+              </div>
+            ) : null}
             {employeeMode ? renderEmployeeExecutionView() : renderAdminView()}
           </>
         )}
@@ -3255,6 +4122,10 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
         .opc-hero-button-bar.two {
           grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .opc-hero-button-bar.admin {
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         }
 
         .opc-hero-button-bar.one {
@@ -3677,6 +4548,18 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           background: #FFFFFF;
           color: ${BRAND.text};
           border-color: ${BRAND.border};
+        }
+
+        .opc-btn-danger {
+          background: #FFFFFF;
+          color: ${BRAND.red};
+          border-color: #FECACA;
+        }
+
+        .opc-section-action-btn {
+          height: 36px;
+          border-radius: 12px;
+          padding-inline: 12px;
         }
 
         .opc-full-btn {
@@ -4215,6 +5098,89 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           to { transform: rotate(360deg); }
         }
 
+
+
+        .opc-time-row-actions {
+          display: flex;
+          justify-content: flex-end;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .opc-mini-action {
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          border-radius: 999px;
+          min-height: 30px;
+          padding: 0 10px;
+          font-size: 12px;
+          font-weight: 800;
+          cursor: pointer;
+          font-family: ${pageFont};
+        }
+
+        .opc-mini-action-mobile {
+          width: 100%;
+          justify-content: center;
+          margin-top: 10px;
+        }
+
+        .opc-manual-time-form {
+          margin-top: 14px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 18px;
+          padding: 14px;
+          background: #FAFAFA;
+        }
+
+        .opc-manual-time-head {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: flex-start;
+          margin-bottom: 12px;
+        }
+
+        .opc-manual-time-head strong {
+          display: block;
+          color: ${BRAND.text};
+          font-size: 15px;
+          font-weight: 850;
+        }
+
+        .opc-manual-time-head span {
+          display: block;
+          margin-top: 3px;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 650;
+        }
+
+        .opc-manual-time-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 10px;
+        }
+
+        .opc-manual-time-grid label,
+        .opc-manual-time-form label {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          color: ${BRAND.text};
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .opc-manual-time-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-top: 12px;
+        }
         @media (max-width: 1180px) {
           .opc-main-grid {
             grid-template-columns: minmax(0, 1fr);
@@ -4243,6 +5209,11 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         }
 
         @media (max-width: 740px) {
+          .opc-manual-time-grid,
+          .opc-manual-time-actions {
+            grid-template-columns: 1fr;
+          }
+
           .opc-page {
             max-width: none;
             width: 100%;
@@ -4294,6 +5265,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
           .opc-hero-button-bar,
           .opc-hero-button-bar.two,
+          .opc-hero-button-bar.admin,
           .opc-hero-button-bar.one {
             grid-template-columns: 1fr;
             gap: 8px;

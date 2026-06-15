@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import PortalSkeleton from './shared/PortalSkeleton';
 import {
-  Building2,
   CheckCircle2,
   Copy,
   Download,
   ExternalLink,
   Loader2,
-  MapPin,
   Plus,
   QrCode,
   RefreshCw,
@@ -16,20 +14,8 @@ import {
 import {
   OPCPageShell,
   OPCTabs,
-  OPCMetricsGrid,
-  OPCMetricCard,
-  OPCToolbar,
-  OPCListCard,
   OPC_BRAND,
   OPC_PAGE_FONT,
-  opcResponsiveStyle,
-  opcSelectStyle,
-  opcInputStyle,
-  opcInputWithIconStyle,
-  opcSearchIconStyle,
-  opcBlackButtonStyle,
-  opcSecondaryButtonStyle,
-  opcCardStyle,
 } from './opc/OPCPageTop';
 import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 
@@ -81,6 +67,120 @@ type ApiResponse = {
 };
 
 const QR_CODES_CACHE_KEY = 'opc:page-cache:qr-codes';
+
+const qrCardStyle: CSSProperties = {
+  background: '#FFFFFF',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: '20px',
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+};
+
+const qrInputStyle: CSSProperties = {
+  width: '100%',
+  height: '46px',
+  borderRadius: '14px',
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FFFFFF',
+  color: OPC_BRAND.text,
+  outline: 'none',
+  padding: '0 12px',
+  fontSize: '14px',
+  fontWeight: 650,
+  fontFamily: OPC_PAGE_FONT,
+  boxSizing: 'border-box',
+};
+
+const qrInputWithIconStyle: CSSProperties = {
+  ...qrInputStyle,
+  padding: '0 14px 0 42px',
+};
+
+const qrSelectStyle: CSSProperties = {
+  width: '100%',
+  height: '46px',
+  borderRadius: '14px',
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FFFFFF',
+  color: OPC_BRAND.text,
+  outline: 'none',
+  padding: '0 12px',
+  fontSize: '13px',
+  fontWeight: 760,
+  fontFamily: OPC_PAGE_FONT,
+  boxSizing: 'border-box',
+};
+
+const qrSearchIconStyle: CSSProperties = {
+  position: 'absolute',
+  left: '14px',
+  top: '50%',
+  transform: 'translateY(-50%)',
+  color: '#9CA3AF',
+  pointerEvents: 'none',
+};
+
+const qrBlackButtonStyle: CSSProperties = {
+  width: '100%',
+  minHeight: '46px',
+  borderRadius: '14px',
+  border: `1px solid ${OPC_BRAND.black}`,
+  background: OPC_BRAND.black,
+  color: '#FFFFFF',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '8px',
+  padding: '0 12px',
+  fontSize: '13px',
+  fontWeight: 820,
+  fontFamily: OPC_PAGE_FONT,
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
+  boxSizing: 'border-box',
+  cursor: 'pointer',
+};
+
+const qrSecondaryButtonStyle: CSSProperties = {
+  width: '100%',
+  minHeight: '46px',
+  borderRadius: '14px',
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FFFFFF',
+  color: OPC_BRAND.text,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '8px',
+  padding: '0 12px',
+  fontSize: '13px',
+  fontWeight: 820,
+  fontFamily: OPC_PAGE_FONT,
+  textDecoration: 'none',
+  whiteSpace: 'nowrap',
+  boxSizing: 'border-box',
+  cursor: 'pointer',
+};
+
+function QRMetricCard({
+  value,
+  label,
+  icon,
+}: {
+  value: number;
+  label: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div className="opc-qr-metric-card" style={qrCardStyle}>
+      <div style={{ minWidth: 0 }}>
+        <div className="opc-qr-metric-value">{value}</div>
+        <div className="opc-qr-metric-label">{label}</div>
+      </div>
+
+      <div className="opc-qr-metric-icon">{icon}</div>
+    </div>
+  );
+}
 
 type ActiveTab = 'overview' | 'create';
 type ActiveFilter = 'all' | 'active' | 'inactive';
@@ -272,7 +372,7 @@ export default function QRCodeOverviewPage() {
     );
   }
 
-  async function createQrCode(event: React.FormEvent<HTMLFormElement>) {
+  async function createQrCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     try {
@@ -364,17 +464,12 @@ export default function QRCodeOverviewPage() {
         ]}
       />
 
-      <OPCMetricsGrid>
-        <OPCMetricCard value={metrics.total} label="QR-Codes" icon={<QrCode size={18} />} />
-        <OPCMetricCard
-          value={metrics.active}
-          label="Aktiv"
-          icon={<CheckCircle2 size={18} />}
-          tone="success"
-        />
-        <OPCMetricCard value={metrics.used} label="Genutzt" icon={<ExternalLink size={18} />} />
-        <OPCMetricCard value={metrics.scans} label="Scans gesamt" icon={<RefreshCw size={18} />} />
-      </OPCMetricsGrid>
+      <div className="opc-qr-metrics">
+        <QRMetricCard value={metrics.total} label="QR-Codes" icon={<QrCode size={18} />} />
+        <QRMetricCard value={metrics.active} label="Aktiv" icon={<CheckCircle2 size={18} />} />
+        <QRMetricCard value={metrics.used} label="Genutzt" icon={<ExternalLink size={18} />} />
+        <QRMetricCard value={metrics.scans} label="Scans gesamt" icon={<RefreshCw size={18} />} />
+      </div>
 
       {warnings.length > 0 && (
         <div style={warningStyle}>
@@ -390,169 +485,106 @@ export default function QRCodeOverviewPage() {
 
       {activeTab === 'overview' ? (
         <>
-          <OPCToolbar columns="minmax(0, 1fr) 180px 190px">
-            <div style={{ position: 'relative', minWidth: 0 }}>
-              <Search size={17} style={opcSearchIconStyle} />
+          <section className="opc-qr-filter-panel" style={qrCardStyle}>
+            <div className="opc-qr-search">
+              <Search size={17} style={qrSearchIconStyle} />
 
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Suche nach Standort, Facility, Kunde oder Token"
-                style={opcInputWithIconStyle}
+                placeholder="QR-Codes suchen..."
+                style={qrInputWithIconStyle}
               />
             </div>
 
-            <select
-              value={activeFilter}
-              onChange={(event) => setActiveFilter(event.target.value as ActiveFilter)}
-              style={opcSelectStyle}
-            >
-              <option value="all">Alle QR-Codes</option>
-              <option value="active">Nur aktiv</option>
-              <option value="inactive">Nur inaktiv</option>
-            </select>
+            <div className="opc-qr-filter-row">
+              <select
+                value={activeFilter}
+                onChange={(event) => setActiveFilter(event.target.value as ActiveFilter)}
+                style={qrSelectStyle}
+              >
+                <option value="all">Alle QR-Codes</option>
+                <option value="active">Nur aktiv</option>
+                <option value="inactive">Nur inaktiv</option>
+              </select>
 
-            <button
-              type="button"
-              data-opc-wide="true"
-              onClick={() => setActiveTab('create')}
-              style={opcBlackButtonStyle}
-            >
-              <Plus size={17} />
-              QR-Code erstellen
-            </button>
-          </OPCToolbar>
+              <button
+                type="button"
+                onClick={() => setActiveTab('create')}
+                style={qrBlackButtonStyle}
+              >
+                <Plus size={17} />
+                QR-Code erstellen
+              </button>
+            </div>
+          </section>
 
-          <OPCListCard>
-            {filteredLinks.length === 0 ? (
-              <div style={emptyStyle}>
-                <QrCode size={24} />
-                <strong>Keine QR-Codes vorhanden.</strong>
-                <span>Erstelle den ersten QR-Code für einen Standort oder eine Facility.</span>
-              </div>
-            ) : (
-              <>
-                <div className="opc-requests-desktop-table">
-                  {filteredLinks.map((link, index) => (
-                    <div
-                      key={link.id}
-                      style={{
-                        ...desktopRowStyle,
-                        borderBottom:
-                          index < filteredLinks.length - 1 ? '1px solid #F3F4F6' : 'none',
-                      }}
-                    >
-                      <img
-                        src={buildQrImageUrl(link)}
-                        alt={link.label || link.facility_label || 'QR-Code'}
-                        style={qrImageStyle}
-                      />
+          {filteredLinks.length === 0 ? (
+            <div className="opc-qr-empty-card" style={qrCardStyle}>
+              <QrCode size={24} />
+              <strong>Keine QR-Codes vorhanden.</strong>
+              <span>Erstelle den ersten QR-Code für einen Standort oder eine Facility.</span>
+            </div>
+          ) : (
+            <div className="opc-qr-list">
+              {filteredLinks.map((link) => (
+                <article key={link.id} className="opc-qr-card" style={qrCardStyle}>
+                  <div className="opc-qr-card-main">
+                    <img
+                      src={buildQrImageUrl(link)}
+                      alt={link.label || link.facility_label || 'QR-Code'}
+                      className="opc-qr-card-image"
+                    />
 
-                      <div style={{ minWidth: 0 }}>
-                        <div style={rowTitleStyle}>
-                          {link.label || link.facility_label || 'QR-Code'}
-                        </div>
-                        <div style={rowSubStyle}>{link.token}</div>
-                      </div>
+                    <div className="opc-qr-card-content">
+                      <h3>{link.label || link.facility_label || 'QR-Code'}</h3>
+                      <p className="opc-qr-token">{link.token}</p>
 
-                      <div style={{ minWidth: 0 }}>
-                        <div style={rowTitleStyle}>{link.site_label || 'Ohne Standort'}</div>
-                        <div style={rowSubStyle}>{link.facility_label || 'Keine Facility'}</div>
-                      </div>
-
-                      <div style={dateStyle}>{link.use_count || 0}x</div>
-
-                      <div style={dateStyle}>{formatDate(link.last_used_at)}</div>
-
-                      <div style={actionWrapStyle}>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            window.open(buildReportUrl(link), '_blank', 'noopener,noreferrer')
-                          }
-                          style={smallBlackButtonStyle}
-                        >
-                          <ExternalLink size={14} />
-                          Testen
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => copyReportUrl(link)}
-                          style={smallSecondaryButtonStyle}
-                          title="Link kopieren"
-                        >
-                          <Copy size={14} />
-                        </button>
-
-                        <a
-                          href={buildQrImageUrl(link, true)}
-                          style={smallSecondaryButtonStyle}
-                          title="QR herunterladen"
-                        >
-                          <Download size={14} />
-                        </a>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="opc-requests-mobile-cards">
-                  {filteredLinks.map((link) => (
-                    <div key={link.id} style={mobileCardStyle}>
-                      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-                        <img
-                          src={buildQrImageUrl(link)}
-                          alt={link.label || link.facility_label || 'QR-Code'}
-                          style={mobileQrImageStyle}
-                        />
-
-                        <div style={{ minWidth: 0 }}>
-                          <h3 style={mobileTitleStyle}>
-                            {link.label || link.facility_label || 'QR-Code'}
-                          </h3>
-                          <p style={mobileTextStyle}>{link.token}</p>
-                        </div>
-                      </div>
-
-                      <div style={mobileMetaStyle}>
+                      <div className="opc-qr-meta">
                         <span>{link.site_label || 'Ohne Standort'}</span>
                         <span>{link.facility_label || 'Keine Facility'}</span>
                         <span>Nutzung: {link.use_count || 0}x</span>
                         <span>Zuletzt: {formatDate(link.last_used_at)}</span>
                       </div>
-
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            window.open(buildReportUrl(link), '_blank', 'noopener,noreferrer')
-                          }
-                          style={smallBlackButtonStyle}
-                        >
-                          <ExternalLink size={14} />
-                          Testen
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => copyReportUrl(link)}
-                          style={smallSecondaryButtonStyle}
-                        >
-                          <Copy size={14} />
-                        </button>
-
-                        <a href={buildQrImageUrl(link, true)} style={smallSecondaryButtonStyle}>
-                          <Download size={14} />
-                        </a>
-                      </div>
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </OPCListCard>
+
+                    <div className="opc-qr-card-side">
+                      <span className="opc-qr-use-pill">{link.is_active ? 'Aktiv' : 'Inaktiv'}</span>
+                      <span>{link.use_count || 0} Scans</span>
+                    </div>
+                  </div>
+
+                  <div className="opc-qr-card-actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        window.open(buildReportUrl(link), '_blank', 'noopener,noreferrer')
+                      }
+                      className="opc-qr-action dark"
+                    >
+                      <ExternalLink size={15} />
+                      Testen
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => copyReportUrl(link)}
+                      className="opc-qr-action"
+                    >
+                      <Copy size={15} />
+                      Link kopieren
+                    </button>
+
+                    <a href={buildQrImageUrl(link, true)} className="opc-qr-action">
+                      <Download size={15} />
+                      QR herunterladen
+                    </a>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
 
           {filteredLinks.length > 0 && (
             <div style={countStyle}>
@@ -561,7 +593,7 @@ export default function QRCodeOverviewPage() {
           )}
         </>
       ) : (
-        <section style={formCardStyle}>
+        <section className="opc-qr-form-card" style={formCardStyle}>
           <form onSubmit={createQrCode}>
             <div style={formGridTwoStyle}>
               <label style={labelStyle}>
@@ -572,7 +604,7 @@ export default function QRCodeOverviewPage() {
                     setSelectedSiteId(event.target.value);
                     setSelectedFacilityId('');
                   }}
-                  style={opcSelectStyle}
+                  style={qrSelectStyle}
                   required
                 >
                   <option value="">Standort auswählen</option>
@@ -590,7 +622,7 @@ export default function QRCodeOverviewPage() {
                   value={label}
                   onChange={(event) => setLabel(event.target.value)}
                   placeholder="z. B. WC Herren EG"
-                  style={opcInputStyle}
+                  style={qrInputStyle}
                 />
               </label>
             </div>
@@ -625,7 +657,7 @@ export default function QRCodeOverviewPage() {
                 <select
                   value={selectedFacilityId}
                   onChange={(event) => setSelectedFacilityId(event.target.value)}
-                  style={opcSelectStyle}
+                  style={qrSelectStyle}
                   required
                   disabled={!selectedSiteId}
                 >
@@ -648,7 +680,7 @@ export default function QRCodeOverviewPage() {
                     value={facilityName}
                     onChange={(event) => setFacilityName(event.target.value)}
                     placeholder="z. B. WC Herren, Eingang, Treppenhaus"
-                    style={opcInputStyle}
+                    style={qrInputStyle}
                     required={facilityMode === 'new'}
                   />
                 </label>
@@ -659,7 +691,7 @@ export default function QRCodeOverviewPage() {
                     value={floor}
                     onChange={(event) => setFloor(event.target.value)}
                     placeholder="z. B. EG"
-                    style={opcInputStyle}
+                    style={qrInputStyle}
                   />
                 </label>
 
@@ -669,7 +701,7 @@ export default function QRCodeOverviewPage() {
                     value={areaType}
                     onChange={(event) => setAreaType(event.target.value)}
                     placeholder="z. B. WC"
-                    style={opcInputStyle}
+                    style={qrInputStyle}
                   />
                 </label>
               </div>
@@ -682,7 +714,7 @@ export default function QRCodeOverviewPage() {
                   value={publicTitle}
                   onChange={(event) => setPublicTitle(event.target.value)}
                   placeholder="Meldung erstellen"
-                  style={opcInputStyle}
+                  style={qrInputStyle}
                 />
               </label>
 
@@ -692,7 +724,7 @@ export default function QRCodeOverviewPage() {
                   value={publicDescription}
                   onChange={(event) => setPublicDescription(event.target.value)}
                   placeholder="Kurze Beschreibung für die öffentliche Meldeseite"
-                  style={opcInputStyle}
+                  style={qrInputStyle}
                 />
               </label>
             </div>
@@ -704,7 +736,7 @@ export default function QRCodeOverviewPage() {
                   resetForm();
                   setActiveTab('overview');
                 }}
-                style={{ ...opcSecondaryButtonStyle, width: 'auto' }}
+                style={qrSecondaryButtonStyle}
                 disabled={creating}
               >
                 Abbrechen
@@ -712,7 +744,7 @@ export default function QRCodeOverviewPage() {
 
               <button
                 type="submit"
-                style={{ ...opcBlackButtonStyle, width: 'auto' }}
+                style={qrBlackButtonStyle}
                 disabled={creating}
               >
                 {creating ? <Loader2 size={17} className="spin" /> : <QrCode size={17} />}
@@ -723,24 +755,14 @@ export default function QRCodeOverviewPage() {
         </section>
       )}
 
-      <style>{`${opcResponsiveStyle}${spinStyle}`}</style>
+      <style>{spinStyle}</style>
     </OPCPageShell>
   );
 }
 
-const loadingStyle: CSSProperties = {
-  minHeight: '60vh',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: OPC_BRAND.muted,
-  fontSize: '14px',
-  fontWeight: 650,
-  fontFamily: OPC_PAGE_FONT,
-};
 
 const warningStyle: CSSProperties = {
-  marginBottom: '22px',
+  marginBottom: '14px',
   padding: '14px 16px',
   borderRadius: '14px',
   border: '1px solid #FDBA74',
@@ -753,7 +775,7 @@ const warningStyle: CSSProperties = {
 };
 
 const errorStyle: CSSProperties = {
-  marginBottom: '22px',
+  marginBottom: '14px',
   padding: '14px 16px',
   borderRadius: '14px',
   border: '1px solid #FCA5A5',
@@ -764,7 +786,7 @@ const errorStyle: CSSProperties = {
 };
 
 const successStyle: CSSProperties = {
-  marginBottom: '22px',
+  marginBottom: '14px',
   padding: '14px 16px',
   borderRadius: '14px',
   border: '1px solid #BBF7D0',
@@ -775,7 +797,7 @@ const successStyle: CSSProperties = {
 };
 
 const emptyStyle: CSSProperties = {
-  minHeight: '220px',
+  minHeight: '180px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -790,17 +812,17 @@ const emptyStyle: CSSProperties = {
 const desktopRowStyle: CSSProperties = {
   width: '100%',
   display: 'grid',
-  gridTemplateColumns: '92px minmax(220px, 0.9fr) minmax(260px, 1.2fr) 80px 150px 220px',
+  gridTemplateColumns: '82px minmax(200px, 0.9fr) minmax(240px, 1.2fr) 72px 140px 210px',
   alignItems: 'center',
-  gap: '20px',
-  padding: '20px 22px',
+  gap: '16px',
+  padding: '18px 20px',
   background: '#FFFFFF',
   fontFamily: OPC_PAGE_FONT,
 };
 
 const qrImageStyle: CSSProperties = {
-  width: '70px',
-  height: '70px',
+  width: '64px',
+  height: '64px',
   borderRadius: '12px',
   border: `1px solid ${OPC_BRAND.border}`,
   background: '#FFFFFF',
@@ -808,8 +830,8 @@ const qrImageStyle: CSSProperties = {
 };
 
 const rowTitleStyle: CSSProperties = {
-  fontSize: '15px',
-  fontWeight: 800,
+  fontSize: '14px',
+  fontWeight: 820,
   color: OPC_BRAND.text,
   letterSpacing: '-0.015em',
   marginBottom: '7px',
@@ -842,7 +864,7 @@ const actionWrapStyle: CSSProperties = {
 };
 
 const smallBlackButtonStyle: CSSProperties = {
-  height: '34px',
+  height: '36px',
   padding: '0 12px',
   borderRadius: '12px',
   border: `1px solid ${OPC_BRAND.black}`,
@@ -862,8 +884,8 @@ const smallBlackButtonStyle: CSSProperties = {
 };
 
 const smallSecondaryButtonStyle: CSSProperties = {
-  width: '34px',
-  height: '34px',
+  width: '36px',
+  height: '36px',
   borderRadius: '12px',
   border: `1px solid ${OPC_BRAND.border}`,
   background: '#FFFFFF',
@@ -882,7 +904,7 @@ const smallSecondaryButtonStyle: CSSProperties = {
 const mobileCardStyle: CSSProperties = {
   width: '100%',
   border: `1px solid ${OPC_BRAND.border}`,
-  borderRadius: '18px',
+  borderRadius: '20px',
   background: '#FFFFFF',
   padding: '16px',
   textAlign: 'left',
@@ -932,7 +954,7 @@ const countStyle: CSSProperties = {
 };
 
 const formCardStyle: CSSProperties = {
-  ...opcCardStyle,
+  ...qrCardStyle,
   padding: '18px',
   marginBottom: '22px',
 };
@@ -946,7 +968,7 @@ const formGridTwoStyle: CSSProperties = {
 
 const formGridThreeStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: '1fr 160px 200px',
+  gridTemplateColumns: 'minmax(0, 1fr) 160px 200px',
   gap: '14px',
   marginBottom: '14px',
 };
@@ -960,15 +982,16 @@ const labelStyle: CSSProperties = {
 };
 
 const toggleRowStyle: CSSProperties = {
-  display: 'flex',
-  gap: '10px',
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: '8px',
   marginBottom: '14px',
 };
 
 const toggleButtonStyle: CSSProperties = {
-  height: '40px',
-  padding: '0 16px',
-  borderRadius: '999px',
+  height: '46px',
+  padding: '0 12px',
+  borderRadius: '14px',
   border: `1px solid ${OPC_BRAND.border}`,
   background: '#FFFFFF',
   color: OPC_BRAND.text,
@@ -985,9 +1008,9 @@ const toggleButtonActiveStyle: CSSProperties = {
 };
 
 const formActionsStyle: CSSProperties = {
-  display: 'flex',
-  justifyContent: 'flex-end',
-  gap: '10px',
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: '8px',
 };
 
 const spinStyle = `
@@ -1000,9 +1023,353 @@ const spinStyle = `
     to { transform: rotate(360deg); }
   }
 
+  .opc-qr-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .opc-qr-metric-card {
+    min-height: 96px;
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+  }
+
+  .opc-qr-metric-value {
+    font-size: 25px;
+    line-height: 1;
+    font-weight: 820;
+    letter-spacing: -0.04em;
+    color: ${OPC_BRAND.text};
+    margin-bottom: 10px;
+  }
+
+  .opc-qr-metric-label {
+    font-size: 13px;
+    font-weight: 720;
+    color: ${OPC_BRAND.muted};
+  }
+
+  .opc-qr-metric-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 13px;
+    border: 1px solid ${OPC_BRAND.border};
+    background: #FAFAFA;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: ${OPC_BRAND.black};
+    flex-shrink: 0;
+  }
+
+  .opc-qr-filter-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: 16px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    align-items: stretch;
+    margin-bottom: 18px;
+    overflow: visible;
+  }
+
+  .opc-qr-search {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .opc-qr-search input::placeholder {
+    color: #9CA3AF;
+    font-weight: 700;
+  }
+
+  .opc-qr-filter-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .opc-qr-filter-row button,
+  .opc-qr-filter-row select,
+  .opc-qr-form-card button,
+  .opc-qr-form-card input,
+  .opc-qr-form-card select {
+    min-width: 0;
+  }
+
+  .opc-qr-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .opc-qr-empty-card {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
+    padding: 34px;
+    color: ${OPC_BRAND.muted};
+    text-align: center;
+    font-family: ${OPC_PAGE_FONT};
+    margin-bottom: 18px;
+  }
+
+  .opc-qr-card {
+    padding: 18px;
+    width: 100%;
+  }
+
+  .opc-qr-card-main {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 18px;
+    align-items: start;
+  }
+
+  .opc-qr-card-image {
+    width: 78px;
+    height: 78px;
+    border-radius: 13px;
+    border: 1px solid ${OPC_BRAND.border};
+    background: #FFFFFF;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
+  .opc-qr-card-content {
+    min-width: 0;
+  }
+
+  .opc-qr-card h3 {
+    margin: 0;
+    color: ${OPC_BRAND.text};
+    font-size: 20px;
+    line-height: 1.18;
+    letter-spacing: -0.04em;
+    font-weight: 860;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .opc-qr-token {
+    margin: 7px 0 0;
+    color: ${OPC_BRAND.muted};
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .opc-qr-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-top: 9px;
+    color: ${OPC_BRAND.muted};
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 650;
+  }
+
+  .opc-qr-meta span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .opc-qr-meta span + span::before {
+    content: '·';
+    margin-right: 14px;
+    color: ${OPC_BRAND.muted};
+  }
+
+  .opc-qr-card-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .opc-qr-card-side > span:last-child {
+    color: ${OPC_BRAND.muted};
+    font-size: 12px;
+    font-weight: 720;
+    white-space: nowrap;
+  }
+
+  .opc-qr-use-pill {
+    min-width: 86px;
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid ${OPC_BRAND.border};
+    background: #F9FAFB;
+    color: ${OPC_BRAND.text};
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 760;
+    white-space: nowrap;
+  }
+
+  .opc-qr-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .opc-qr-action {
+    min-height: 42px;
+    border-radius: 13px;
+    border: 1px solid ${OPC_BRAND.border};
+    background: #FFFFFF;
+    color: ${OPC_BRAND.text};
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 760;
+    font-family: ${OPC_PAGE_FONT};
+    text-decoration: none;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .opc-qr-action.dark {
+    background: ${OPC_BRAND.black};
+    border-color: ${OPC_BRAND.black};
+    color: #FFFFFF;
+  }
+
+  .opc-requests-desktop-table,
+  .opc-requests-mobile-cards {
+    display: none !important;
+  }
+
+  .opc-qr-form-card {
+    padding: 18px;
+    margin-bottom: 22px;
+  }
+
+  .opc-qr-form-card form {
+    margin: 0;
+  }
+
   @media (max-width: 980px) {
-    form [style*="grid-template-columns: repeat(2"] {
+    form [style*="grid-template-columns: repeat(2"],
+    form [style*="grid-template-columns: 1fr 160px 200px"] {
       grid-template-columns: 1fr !important;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .opc-qr-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .opc-qr-metric-card {
+      min-height: 86px;
+      padding: 15px;
+    }
+
+    .opc-qr-metric-value {
+      font-size: 23px;
+    }
+
+    .opc-qr-metric-label {
+      font-size: 12px;
+      line-height: 1.2;
+    }
+
+    .opc-qr-metric-icon {
+      width: 34px;
+      height: 34px;
+    }
+
+    .opc-qr-filter-panel {
+      padding: 14px;
+      border-radius: 18px !important;
+    }
+
+    .opc-qr-filter-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .opc-qr-filter-row button,
+    .opc-qr-filter-row select {
+      min-height: 46px;
+      font-size: 12px !important;
+      padding-left: 8px !important;
+      padding-right: 8px !important;
+    }
+
+    .opc-qr-card {
+      padding: 15px;
+    }
+
+    .opc-qr-card-main {
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .opc-qr-card-side {
+      grid-column: 1 / -1;
+      align-items: flex-start;
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
+
+    .opc-qr-card h3 {
+      font-size: 18px;
+    }
+
+    .opc-qr-meta {
+      display: grid;
+      gap: 7px;
+    }
+
+    .opc-qr-meta span + span::before {
+      content: none;
+      margin: 0;
+    }
+
+    .opc-qr-card-actions {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .opc-qr-action {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .opc-qr-filter-row {
+      grid-template-columns: 1fr;
     }
   }
 `;
