@@ -30,14 +30,9 @@ import { ClientRouter } from 'astro:transitions';
     <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
     <meta name="theme-color" content="#ff6a00" />
     <meta name="application-name" content="Orange Pro Clean" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rechnungen | Orange Pro Clean</title>
   </head>
-  <body>
-    <InvoicesPage client:only="react" />
-  </body>
+  <body><InvoicesPage client:only="react" /></body>
 </html>

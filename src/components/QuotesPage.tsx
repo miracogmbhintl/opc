@@ -390,16 +390,24 @@ export default function QuotesPage() {
           </div>
 
           <section className="opc-quotes-filter-panel" style={cardStyle}>
-            <div className="opc-quotes-filter-actions">
-              <a href={`${baseUrl}/kunden`} className="opc-filter-button light" data-astro-prefetch="false">
-                <UserRound size={16} />
-                Kunde auswählen
-              </a>
+            <div className="opc-quotes-filter-top">
+              <div className="opc-quotes-filter-actions">
+                <a href={`${baseUrl}/kunden`} className="opc-filter-button light" data-astro-prefetch="false">
+                  <UserRound size={16} />
+                  Kunde auswählen
+                </a>
 
-              <a href={`${baseUrl}/offerte/neu`} className="opc-filter-button dark" data-astro-prefetch="false">
-                <Plus size={16} />
-                Neue Offerte
-              </a>
+                <a href={`${baseUrl}/offerte/neu`} className="opc-filter-button dark" data-astro-prefetch="false">
+                  <Plus size={16} />
+                  Neue Offerte
+                </a>
+              </div>
+
+              <div className="opc-quotes-pipeline-hint">
+                <WalletCards size={15} />
+                <span>Pipeline gesamt</span>
+                <strong>{formatMoney(totalPipeline)}</strong>
+              </div>
             </div>
 
             <div className="opc-quotes-search-row">
@@ -423,10 +431,6 @@ export default function QuotesPage() {
               </select>
             </div>
 
-            <div className="opc-quotes-pipeline-hint">
-              <WalletCards size={15} />
-              Pipeline gesamt: <strong>{formatMoney(totalPipeline)}</strong>
-            </div>
           </section>
 
           {errorMessage ? <div className="opc-quotes-error">{errorMessage}</div> : null}
@@ -512,6 +516,13 @@ export default function QuotesPage() {
             gap: 12px;
             margin-bottom: 18px;
             overflow: visible;
+          }
+
+          .opc-quotes-filter-top {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) max-content;
+            gap: 8px;
+            align-items: stretch;
           }
 
           .opc-quotes-filter-actions {
@@ -750,8 +761,17 @@ export default function QuotesPage() {
               grid-template-columns: 1fr;
             }
 
+            .opc-quotes-filter-top {
+              grid-template-columns: 1fr;
+            }
+
             .opc-quotes-filter-actions {
               grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .opc-quotes-pipeline-hint {
+              justify-content: flex-start;
+              width: 100%;
             }
 
             .opc-filter-button {

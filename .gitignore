@@ -205,3 +205,4 @@ opc_pages_dump_*.txt
 _besichtigung_layout_discovery.sh
 _patch_*.sh
 *_layout_discovery_*/
+.env.development

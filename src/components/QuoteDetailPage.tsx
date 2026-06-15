@@ -21,6 +21,7 @@ import {
   Check,
   ClipboardCheck,
   Download,
+  FileText,
   Mail,
   Plus,
   Receipt,
@@ -37,6 +38,20 @@ type QuoteDetailPageProps = {
 };
 
 type PriceInputMode = 'excl' | 'incl';
+
+const statusLabels: Record<string, string> = {
+  draft: 'Entwurf',
+  ready: 'Bereit',
+  sent: 'Gesendet',
+  viewed: 'Gesehen',
+  accepted: 'Angenommen',
+  declined: 'Abgelehnt',
+  expired: 'Abgelaufen',
+  cancelled: 'Storniert',
+  converted_to_job: 'Einsatz erstellt',
+  invoiced: 'Verrechnet',
+};
+
 
 function clean(value: unknown) {
   return String(value || '').trim();
@@ -736,13 +751,13 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   return (
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={`/offerte/${quoteId}`} fullWidth hideTopBar>
       <OPCPageShell>
-        <div style={topBarStyle} className="opc-mobile-topbar">
-          <a href={`${baseUrl}/offerten`} className="opc-mobile-back" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+        <div style={detailTopBarStyle} className="opc-quote-topbar">
+          <a href={`${baseUrl}/offerten`} className="opc-quote-back" style={detailBackPillStyle}>
             <ArrowLeft size={16} />
             Zurück
           </a>
 
-          <div style={actionRowStyle} className="opc-mobile-action-row">
+          <div style={detailActionRowStyle} className="opc-quote-action-row">
             <button type="button" disabled={saving} onClick={() => saveQuote()} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
               <Save size={16} />
               {saving ? 'Speichert...' : 'Speichern'}
@@ -756,19 +771,57 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           </div>
         </div>
 
-        <section style={heroStyle} className="opc-mobile-hero">
-          <div>
+        <section style={detailHeroStyle} className="opc-quote-hero">
+          <div style={detailHeroMainStyle}>
             <p style={eyebrowStyle}>Offerte</p>
-            <h1 style={titleStyle} className="opc-mobile-title">{quote.quote_number}</h1>
+            <h1 style={titleStyle} className="opc-quote-title">{quote.quote_number}</h1>
             <p style={subtitleStyle}>{quote.title}</p>
             {lastSavedAt && <p style={savedHintStyle}>Zuletzt gespeichert um {lastSavedAt}</p>}
           </div>
-          <div style={totalBoxStyle} className="opc-mobile-total-box">
-            <span style={totalLabelStyle}>Total inkl. MWST</span>
-            <strong style={totalValueStyle}>{formatMoney(totals.total)}</strong>
-            <span style={totalSubLabelStyle}>Preisangaben: {priceInputMode === 'incl' ? 'inkl. MWST' : 'exkl. MWST'}</span>
+
+          <div style={detailHeroSideStyle}>
+            <span style={quoteStatusBadgeStyle}>{statusLabels[quote.status] || quote.status}</span>
+            <div style={totalBoxStyle} className="opc-quote-total-box">
+              <span style={totalLabelStyle}>Total inkl. MWST</span>
+              <strong style={totalValueStyle}>{formatMoney(totals.total)}</strong>
+              <span style={totalSubLabelStyle}>Preisangaben: {priceInputMode === 'incl' ? 'inkl. MWST' : 'exkl. MWST'}</span>
+            </div>
           </div>
         </section>
+
+        <div style={quoteDetailMetricsStyle} className="opc-quote-detail-metrics">
+          <div style={quoteDetailMetricCardStyle}>
+            <div>
+              <div style={quoteMetricValueStyle}>{statusLabels[quote.status] || quote.status}</div>
+              <div style={quoteMetricLabelStyle}>Status</div>
+            </div>
+            <div style={quoteMetricIconStyle}><Check size={18} /></div>
+          </div>
+
+          <div style={quoteDetailMetricCardStyle}>
+            <div>
+              <div style={quoteMetricValueStyle}>{formatMoney(totals.total)}</div>
+              <div style={quoteMetricLabelStyle}>Total</div>
+            </div>
+            <div style={quoteMetricIconStyle}><Receipt size={18} /></div>
+          </div>
+
+          <div style={quoteDetailMetricCardStyle}>
+            <div>
+              <div style={quoteMetricValueStyle}>{isoDate(quote.valid_until) || '—'}</div>
+              <div style={quoteMetricLabelStyle}>Gültig bis</div>
+            </div>
+            <div style={quoteMetricIconStyle}><CalendarClock size={18} /></div>
+          </div>
+
+          <div style={quoteDetailMetricCardStyle}>
+            <div>
+              <div style={quoteMetricValueStyle}>{priceInputMode === 'incl' ? 'Inkl.' : 'Exkl.'}</div>
+              <div style={quoteMetricLabelStyle}>Preisangaben</div>
+            </div>
+            <div style={quoteMetricIconStyle}><FileText size={18} /></div>
+          </div>
+        </div>
 
         {successMessage && <div style={successStyle}><Check size={16} />{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
@@ -776,27 +829,27 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         <section style={{ marginBottom: 22 }}>
           <OPCListCard>
             <CardHeader title="Nächste Schritte" />
-            <div style={nextActionsStyle} className="opc-mobile-next-actions">
-              <button type="button" onClick={handleDownloadQuotePdf} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+            <div style={quoteNextActionsGridStyle} className="opc-quote-next-actions">
+              <button type="button" onClick={handleDownloadQuotePdf} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: '100%' }}>
                 <Download size={16} /> Offerte PDF herunterladen
               </button>
-              <button type="button" onClick={sendQuoteEmail} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <button type="button" onClick={sendQuoteEmail} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: '100%' }}>
                 <Mail size={16} /> {creatingAction === 'email' ? 'E-Mail wird gesendet...' : 'Per E-Mail senden'}
               </button>
-              <button type="button" onClick={handleDownloadOrderConfirmation} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <button type="button" onClick={handleDownloadOrderConfirmation} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: '100%' }}>
                 <ClipboardCheck size={16} /> Auftragsbestätigung
               </button>
-              <button type="button" onClick={createInvoiceFromQuote} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <button type="button" onClick={createInvoiceFromQuote} disabled={saving || creatingAction !== ''} style={{ ...opcSecondaryButtonStyle, width: '100%' }}>
                 <Receipt size={16} /> {creatingAction === 'invoice' ? 'Rechnung wird erstellt...' : 'Rechnung erstellen'}
               </button>
-              <button type="button" onClick={createJobFromQuote} disabled={saving || creatingAction !== ''} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+              <button type="button" onClick={createJobFromQuote} disabled={saving || creatingAction !== ''} style={{ ...opcBlackButtonStyle, width: '100%' }}>
                 <CalendarClock size={16} /> {creatingAction === 'job' ? 'Einsatz wird erstellt...' : 'Einsatz planen'}
               </button>
             </div>
           </OPCListCard>
         </section>
 
-        <div style={gridStyle} className="opc-quote-grid">
+        <div style={gridStyle} className="opc-quote-main-grid">
           <OPCListCard>
             <CardHeader title="Offertenkopf" />
             <div style={fieldGridStyle} className="opc-quote-field-grid">
@@ -906,22 +959,139 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
 
         <style>{`
           ${opcResponsiveStyle}
+
+          .opc-quote-topbar {
+            flex-wrap: wrap;
+          }
+
+          .opc-quote-action-row > button,
+          .opc-quote-action-row > a {
+            min-height: 40px;
+            border-radius: 13px !important;
+          }
+
+          .opc-quote-hero {
+            align-items: stretch;
+          }
+
+          .opc-quote-detail-metrics {
+            margin-bottom: 22px;
+          }
+
+          .opc-quote-next-actions {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            padding: 18px 20px;
+          }
+
+          .opc-quote-next-actions > button {
+            min-height: 42px;
+            border-radius: 13px !important;
+          }
+
+          .opc-quote-field-grid input,
+          .opc-quote-field-grid select,
+          .opc-quote-text-grid input,
+          .opc-quote-text-grid select,
+          .opc-quote-item-grid input,
+          .opc-quote-item-grid select {
+            min-height: 46px;
+            border-radius: 14px !important;
+            font-size: 14px !important;
+            font-weight: 650 !important;
+          }
+
           @media (max-width: 980px) {
-            .opc-quote-grid, .opc-quote-field-grid, .opc-quote-item-grid, .opc-quote-text-grid { grid-template-columns: 1fr !important; }
+            .opc-quote-main-grid {
+              grid-template-columns: 1fr !important;
+              gap: 16px !important;
+            }
+
+            .opc-quote-field-grid {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              gap: 14px !important;
+            }
+
+            .opc-quote-item-grid {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              gap: 14px !important;
+            }
+
+            .opc-quote-text-grid {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              gap: 14px !important;
+            }
           }
 
           @media (max-width: 760px) {
-            .opc-mobile-topbar { flex-direction: column !important; align-items: stretch !important; gap: 12px !important; }
-            .opc-mobile-action-row { display: grid !important; grid-template-columns: 1fr !important; width: 100% !important; }
-            .opc-mobile-action-row > *, .opc-mobile-back, .opc-mobile-next-actions > * { width: 100% !important; }
-            .opc-mobile-hero { flex-direction: column !important; padding: 18px !important; border-radius: 18px !important; }
-            .opc-mobile-title { font-size: 30px !important; line-height: 0.98 !important; overflow-wrap: anywhere !important; }
-            .opc-mobile-total-box { width: 100% !important; min-width: 0 !important; box-sizing: border-box !important; }
-            .opc-mobile-next-actions { display: grid !important; grid-template-columns: 1fr !important; padding: 16px !important; }
-            .opc-quote-grid, .opc-quote-field-grid, .opc-quote-item-grid, .opc-quote-text-grid { grid-template-columns: 1fr !important; gap: 14px !important; }
-            .opc-quote-field-grid, .opc-quote-text-grid, .opc-quote-items-stack { padding: 16px !important; }
-            .opc-quote-item-grid > * { width: 100% !important; }
-            .opc-quote-item-total { min-height: auto !important; padding: 8px 0 0 !important; }
+            .opc-quote-topbar {
+              flex-direction: row !important;
+              align-items: center !important;
+              gap: 10px !important;
+            }
+
+            .opc-quote-back {
+              width: auto !important;
+            }
+
+            .opc-quote-action-row {
+              display: grid !important;
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              width: 100% !important;
+              gap: 8px !important;
+            }
+
+            .opc-quote-action-row > * {
+              width: 100% !important;
+            }
+
+            .opc-quote-hero {
+              flex-direction: column !important;
+              padding: 18px !important;
+              border-radius: 18px !important;
+            }
+
+            .opc-quote-title {
+              font-size: 30px !important;
+              line-height: 0.98 !important;
+              overflow-wrap: anywhere !important;
+            }
+
+            .opc-quote-total-box {
+              width: 100% !important;
+              min-width: 0 !important;
+              box-sizing: border-box !important;
+            }
+
+            .opc-quote-detail-metrics {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              gap: 10px !important;
+            }
+
+            .opc-quote-next-actions {
+              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+              padding: 16px !important;
+            }
+
+            .opc-quote-field-grid,
+            .opc-quote-text-grid,
+            .opc-quote-items-stack {
+              padding: 16px !important;
+            }
+
+            .opc-quote-item-total {
+              min-height: auto !important;
+              padding: 8px 0 0 !important;
+            }
+          }
+
+          @media (max-width: 560px) {
+            .opc-quote-field-grid,
+            .opc-quote-item-grid,
+            .opc-quote-text-grid {
+              grid-template-columns: 1fr !important;
+            }
           }
         `}</style>
       </OPCPageShell>
@@ -944,6 +1114,122 @@ function TextArea({ label, value, onChange, wide = false }: { label: string; val
 function SummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return <div style={summaryRowStyle}><span>{label}</span><strong style={{ fontSize: strong ? 18 : 14 }}>{value}</strong></div>;
 }
+
+const detailTopBarStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 14,
+  marginBottom: 14,
+};
+
+const detailBackPillStyle: CSSProperties = {
+  ...opcSecondaryButtonStyle,
+  width: 'auto',
+  minHeight: 38,
+  borderRadius: 999,
+  padding: '0 14px',
+};
+
+const detailActionRowStyle: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
+const detailHeroStyle: CSSProperties = {
+  background: '#FFFFFF',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: 20,
+  padding: 22,
+  marginBottom: 14,
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: 16,
+};
+
+const detailHeroMainStyle: CSSProperties = {
+  minWidth: 0,
+};
+
+const detailHeroSideStyle: CSSProperties = {
+  minWidth: 240,
+  display: 'grid',
+  gap: 10,
+  alignContent: 'start',
+  justifyItems: 'end',
+};
+
+const quoteStatusBadgeStyle: CSSProperties = {
+  minHeight: 32,
+  minWidth: 132,
+  padding: '0 13px',
+  borderRadius: 999,
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#F9FAFB',
+  color: OPC_BRAND.text,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontSize: 12,
+  fontWeight: 780,
+  whiteSpace: 'nowrap',
+};
+
+const quoteDetailMetricsStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+  gap: 12,
+};
+
+const quoteDetailMetricCardStyle: CSSProperties = {
+  minHeight: 78,
+  padding: '16px 18px',
+  background: '#FFFFFF',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: 18,
+  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+};
+
+const quoteMetricValueStyle: CSSProperties = {
+  color: OPC_BRAND.text,
+  fontSize: 19,
+  lineHeight: 1.05,
+  fontWeight: 860,
+  letterSpacing: '-0.035em',
+};
+
+const quoteMetricLabelStyle: CSSProperties = {
+  marginTop: 5,
+  color: OPC_BRAND.muted,
+  fontSize: 12,
+  fontWeight: 760,
+};
+
+const quoteMetricIconStyle: CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 13,
+  border: `1px solid ${OPC_BRAND.border}`,
+  background: '#FAFAFA',
+  color: OPC_BRAND.text,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flex: '0 0 auto',
+};
+
+const quoteNextActionsGridStyle: CSSProperties = {
+  padding: 20,
+  display: 'grid',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+  gap: 10,
+};
 
 const topBarStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, marginBottom: 22 };
 const actionRowStyle: CSSProperties = { display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' };
