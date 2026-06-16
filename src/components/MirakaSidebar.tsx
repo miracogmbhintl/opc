@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Briefcase,
   CalendarDays,
+  ClipboardCheck,
   Clock,
   ChevronLeft,
   ChevronRight,
@@ -25,6 +26,7 @@ import {
   QrCode,
   Settings,
   Users,
+  WalletCards,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { safeNavigate } from '../lib/opc-navigation-guard';
@@ -153,12 +155,14 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       dashboard: routeFor('dashboard', '/dashboard'),
 
       inquiries: routeFor('inquiries', '/anfragen'),
+      inspections: routeFor('inspections', '/besichtigungen'),
       calendar: routeFor('calendar', '/kalender'),
 
       clients: routeFor('clients', '/kunden'),
       jobs: routeFor('jobs', '/einsaetze'),
       timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       files: routeFor('files', '/berichte-dateien'),
+      finance: routeFor('finance', '/finanzen'),
       tickets: routeFor('tickets', '/anfragen-schaeden'),
       qrCodes: routeFor('qrCodes', '/qr-codes'),
       settings: routeFor('settings', '/einstellungen'),
@@ -343,6 +347,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         match: [routes.inquiries, '/anfragen'],
       },
       {
+        href: buildUrl(routes.inspections),
+        label: 'Besichtigungen',
+        icon: ClipboardCheck,
+        key: 'inspections',
+        match: [routes.inspections, '/besichtigungen', '/besichtigung', '/dashboard/besichtigungen'],
+      },
+      {
         href: buildUrl(routes.calendar),
         label: 'Kalender',
         icon: CalendarDays,
@@ -384,6 +395,17 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         key: 'files',
         match: [routes.files, '/berichte-dateien', '/dashboard/files'],
       },
+      ...(normalizedRole === 'owner'
+        ? [
+            {
+              href: buildUrl(routes.finance),
+              label: 'Finanzen',
+              icon: WalletCards,
+              key: 'finance',
+              match: [routes.finance, '/finanzen', '/finance', '/dashboard/finanzen'],
+            },
+          ]
+        : []),
       {
         href: buildUrl(routes.settings),
         label: 'Einstellungen',
@@ -460,6 +482,17 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         key: 'files',
         match: [routes.files, '/berichte-dateien', '/dashboard/files'],
       },
+      ...(normalizedRole === 'owner'
+        ? [
+            {
+              href: buildUrl(routes.finance),
+              label: 'Finanzen',
+              icon: WalletCards,
+              key: 'finance',
+              match: [routes.finance, '/finanzen', '/finance', '/dashboard/finanzen'],
+            },
+          ]
+        : []),
       {
         href: buildUrl(routes.settings),
         label: 'Einstellungen',
@@ -940,7 +973,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
               padding: isMobileExpanded ? '12px' : '9px',
               display: 'flex',
               flexDirection: isMobileExpanded ? 'column' : 'row',
-              gap: isMobileExpanded ? '8px' : '6.75px',
+              gap: isMobileExpanded ? '5px' : '6.75px',
               alignItems: 'center',
               justifyContent: 'center',
             }}

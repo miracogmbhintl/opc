@@ -1,5 +1,5 @@
 ---
-import QuotesPage from '../components/QuotesPage';
+import FinancePage from '../components/FinancePage';
 import { ClientRouter } from 'astro:transitions';
 ---
 
@@ -60,7 +60,7 @@ import { ClientRouter } from 'astro:transitions';
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>Offerten | Orange Pro Clean</title>
+    <title>Finanzen | Orange Pro Clean</title>
 
     <style is:global>
       html,
@@ -77,7 +77,7 @@ import { ClientRouter } from 'astro:transitions';
         overflow-x: hidden;
       }
 
-      .offerten-page-root {
+      .finanzen-page-root {
         width: 100%;
         max-width: none;
         margin: 0;
@@ -85,7 +85,7 @@ import { ClientRouter } from 'astro:transitions';
         display: block;
       }
 
-      .offerten-page-root > astro-island,
+      .finanzen-page-root > astro-island,
       body > astro-island {
         width: 100%;
         max-width: none;
@@ -97,8 +97,8 @@ import { ClientRouter } from 'astro:transitions';
   </head>
 
   <body>
-    <main class="offerten-page-root">
-      <QuotesPage client:only="react" />
+    <main class="finanzen-page-root">
+      <FinancePage client:only="react" />
     </main>
   </body>
 </html>

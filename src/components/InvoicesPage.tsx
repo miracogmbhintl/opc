@@ -2,12 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import MirakaDashboardShell from './MirakaDashboardShell';
-import { OPCPageShell, opcResponsiveStyle } from './opc/OPCPageTop';
 import {
   AlertTriangle,
   Building2,
   CalendarDays,
-  CheckCircle2,
   FileText,
   Plus,
   Search,
@@ -58,15 +56,24 @@ type SiteRow = {
   country?: string | null;
 };
 
-type StatusFilter = 'all' | 'draft' | 'ready' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled';
+type StatusFilter =
+  | 'all'
+  | 'open'
+  | 'draft'
+  | 'ready'
+  | 'sent'
+  | 'paid'
+  | 'partially_paid'
+  | 'overdue'
+  | 'cancelled';
 
 const BRAND = {
   text: '#111827',
   muted: '#6B7280',
-  faint: '#9CA3AF',
   border: '#E5E7EB',
   black: '#0F1115',
   card: '#FFFFFF',
+  soft: '#FAFAFA',
   red: '#B91C1C',
   green: '#166534',
   amber: '#92400E',
@@ -77,6 +84,8 @@ const pageFont =
   '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
 
 const statusLabels: Record<string, string> = {
+  all: 'Alle Status',
+  open: 'Offene Rechnungen',
   draft: 'Entwurf',
   ready: 'Bereit',
   sent: 'Gesendet',
@@ -173,23 +182,30 @@ function getStatusLabel(status?: string | null) {
   return statusLabels[key] || key || 'Unbekannt';
 }
 
+function isOpenInvoice(invoice: InvoiceRow) {
+  const key = normalize(invoice.status);
+
+  if (['paid', 'cancelled', 'void'].includes(key)) return false;
+  if (['draft', 'ready', 'sent', 'partially_paid', 'overdue'].includes(key)) return true;
+
+  const balance = Number(invoice.balance_chf || 0);
+  return Number.isFinite(balance) && balance > 0;
+}
+
+function getInvoiceBalance(invoice: InvoiceRow) {
+  const balance = Number(invoice.balance_chf || 0);
+  return Number.isFinite(balance) && balance > 0 ? balance : 0;
+}
+
 function getStatusTone(status?: string | null) {
   const key = normalize(status);
 
-  if (key === 'paid') {
-    return { bg: '#F3F4F6', text: BRAND.text, border: BRAND.border };
-  }
-
-  if (['sent', 'partially_paid', 'ready'].includes(key)) {
-    return { bg: '#ECFEFF', text: BRAND.blue, border: '#A5F3FC' };
-  }
-
-  if (['draft'].includes(key)) {
-    return { bg: '#FFFBEB', text: BRAND.amber, border: '#FDE68A' };
-  }
-
   if (['overdue', 'cancelled', 'void'].includes(key)) {
     return { bg: '#FEF2F2', text: BRAND.red, border: '#FECACA' };
+  }
+
+  if (key === 'paid') {
+    return { bg: '#F3F4F6', text: BRAND.text, border: BRAND.border };
   }
 
   return { bg: '#F9FAFB', text: BRAND.muted, border: BRAND.border };
@@ -199,7 +215,24 @@ function StatusBadge({ status }: { status?: string | null }) {
   const tone = getStatusTone(status);
 
   return (
-    <span className="opc-invoices-status-badge" style={{ background: tone.bg, color: tone.text, borderColor: tone.border }}>
+    <span
+      className="opc-status-badge"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: '98px',
+        height: '28px',
+        padding: '0 12px',
+        borderRadius: '999px',
+        border: `1px solid ${tone.border}`,
+        background: tone.bg,
+        color: tone.text,
+        fontSize: '12px',
+        fontWeight: 760,
+        whiteSpace: 'nowrap',
+      }}
+    >
       {getStatusLabel(status)}
     </span>
   );
@@ -213,29 +246,71 @@ function MetricCard({
 }: {
   value: string | number;
   label: string;
-  icon: ReactNode;
-  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'dark';
+  icon?: ReactNode;
+  tone?: 'neutral' | 'danger' | 'dark';
 }) {
-  const valueColor =
-    tone === 'success'
-      ? BRAND.green
-      : tone === 'warning'
-        ? BRAND.amber
-        : tone === 'danger'
-          ? BRAND.red
-          : tone === 'dark'
-            ? BRAND.black
-            : BRAND.text;
+  const valueColor = tone === 'danger' ? BRAND.red : tone === 'dark' ? BRAND.black : BRAND.text;
 
   return (
-    <div className="opc-invoices-metric-card" style={cardStyle}>
+    <div
+      className="opc-invoices-metric-card"
+      style={{
+        ...cardStyle,
+        minHeight: '96px',
+        padding: '18px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '14px',
+      }}
+    >
       <div style={{ minWidth: 0 }}>
-        <div className="opc-invoices-metric-value" style={{ color: valueColor }}>
+        <div
+          className="opc-invoices-metric-value"
+          style={{
+            fontSize: '25px',
+            lineHeight: 1,
+            fontWeight: 820,
+            letterSpacing: '-0.04em',
+            color: valueColor,
+            marginBottom: '10px',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {value}
         </div>
-        <div className="opc-invoices-metric-label">{label}</div>
+
+        <div
+          className="opc-invoices-metric-label"
+          style={{
+            fontSize: '13px',
+            fontWeight: 720,
+            color: BRAND.muted,
+          }}
+        >
+          {label}
+        </div>
       </div>
-      <div className="opc-invoices-metric-icon">{icon}</div>
+
+      {icon && (
+        <div
+          className="opc-invoices-metric-icon"
+          style={{
+            width: '38px',
+            height: '38px',
+            borderRadius: '13px',
+            border: `1px solid ${BRAND.border}`,
+            background: '#FAFAFA',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: BRAND.black,
+            flexShrink: 0,
+          }}
+        >
+          {icon}
+        </div>
+      )}
     </div>
   );
 }
@@ -251,35 +326,47 @@ function InvoiceCard({ invoice, client, site }: { invoice: InvoiceRow; client?: 
 
   return (
     <article className="opc-invoice-card" style={cardStyle}>
-      <a href={`${baseUrl}/rechnung/${invoice.id}`} className="opc-invoice-card-link" data-astro-prefetch="false">
-        <div className="opc-invoice-card-main">
-          <div style={{ minWidth: 0 }}>
-            <div className="opc-invoice-client-number">{clientNumber}</div>
-            <h3>{invoice.title || invoice.invoice_number || 'Rechnung'}</h3>
-            <div className="opc-invoice-meta">
-              <span>
-                <FileText size={14} />
-                {invoice.invoice_number || 'Ohne Nummer'}
-              </span>
-              <span>
-                <Building2 size={14} />
-                {clientName}
-              </span>
-              <span>{siteName}</span>
-              <span>
-                <CalendarDays size={14} />
-                {issueDate}{dueDate ? ` · fällig bis ${dueDate}` : ''}
-              </span>
-            </div>
-          </div>
+      <div className="opc-invoice-card-main">
+        <div style={{ minWidth: 0 }}>
+          <h3>{invoice.title || invoice.invoice_number || 'Rechnung'}</h3>
 
-          <div className="opc-invoice-card-side">
-            <StatusBadge status={invoice.status} />
-            <strong>{total}</strong>
-            <span>Offen: {balance}</span>
+          <div className="opc-invoice-meta">
+            <span>
+              <FileText size={14} />
+              {invoice.invoice_number || 'Ohne Nummer'}
+            </span>
+
+            <span>
+              <UserRound size={14} />
+              {clientNumber}
+            </span>
+
+            <span>
+              <Building2 size={14} />
+              {clientName}
+            </span>
+
+            <span>{siteName}</span>
+
+            <span>
+              <CalendarDays size={14} />
+              {issueDate}{dueDate ? ` · fällig bis ${dueDate}` : ''}
+            </span>
           </div>
         </div>
-      </a>
+
+        <div className="opc-invoice-card-side">
+          <StatusBadge status={invoice.status} />
+          <strong>{total}</strong>
+          <span>Offen: {balance}</span>
+        </div>
+      </div>
+
+      <div className="opc-invoice-card-actions">
+        <a className="opc-invoice-action dark" href={`${baseUrl}/rechnung/${invoice.id}`} data-astro-prefetch="false">
+          Rechnung öffnen
+        </a>
+      </div>
     </article>
   );
 }
@@ -292,6 +379,7 @@ export default function InvoicesPage() {
   const [errorMessage, setErrorMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [clientFilter, setClientFilter] = useState('all');
   const didLoadRef = useRef(false);
 
   useEffect(() => {
@@ -377,13 +465,34 @@ export default function InvoicesPage() {
     }
   }
 
+  const clientOptions = useMemo(() => {
+    const map = new Map<string, string>();
+
+    invoices.forEach((invoice) => {
+      const key = invoice.client_id || '';
+      if (!key) return;
+
+      const client = clientMap.get(key);
+      map.set(key, getClientName(client, invoice));
+    });
+
+    return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1], 'de'));
+  }, [invoices, clientMap]);
+
   const filteredInvoices = useMemo(() => {
     const query = normalize(searchQuery);
 
     return invoices.filter((invoice) => {
       const client = invoice.client_id ? clientMap.get(invoice.client_id) : undefined;
       const site = invoice.client_site_id ? siteMap.get(invoice.client_site_id) : undefined;
-      const matchesStatus = statusFilter === 'all' || normalize(invoice.status) === statusFilter;
+
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'open' && isOpenInvoice(invoice)) ||
+        normalize(invoice.status) === statusFilter;
+
+      const matchesClient = clientFilter === 'all' || invoice.client_id === clientFilter;
+
       const haystack = normalize([
         invoice.invoice_number,
         invoice.title,
@@ -393,423 +502,448 @@ export default function InvoicesPage() {
         getSiteName(site),
       ].join(' '));
 
-      return matchesStatus && (!query || haystack.includes(query));
+      return matchesStatus && matchesClient && (!query || haystack.includes(query));
     });
-  }, [invoices, clientMap, siteMap, searchQuery, statusFilter]);
+  }, [invoices, clientMap, siteMap, searchQuery, statusFilter, clientFilter]);
 
   const sentCount = useMemo(() => invoices.filter((invoice) => normalize(invoice.status) === 'sent').length, [invoices]);
-  const paidCount = useMemo(() => invoices.filter((invoice) => normalize(invoice.status) === 'paid').length, [invoices]);
   const overdueCount = useMemo(() => invoices.filter((invoice) => normalize(invoice.status) === 'overdue').length, [invoices]);
-  const openBalance = useMemo(() => invoices.reduce((sum, invoice) => sum + Number(invoice.balance_chf || 0), 0), [invoices]);
+  const openBalance = useMemo(() => invoices.reduce((sum, invoice) => sum + getInvoiceBalance(invoice), 0), [invoices]);
 
   return (
-    <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/rechnung" fullWidth hideTopBar>
-      <OPCPageShell>
-        <div className="opc-invoices-page" style={{ fontFamily: pageFont }}>
-          <div className="opc-invoices-metrics">
-            <MetricCard value={invoices.length} label="Rechnungen" icon={<FileText size={18} />} tone="dark" />
-            <MetricCard value={sentCount} label="Gesendet" icon={<Send size={18} />} />
-            <MetricCard value={paidCount} label="Bezahlt" icon={<CheckCircle2 size={18} />} tone="success" />
-            <MetricCard value={overdueCount} label="Überfällig" icon={<AlertTriangle size={18} />} tone={overdueCount > 0 ? 'danger' : 'neutral'} />
-          </div>
-
-          <section className="opc-invoices-filter-panel" style={cardStyle}>
-            <div className="opc-invoices-filter-actions">
-              <a href={`${baseUrl}/kunden`} className="opc-filter-button light" data-astro-prefetch="false">
-                <UserRound size={16} />
-                Kunde auswählen
-              </a>
-
-              <a href={`${baseUrl}/rechnung/neu`} className="opc-filter-button dark" data-astro-prefetch="false">
-                <Plus size={16} />
-                Neue Rechnung
-              </a>
-            </div>
-
-            <div className="opc-invoices-search-row">
-              <div className="opc-invoices-search">
-                <Search size={17} />
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Rechnung, Kunde, Kundennummer, Adresse suchen"
-                />
-              </div>
-
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
-                <option value="all">Alle Status</option>
-                <option value="draft">Entwurf</option>
-                <option value="ready">Bereit</option>
-                <option value="sent">Gesendet</option>
-                <option value="paid">Bezahlt</option>
-                <option value="partially_paid">Teilweise bezahlt</option>
-                <option value="overdue">Überfällig</option>
-                <option value="cancelled">Storniert</option>
-              </select>
-            </div>
-
-            <div className="opc-invoices-balance-hint">
-              <WalletCards size={15} />
-              Offener Betrag: <strong>{formatMoney(openBalance)}</strong>
-            </div>
-          </section>
-
-          {errorMessage ? <div className="opc-invoices-error">{errorMessage}</div> : null}
-
-          {loading ? (
-            <div className="opc-invoices-empty" style={cardStyle}>Rechnungen werden geladen.</div>
-          ) : filteredInvoices.length === 0 ? (
-            <div className="opc-invoices-empty" style={cardStyle}>Keine Rechnungen gefunden.</div>
-          ) : (
-            <div className="opc-invoices-list">
-              {filteredInvoices.map((invoice) => {
-                const client = invoice.client_id ? clientMap.get(invoice.client_id) : undefined;
-                const site = invoice.client_site_id ? siteMap.get(invoice.client_site_id) : undefined;
-
-                return <InvoiceCard key={invoice.id} invoice={invoice} client={client} site={site} />;
-              })}
-            </div>
-          )}
+    <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/rechnung" hideTopBar>
+      <div className="opc-invoices-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
+        <div className="opc-invoices-metrics">
+          <MetricCard value={invoices.length} label="Rechnungen" icon={<FileText size={17} />} />
+          <MetricCard value={sentCount} label="Gesendet" icon={<Send size={17} />} />
+          <MetricCard value={formatMoney(openBalance)} label="Offener Betrag" icon={<WalletCards size={17} />} />
+          <MetricCard
+            value={overdueCount}
+            label="Überfällig"
+            icon={<AlertTriangle size={17} />}
+            tone={overdueCount > 0 ? 'danger' : 'neutral'}
+          />
         </div>
 
-        <style>{`
-          ${opcResponsiveStyle}
+        <section className="opc-invoices-filter-panel" style={cardStyle}>
+          <div className="opc-invoices-search">
+            <Search size={17} />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Rechnungen suchen..."
+            />
+          </div>
 
+          <div className="opc-invoices-status-buttons" aria-label="Rechnungen filtern">
+            <button
+              type="button"
+              className={statusFilter === 'all' ? 'active' : ''}
+              onClick={() => setStatusFilter('all')}
+            >
+              Alle
+            </button>
+
+            <button
+              type="button"
+              className={statusFilter === 'open' ? 'active' : ''}
+              onClick={() => setStatusFilter('open')}
+            >
+              Offen
+            </button>
+
+            <button
+              type="button"
+              className={statusFilter === 'paid' ? 'active' : ''}
+              onClick={() => setStatusFilter('paid')}
+            >
+              Bezahlt
+            </button>
+          </div>
+
+          <div className="opc-invoices-action-row">
+            <a href={`${baseUrl}/kunden`} className="opc-invoice-filter-button" data-astro-prefetch="false">
+              <UserRound size={16} />
+              Kunde auswählen
+            </a>
+
+            <a href={`${baseUrl}/rechnung/neu`} className="opc-invoice-filter-button dark" data-astro-prefetch="false">
+              <Plus size={16} />
+              Neue Rechnung
+            </a>
+          </div>
+
+          <div className="opc-invoices-select-row">
+            <select value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
+              <option value="all">Alle Kunden</option>
+              {clientOptions.map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
+              <option value="all">Alle Status</option>
+              <option value="open">Offene Rechnungen</option>
+              <option value="draft">Entwurf</option>
+              <option value="ready">Bereit</option>
+              <option value="sent">Gesendet</option>
+              <option value="paid">Bezahlt</option>
+              <option value="partially_paid">Teilweise bezahlt</option>
+              <option value="overdue">Überfällig</option>
+              <option value="cancelled">Storniert</option>
+            </select>
+          </div>
+        </section>
+
+        {errorMessage ? <div className="opc-invoices-error">{errorMessage}</div> : null}
+
+        {loading ? (
+          <div className="opc-invoices-empty" style={cardStyle}>Rechnungen werden geladen.</div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="opc-invoices-empty" style={cardStyle}>Keine Rechnungen gefunden.</div>
+        ) : (
+          <div className="opc-invoices-list">
+            {filteredInvoices.map((invoice) => {
+              const client = invoice.client_id ? clientMap.get(invoice.client_id) : undefined;
+              const site = invoice.client_site_id ? siteMap.get(invoice.client_site_id) : undefined;
+
+              return <InvoiceCard key={invoice.id} invoice={invoice} client={client} site={site} />;
+            })}
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        html,
+        body {
+          width: 100%;
+          min-width: 0;
+          margin: 0;
+          padding: 0;
+        }
+
+        body {
+          overflow-x: hidden;
+        }
+
+        body > astro-island {
+          width: 100%;
+          max-width: none;
+          margin: 0;
+          padding: 0;
+          display: block;
+        }
+
+        .opc-invoices-page {
+          width: 100%;
+          max-width: none;
+          min-width: 0;
+          margin: 0;
+          padding: 0 0 140px;
+        }
+
+        .opc-invoices-page * {
+          box-sizing: border-box;
+        }
+
+        .opc-invoices-metrics {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+
+        .opc-invoices-filter-panel {
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          padding: 16px;
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+          align-items: stretch;
+          margin-bottom: 18px;
+          overflow: visible;
+        }
+
+        .opc-invoices-search {
+          width: 100%;
+          min-width: 0;
+          height: 46px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 0 12px;
+          color: ${BRAND.muted};
+        }
+
+        .opc-invoices-search input {
+          width: 100%;
+          min-width: 0;
+          border: 0;
+          outline: 0;
+          color: ${BRAND.text};
+          font-size: 14px;
+          font-weight: 650;
+          font-family: ${pageFont};
+        }
+
+        .opc-invoices-status-buttons {
+          width: 100%;
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 8px;
+          min-width: 0;
+        }
+
+        .opc-invoices-status-buttons button {
+          width: 100%;
+          height: 46px;
+          min-width: 0;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.muted};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 820;
+          font-family: ${pageFont};
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-invoices-status-buttons button.active {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-invoices-action-row {
+          width: 100%;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 8px;
+          align-items: stretch;
+        }
+
+        .opc-invoice-filter-button {
+          width: 100%;
+          min-height: 46px;
+          border-radius: 14px;
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 820;
+          font-family: ${pageFont};
+          text-decoration: none;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-invoice-filter-button.dark {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-invoices-select-row {
+          width: 100%;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .opc-invoices-select-row select {
+          width: 100%;
+          min-width: 0;
+          height: 46px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 14px;
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          padding: 0 12px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          outline: 0;
+        }
+
+        .opc-invoices-error {
+          border: 1px solid #FECACA;
+          background: #FEF2F2;
+          color: ${BRAND.red};
+          padding: 14px 16px;
+          border-radius: 16px;
+          font-size: 13px;
+          font-weight: 720;
+          margin-bottom: 14px;
+        }
+
+        .opc-invoices-list {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .opc-invoice-card {
+          padding: 18px;
+        }
+
+        .opc-invoice-card-main {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 18px;
+          align-items: start;
+        }
+
+        .opc-invoice-card h3 {
+          margin: 0;
+          color: ${BRAND.text};
+          font-size: 20px;
+          line-height: 1.18;
+          letter-spacing: -0.04em;
+          font-weight: 860;
+        }
+
+        .opc-invoice-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px 14px;
+          margin-top: 9px;
+          color: ${BRAND.muted};
+          font-size: 13px;
+          line-height: 1.35;
+          font-weight: 650;
+        }
+
+        .opc-invoice-meta span {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          max-width: 100%;
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+
+        .opc-invoice-card-side {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 8px;
+        }
+
+        .opc-invoice-card-side strong {
+          color: ${BRAND.text};
+          font-size: 13px;
+          font-weight: 840;
+          white-space: nowrap;
+        }
+
+        .opc-invoice-card-side > span:last-child {
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 720;
+          white-space: nowrap;
+        }
+
+        .opc-invoice-card-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 16px;
+        }
+
+        .opc-invoice-action {
+          min-height: 42px;
+          border-radius: 13px;
+          border: 1px solid ${BRAND.border};
+          background: #FFFFFF;
+          color: ${BRAND.text};
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 0 14px;
+          font-size: 13px;
+          font-weight: 760;
+          font-family: ${pageFont};
+          text-decoration: none;
+          cursor: pointer;
+          white-space: nowrap;
+        }
+
+        .opc-invoice-action.dark {
+          background: ${BRAND.black};
+          border-color: ${BRAND.black};
+          color: #FFFFFF;
+        }
+
+        .opc-invoices-empty {
+          min-height: 120px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: ${BRAND.muted};
+          font-size: 14px;
+          font-weight: 650;
+          text-align: center;
+          padding: 22px;
+        }
+
+        @media (max-width: 720px) {
           .opc-invoices-page {
-            padding: 0 0 140px;
-            color: ${BRAND.text};
+            padding-bottom: 110px;
           }
 
-          .opc-invoices-page * {
-            box-sizing: border-box;
-          }
-
-          .opc-invoices-metrics {
-            display: grid;
+          .opc-invoices-action-row,
+          .opc-invoices-select-row {
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-            margin-bottom: 14px;
           }
 
-          .opc-invoices-metric-card {
-            min-height: 96px;
-            padding: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 14px;
-          }
-
-          .opc-invoices-metric-value {
-            font-size: 25px;
-            line-height: 1;
-            font-weight: 820;
-            letter-spacing: -0.04em;
-            margin-bottom: 10px;
-          }
-
-          .opc-invoices-metric-label {
-            font-size: 13px;
-            font-weight: 720;
-            color: ${BRAND.muted};
-          }
-
-          .opc-invoices-metric-icon {
-            width: 38px;
-            height: 38px;
-            border-radius: 13px;
-            border: 1px solid ${BRAND.border};
-            background: #FAFAFA;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: ${BRAND.black};
-            flex-shrink: 0;
-          }
-
-          .opc-invoices-filter-panel {
-            width: 100%;
-            max-width: 100%;
-            min-width: 0;
-            padding: 16px;
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 12px;
-            margin-bottom: 18px;
-            overflow: visible;
-          }
-
-          .opc-invoices-filter-actions {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 8px;
-          }
-
-          .opc-filter-button {
+          .opc-invoice-filter-button {
             min-height: 46px;
-            border-radius: 14px;
-            border: 1px solid ${BRAND.border};
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 0 12px;
-            color: ${BRAND.text};
-            font-size: 13px;
-            font-weight: 820;
-            font-family: ${pageFont};
-            text-decoration: none;
-            white-space: nowrap;
+            font-size: 12px;
+            padding: 0 8px;
           }
 
-          .opc-filter-button.light {
-            background: #FFFFFF;
-          }
-
-          .opc-filter-button.dark {
-            background: ${BRAND.black};
-            border-color: ${BRAND.black};
-            color: #FFFFFF;
-          }
-
-          .opc-invoices-search-row {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) minmax(0, 220px);
-            gap: 8px;
-            align-items: stretch;
-          }
-
-          .opc-invoices-search {
-            min-width: 0;
-            height: 46px;
-            border: 1px solid ${BRAND.border};
-            border-radius: 14px;
-            background: #FFFFFF;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 0 12px;
-            color: ${BRAND.muted};
-          }
-
-          .opc-invoices-search input {
-            width: 100%;
-            min-width: 0;
-            border: 0;
-            outline: 0;
-            color: ${BRAND.text};
-            font-size: 14px;
-            font-weight: 650;
-            font-family: ${pageFont};
-          }
-
-          .opc-invoices-search-row select {
-            width: 100%;
-            min-width: 0;
-            height: 46px;
-            border: 1px solid ${BRAND.border};
-            border-radius: 14px;
-            background: #FFFFFF;
-            color: ${BRAND.text};
-            padding: 0 12px;
-            font-size: 13px;
-            font-weight: 760;
-            font-family: ${pageFont};
-            outline: 0;
-          }
-
-          .opc-invoices-balance-hint {
-            min-height: 42px;
-            border-radius: 14px;
-            border: 1px solid #F3F4F6;
-            background: #FAFAFA;
-            color: ${BRAND.muted};
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 0 12px;
-            font-size: 13px;
-            font-weight: 720;
-          }
-
-          .opc-invoices-balance-hint strong {
-            color: ${BRAND.text};
-            font-weight: 840;
-          }
-
-          .opc-invoices-error {
-            border: 1px solid #FECACA;
-            background: #FEF2F2;
-            color: ${BRAND.red};
-            padding: 14px 16px;
-            border-radius: 16px;
-            font-size: 13px;
-            font-weight: 720;
-            margin-bottom: 14px;
-          }
-
-          .opc-invoices-list {
-            display: flex;
+          .opc-invoice-card-actions {
             flex-direction: column;
-            gap: 12px;
           }
 
-          .opc-invoice-card {
-            padding: 0;
-            overflow: hidden;
-          }
-
-          .opc-invoice-card-link {
-            display: block;
-            color: ${BRAND.text};
-            text-decoration: none;
-            padding: 18px;
+          .opc-invoice-action {
+            width: 100%;
           }
 
           .opc-invoice-card-main {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 18px;
-            align-items: start;
-          }
-
-          .opc-invoice-client-number {
-            margin-bottom: 6px;
-            color: ${BRAND.muted};
-            font-size: 12px;
-            line-height: 1.2;
-            font-weight: 820;
-            text-transform: uppercase;
-            letter-spacing: 0.02em;
-          }
-
-          .opc-invoice-card h3 {
-            margin: 0;
-            color: ${BRAND.text};
-            font-size: 20px;
-            line-height: 1.18;
-            letter-spacing: -0.04em;
-            font-weight: 860;
-          }
-
-          .opc-invoice-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px 14px;
-            margin-top: 9px;
-            color: ${BRAND.muted};
-            font-size: 13px;
-            line-height: 1.35;
-            font-weight: 650;
-          }
-
-          .opc-invoice-meta span {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            max-width: 100%;
-            min-width: 0;
-            overflow-wrap: anywhere;
+            grid-template-columns: 1fr;
           }
 
           .opc-invoice-card-side {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            gap: 8px;
+            align-items: flex-start;
           }
 
-          .opc-invoice-card-side strong {
-            color: ${BRAND.text};
-            font-size: 13px;
-            font-weight: 840;
-            white-space: nowrap;
+          .opc-invoice-card {
+            padding: 15px;
           }
 
-          .opc-invoice-card-side span:last-child {
-            color: ${BRAND.muted};
-            font-size: 12px;
-            font-weight: 720;
-            white-space: nowrap;
+          .opc-invoice-card h3 {
+            font-size: 18px;
           }
 
-          .opc-invoices-status-badge {
-            min-height: 30px;
-            min-width: 132px;
-            padding: 0 12px;
-            border-radius: 999px;
-            border: 1px solid;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            font-weight: 780;
-            white-space: nowrap;
+          .opc-invoices-metric-value {
+            font-size: 22px !important;
           }
-
-          .opc-invoices-empty {
-            min-height: 120px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: ${BRAND.muted};
-            font-size: 14px;
-            font-weight: 650;
-            text-align: center;
-            padding: 22px;
-          }
-
-          @media (max-width: 760px) {
-            .opc-invoices-page {
-              padding-bottom: 110px;
-            }
-
-            .opc-invoices-metrics {
-              grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-              gap: 10px;
-            }
-
-            .opc-invoices-metric-card {
-              min-height: 86px;
-              padding: 15px;
-            }
-
-            .opc-invoices-metric-value {
-              font-size: 23px;
-            }
-
-            .opc-invoices-search-row {
-              grid-template-columns: 1fr;
-            }
-
-            .opc-invoices-filter-actions {
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-
-            .opc-filter-button {
-              min-height: 46px;
-              font-size: 12px;
-              padding: 0 8px;
-            }
-
-            .opc-invoice-card-main {
-              grid-template-columns: 1fr;
-            }
-
-            .opc-invoice-card-side {
-              align-items: flex-start;
-            }
-
-            .opc-invoice-card-link {
-              padding: 15px;
-            }
-
-            .opc-invoice-card h3 {
-              font-size: 18px;
-            }
-          }
-        `}</style>
-      </OPCPageShell>
+        }
+      `}</style>
     </MirakaDashboardShell>
   );
 }
