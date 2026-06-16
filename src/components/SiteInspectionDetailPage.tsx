@@ -497,44 +497,59 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
       if (!supabase) throw new Error('Supabase ist nicht verfügbar.');
 
       const files = Array.from(fileList);
+      let uploadedCount = 0;
+      const failedFiles: string[] = [];
 
-      for (const file of files) {
-        const extension = file.name.includes('.') ? file.name.split('.').pop() : 'file';
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-        const objectPath = `${form.client_id}/${form.id}/${Date.now()}-${Math.random().toString(36).slice(2)}-${safeName}`;
+      for (const [index, file] of files.entries()) {
+        try {
+          const extension = file.name.includes('.') ? file.name.split('.').pop() : 'file';
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
+          const objectPath = `${form.client_id}/${form.id}/${Date.now()}-${index}-${Math.random().toString(36).slice(2)}-${safeName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('opc-site-inspection-media')
-          .upload(objectPath, file, {
-            cacheControl: '3600',
-            upsert: false,
-            contentType: file.type || undefined,
+          const { error: uploadError } = await supabase.storage
+            .from('opc-site-inspection-media')
+            .upload(objectPath, file, {
+              cacheControl: '3600',
+              upsert: false,
+              contentType: file.type || undefined,
+            });
+
+          if (uploadError) throw uploadError;
+
+          const mediaType = file.type.startsWith('video/') ? 'video' : file.type === 'application/pdf' ? 'document' : 'image';
+
+          const { error: insertError } = await supabase.from('opc_site_inspection_media').insert({
+            inspection_id: form.id,
+            client_id: form.client_id,
+            client_site_id: form.client_site_id,
+            bucket_id: 'opc-site-inspection-media',
+            object_path: objectPath,
+            media_type: mediaType,
+            purpose: 'inspection',
+            file_name: file.name,
+            mime_type: file.type || null,
+            file_size_bytes: file.size,
+            sort_order: mediaRows.length + index,
+            metadata: { original_extension: extension },
           });
 
-        if (uploadError) throw uploadError;
+          if (insertError) throw insertError;
 
-        const mediaType = file.type.startsWith('video/') ? 'video' : file.type === 'application/pdf' ? 'document' : 'image';
-
-        const { error: insertError } = await supabase.from('opc_site_inspection_media').insert({
-          inspection_id: form.id,
-          client_id: form.client_id,
-          client_site_id: form.client_site_id,
-          bucket_id: 'opc-site-inspection-media',
-          object_path: objectPath,
-          media_type: mediaType,
-          purpose: 'inspection',
-          file_name: file.name,
-          mime_type: file.type || null,
-          file_size_bytes: file.size,
-          sort_order: mediaRows.length,
-          metadata: { original_extension: extension },
-        });
-
-        if (insertError) throw insertError;
+          uploadedCount += 1;
+        } catch (fileError: any) {
+          failedFiles.push(`${file.name}: ${fileError?.message || 'Upload fehlgeschlagen'}`);
+        }
       }
 
       await loadMedia(form.id);
-      setSuccessMessage('Medien wurden hochgeladen.');
+
+      if (uploadedCount > 0) {
+        setSuccessMessage(`${uploadedCount} von ${files.length} Medien wurden hochgeladen.`);
+      }
+
+      if (failedFiles.length > 0) {
+        setErrorMessage(`Nicht alle Medien konnten hochgeladen werden. ${failedFiles.slice(0, 5).join(' | ')}`);
+      }
     } catch (error: any) {
       setErrorMessage(error?.message || 'Upload fehlgeschlagen.');
     } finally {
@@ -654,7 +669,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
     }
   }
 
-  const mediaPreviewRows = useMemo(() => mediaRows.slice(0, 12), [mediaRows]);
+  const mediaPreviewRows = mediaRows;
   const hasInspectionAddress = Boolean(site) || hasManualAddress(manualSiteAddress);
   const currentSiteLabel = site
     ? getSiteLabel(site)

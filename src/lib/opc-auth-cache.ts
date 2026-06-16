@@ -34,6 +34,19 @@ function isBrowser() {
   return typeof window !== 'undefined';
 }
 
+function isExplicitlyLoggedOut() {
+  if (!isBrowser()) return false;
+
+  try {
+    return (
+      window.sessionStorage.getItem('mco_logged_out') === 'true' ||
+      window.localStorage.getItem('mco_logged_out') === 'true'
+    );
+  } catch {
+    return false;
+  }
+}
+
 function normalizeRole(value: unknown): UserRole {
   const role = String(value || '').toLowerCase().trim();
 
@@ -249,7 +262,10 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
   }
 
   const user = session?.user || null;
-  if (!user) return null;
+  if (!user) {
+    if (cachedProfile && !isExplicitlyLoggedOut()) return cachedProfile;
+    return null;
+  }
 
   try {
     const staffRole = await fetchActiveStaffRoleByUser(user.id, user.email);

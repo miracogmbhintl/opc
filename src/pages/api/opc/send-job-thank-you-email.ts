@@ -1,5 +1,5 @@
 import type { APIContext } from 'astro';
-import { createClient } from '@supabase/supabase-js';
+import { createOpcSupabaseAdmin } from '../../../lib/opc-server-env';
 
 export const prerender = false;
 
@@ -23,30 +23,9 @@ function isCompletedStatus(status?: string | null) {
   );
 }
 
-export async function POST({ request }: APIContext) {
+export async function POST({ request, locals }: APIContext) {
   try {
-    const supabaseUrl = import.meta.env.SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-    const serviceRoleKey =
-      import.meta.env.SUPABASE_SERVICE_ROLE_KEY ||
-      import.meta.env.SUPABASE_SERVICE_ROLE ||
-      import.meta.env.SUPABASE_SERVICE_KEY;
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      return jsonResponse(
-        {
-          error:
-            'Supabase server configuration is missing. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
-        },
-        500
-      );
-    }
-
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
+    const supabaseAdmin = createOpcSupabaseAdmin(locals);
 
     const payload = (await request.json()) as any;
     const jobId = clean(payload?.jobId);

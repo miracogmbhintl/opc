@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
+import { removeOpcPageCache } from '../lib/opc-page-cache';
 import {
   ArrowLeft,
   Briefcase,
@@ -35,6 +36,8 @@ import {
 
 type ClientStatus = 'active' | 'pending' | 'inactive' | 'archived' | string;
 type EmailAction = 'account_setup' | 'password_reset' | 'magic_link' | 'portal_invite';
+
+const CLIENTS_PAGE_CACHE_KEY = 'opc:page-cache:clients-management:v6-toolbar-tabs-fixed';
 
 interface OpcClientDetail {
   id: string;
@@ -303,6 +306,90 @@ function normaliseClient(row: any): OpcClientDetail {
   };
 }
 
+function mergeClientFreshFields(
+  freshClient: OpcClientDetail,
+  fallbackClient?: Partial<OpcClientDetail> | null
+): OpcClientDetail {
+  if (!fallbackClient) return freshClient;
+
+  return {
+    ...freshClient,
+    billing_phone_e164:
+      freshClient.billing_phone_e164 ||
+      fallbackClient.billing_phone_e164 ||
+      fallbackClient.phone_e164 ||
+      fallbackClient.phone_raw ||
+      '',
+    phone_raw:
+      freshClient.phone_raw ||
+      fallbackClient.phone_raw ||
+      fallbackClient.phone_e164 ||
+      fallbackClient.billing_phone_e164 ||
+      '',
+    phone_e164:
+      freshClient.phone_e164 ||
+      fallbackClient.phone_e164 ||
+      fallbackClient.phone_raw ||
+      fallbackClient.billing_phone_e164 ||
+      '',
+    billing_email:
+      freshClient.billing_email ||
+      fallbackClient.billing_email ||
+      fallbackClient.email ||
+      '',
+    email:
+      freshClient.email ||
+      fallbackClient.email ||
+      fallbackClient.billing_email ||
+      '',
+  };
+}
+
+function getPhoneDigits(value?: string | number | null) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function getBestPhoneValue(...values: Array<string | number | null | undefined>) {
+  const candidates = values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .map((value) => ({
+      value,
+      digits: getPhoneDigits(value),
+    }))
+    .filter((item) => item.value);
+
+  if (candidates.length === 0) return '';
+
+  candidates.sort((a, b) => {
+    const digitDifference = b.digits.length - a.digits.length;
+    if (digitDifference !== 0) return digitDifference;
+    return b.value.length - a.value.length;
+  });
+
+  return candidates[0]?.value || '';
+}
+
+function getBestClientPhone(client?: Partial<OpcClientDetail> | null) {
+  if (!client) return '';
+
+  return getBestPhoneValue(
+    client.phone_e164,
+    client.phone_raw,
+    client.billing_phone_e164
+  );
+}
+
+function shouldReplacePhone(currentValue?: string | null, nextValue?: string | null) {
+  const currentDigits = getPhoneDigits(currentValue);
+  const nextDigits = getPhoneDigits(nextValue);
+
+  if (!nextDigits) return false;
+  if (!currentDigits) return true;
+
+  return nextDigits.length >= currentDigits.length;
+}
+
 function getInitials(name?: string) {
   if (!name) return 'K';
 
@@ -474,7 +561,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     return inputId;
   }
 
-  async function loadClientData(opcClientId: string) {
+  async function loadClientData(opcClientId: string, fallbackClient?: Partial<OpcClientDetail> | null) {
     try {
       const { data, error: fetchError } = await supabase
         .from('opc_client_detail_view')
@@ -485,7 +572,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
       if (fetchError) throw fetchError;
       if (!data) throw new Error('Kunde wurde nicht gefunden.');
 
-      const normalised = normaliseClient(data);
+      const normalised = mergeClientFreshFields(normaliseClient(data), fallbackClient);
 
       setClient(normalised);
       setEditedClient(normalised);
@@ -610,6 +697,20 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
   }
 
 
+  function invalidateClientListCache() {
+    try {
+      removeOpcPageCache(CLIENTS_PAGE_CACHE_KEY);
+      window.dispatchEvent(
+        new CustomEvent('opc:clients-invalidated', {
+          detail: { clientId: resolvedClientId },
+        })
+      );
+    } catch {
+      // Cache invalidation must not block saving.
+    }
+  }
+
+
   async function handleSave() {
     if (!editedClient || !client) return;
 
@@ -634,7 +735,49 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         throw new Error(result?.error || 'Änderungen konnten nicht gespeichert werden.');
       }
 
-      await loadClientData(resolvedClientId);
+      const optimisticClient: OpcClientDetail = {
+        ...client,
+        ...editedClient,
+        billing_phone_e164:
+          editedClient.billing_phone_e164 ||
+          editedClient.phone_e164 ||
+          editedClient.phone_raw ||
+          client.billing_phone_e164 ||
+          '',
+        phone_raw:
+          editedClient.phone_raw ||
+          editedClient.phone_e164 ||
+          editedClient.billing_phone_e164 ||
+          client.phone_raw ||
+          '',
+        phone_e164:
+          editedClient.phone_e164 ||
+          editedClient.phone_raw ||
+          editedClient.billing_phone_e164 ||
+          client.phone_e164 ||
+          '',
+        billing_email:
+          editedClient.billing_email ||
+          editedClient.email ||
+          client.billing_email ||
+          '',
+        email:
+          editedClient.email ||
+          editedClient.billing_email ||
+          client.email ||
+          '',
+        updated_at: new Date().toISOString(),
+      };
+
+      setClient(optimisticClient);
+      setEditedClient(optimisticClient);
+      invalidateClientListCache();
+
+      await Promise.all([
+        loadClientData(resolvedClientId, optimisticClient),
+        loadClientRelatedSections(resolvedClientId),
+      ]);
+
       setEditMode(false);
       setSuccessMessage('Änderungen wurden gespeichert.');
     } catch (err: any) {
@@ -665,6 +808,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         throw new Error(result?.error || 'Portalzugang konnte nicht freigeschaltet werden.');
       }
 
+      invalidateClientListCache();
       await Promise.all([loadClientUser(resolvedClientId), loadClientData(resolvedClientId)]);
       setSuccessMessage('Portalzugang wurde freigeschaltet. Der Kunde kann jetzt eingeladen werden.');
     } catch (err: any) {
@@ -805,7 +949,41 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
   function updateEditedClient<K extends keyof OpcClientDetail>(key: K, value: OpcClientDetail[K]) {
     setEditedClient((prev) => {
       if (!prev) return prev;
-      return { ...prev, [key]: value };
+
+      const next: OpcClientDetail = {
+        ...prev,
+        [key]: value,
+      };
+
+      if (key === 'billing_phone_e164') {
+        const nextBillingPhone = String(value || '').trim();
+
+        if (shouldReplacePhone(prev.phone_raw, nextBillingPhone)) {
+          next.phone_raw = nextBillingPhone;
+        }
+
+        if (shouldReplacePhone(prev.phone_e164, nextBillingPhone)) {
+          next.phone_e164 = nextBillingPhone;
+        }
+      }
+
+      if (key === 'phone_raw' || key === 'phone_e164') {
+        const nextContactPhone = String(value || '').trim();
+
+        if (shouldReplacePhone(prev.billing_phone_e164, nextContactPhone)) {
+          next.billing_phone_e164 = nextContactPhone;
+        }
+
+        if (key === 'phone_raw' && shouldReplacePhone(prev.phone_e164, nextContactPhone)) {
+          next.phone_e164 = nextContactPhone;
+        }
+
+        if (key === 'phone_e164' && shouldReplacePhone(prev.phone_raw, nextContactPhone)) {
+          next.phone_raw = nextContactPhone;
+        }
+      }
+
+      return next;
     });
   }
 
@@ -1020,7 +1198,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
           <div style={fieldStackStyle}>
             {renderField('Kontaktperson', displayClient.full_name, 'full_name')}
             {renderField('E-Mail', displayClient.email || displayClient.billing_email, 'email', { type: 'email' })}
-            {renderField('Telefon', displayClient.phone_e164 || displayClient.phone_raw || displayClient.billing_phone_e164, 'phone_raw', { type: 'tel' })}
+            {renderField('Telefon', getBestClientPhone(displayClient), 'phone_raw', { type: 'tel' })}
             {renderField('Lifecycle', displayClient.lifecycle_stage, undefined, { disabled: true })}
           </div>
         </OPCListCard>

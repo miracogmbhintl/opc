@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
-import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
+import { readOpcPageCache, removeOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import { safeNavigate } from '../lib/opc-navigation-guard';
 import {
   Building2,
@@ -269,6 +269,23 @@ export default function ClientsManagement() {
     void loadClients();
   }, []);
 
+  useEffect(() => {
+    const refreshClients = () => {
+      removeOpcPageCache(CLIENTS_PAGE_CACHE_KEY);
+      void loadClients({ background: true });
+    };
+
+    window.addEventListener('opc:clients-invalidated', refreshClients);
+    window.addEventListener('focus', refreshClients);
+    window.addEventListener('pageshow', refreshClients);
+
+    return () => {
+      window.removeEventListener('opc:clients-invalidated', refreshClients);
+      window.removeEventListener('focus', refreshClients);
+      window.removeEventListener('pageshow', refreshClients);
+    };
+  }, []);
+
   async function loadClients(options: { background?: boolean } = {}) {
     const isBackground = Boolean(options.background);
 
@@ -351,6 +368,8 @@ export default function ClientsManagement() {
         )
       );
 
+      removeOpcPageCache(CLIENTS_PAGE_CACHE_KEY);
+      await loadClients({ background: true });
       setSuccessMessage('Portalzugang wurde freigeschaltet. Der Kunde ist jetzt unter Portal-Kunden sichtbar.');
     } catch (error: any) {
       console.error('Portalzugang konnte nicht freigeschaltet werden:', error);

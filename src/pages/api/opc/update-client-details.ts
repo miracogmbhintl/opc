@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { getOpcServerEnvValue } from '../../../lib/opc-server-env';
 
 export const prerender = false;
 
@@ -97,11 +98,7 @@ function normalizeSiteType(value: unknown) {
 }
 
 function getEnvValue(locals: any, key: string) {
-  const importMetaEnv = (import.meta as any)?.env || {};
-  const processEnv = (globalThis as any)?.process?.env || {};
-  const runtimeEnv = {};
-
-  return importMetaEnv[key] || processEnv[key] || runtimeEnv[key] || '';
+  return getOpcServerEnvValue(locals, key);
 }
 
 function decodeBase64Url(input: string) {
@@ -187,16 +184,6 @@ function getSupabaseConfig(locals: any) {
 
 function getServerSupabase(locals: any) {
   const { supabaseUrl, serviceRoleKey } = getSupabaseConfig(locals);
-
-  console.log('[opc/update-client-details] Server Supabase project:', {
-    host: (() => {
-      try {
-        return new URL(supabaseUrl).host;
-      } catch {
-        return 'invalid-url';
-      }
-    })(),
-  });
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
@@ -484,7 +471,6 @@ async function getAuthenticatedUser(
     const error = result?.error || null;
 
     if (!error && user) {
-      console.log('[opc/update-client-details] Authenticated via:', candidate.source);
       return {
         user,
         session: null,
@@ -508,7 +494,6 @@ async function getAuthenticatedUser(
     const error = result?.error || null;
 
     if (!error && user && session?.access_token) {
-      console.log('[opc/update-client-details] Authenticated via refresh:', candidate.source);
 
       setSessionCookies(cookies, session);
 
@@ -526,20 +511,9 @@ async function getAuthenticatedUser(
   }
 
   if (accessCandidates.length === 0 && refreshCandidates.length === 0) {
-    console.error('[opc/update-client-details] No auth token candidates found.', {
-      hasAuthorizationHeader: Boolean(authHeader),
-      cookieNames: Object.keys(parsedCookies),
-    });
 
     throw new Error('Not authenticated');
   }
-
-  console.error('[opc/update-client-details] Authentication failed:', {
-    accessCandidatesChecked: accessCandidates.map((candidate) => candidate.source),
-    refreshCandidatesChecked: refreshCandidates.map((candidate) => candidate.source),
-    accessErrors,
-    refreshErrors,
-  });
 
   throw new Error('Invalid authentication');
 }
@@ -630,8 +604,10 @@ function hasAnyContactValue(editedClient: Record<string, any>) {
     clean(editedClient.full_name) ||
       clean(editedClient.company_name) ||
       normalizeEmail(editedClient.email) ||
+      normalizeEmail(editedClient.billing_email) ||
       clean(editedClient.phone_raw) ||
-      clean(editedClient.phone_e164)
+      clean(editedClient.phone_e164) ||
+      clean(editedClient.billing_phone_e164)
   );
 }
 
@@ -673,11 +649,12 @@ function buildContactPayload(editedClient: Record<string, any>) {
       normalizeEmail(editedClient.billing_email),
     phone_raw:
       clean(editedClient.phone_raw) ||
+      clean(editedClient.phone_e164) ||
       clean(editedClient.billing_phone_e164),
     phone_e164:
       clean(editedClient.phone_e164) ||
-      clean(editedClient.billing_phone_e164) ||
-      clean(editedClient.phone_raw),
+      clean(editedClient.phone_raw) ||
+      clean(editedClient.billing_phone_e164),
     updated_at: new Date().toISOString(),
   };
 }
@@ -966,6 +943,9 @@ async function updateClientDetails({
     primarySiteId: finalPrimarySiteId,
     billingName: updatedClient.billing_name,
     status: updatedClient.status,
+    billingPhone: clientPayload.billing_phone_e164,
+    contactPhoneRaw: contactId ? buildContactPayload(editedClient).phone_raw : null,
+    contactPhoneE164: contactId ? buildContactPayload(editedClient).phone_e164 : null,
   };
 }
 

@@ -1,36 +1,19 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { getOpcSupabaseUrl, getOpcSupabaseAnonKey, getOpcSupabaseServiceRoleKey } from '../../../../lib/opc-server-env';
 
 type AnyRow = Record<string, any>;
 
-function getSupabaseUrl() {
-  const value =
-    import.meta.env.PUBLIC_SUPABASE_URL ||
-    import.meta.env.VITE_SUPABASE_URL ||
-    import.meta.env.SUPABASE_URL;
-
-  if (!value) throw new Error('Missing Supabase URL.');
-  return value;
+function getSupabaseUrl(locals?: any) {
+  return getOpcSupabaseUrl(locals);
 }
 
-function getAnonKey() {
-  const value =
-    import.meta.env.PUBLIC_SUPABASE_ANON_KEY ||
-    import.meta.env.VITE_SUPABASE_ANON_KEY ||
-    import.meta.env.SUPABASE_ANON_KEY;
-
-  if (!value) throw new Error('Missing Supabase anon key.');
-  return value;
+function getAnonKey(locals?: any) {
+  return getOpcSupabaseAnonKey(locals);
 }
 
-function getServiceKey() {
-  const value =
-    import.meta.env.SUPABASE_SERVICE_ROLE_KEY ||
-    import.meta.env.SUPABASE_SERVICE_KEY ||
-    import.meta.env.SERVICE_ROLE_KEY;
-
-  if (!value) throw new Error('Missing Supabase service role key.');
-  return value;
+function getServiceKey(locals?: any) {
+  return getOpcSupabaseServiceRoleKey(locals);
 }
 
 function getBearerToken(request: Request): string | null {
@@ -43,10 +26,10 @@ function getBearerToken(request: Request): string | null {
   return null;
 }
 
-function createUserSupabase(request: Request) {
+function createUserSupabase(request: Request, locals?: any) {
   const token = getBearerToken(request);
 
-  return createClient(getSupabaseUrl(), getAnonKey(), {
+  return createClient(getSupabaseUrl(locals), getAnonKey(locals), {
     global: {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     },
@@ -57,8 +40,8 @@ function createUserSupabase(request: Request) {
   });
 }
 
-function createServiceSupabase() {
-  return createClient(getSupabaseUrl(), getServiceKey(), {
+function createServiceSupabase(locals?: any) {
+  return createClient(getSupabaseUrl(locals), getServiceKey(locals), {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -308,10 +291,10 @@ function flattenJob(
   };
 }
 
-export const GET: APIRoute = async ({ request }) => {
+export const GET: APIRoute = async ({ request, locals }) => {
   try {
-    const userSupabase = createUserSupabase(request);
-    const serviceSupabase = createServiceSupabase();
+    const userSupabase = createUserSupabase(request, locals);
+    const serviceSupabase = createServiceSupabase(locals);
 
     const {
       data: { user },

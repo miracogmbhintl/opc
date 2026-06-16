@@ -1,14 +1,9 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { getOpcSupabaseUrl, getOpcSupabaseAnonKey, getOpcSupabaseServiceRoleKey } from '../../../lib/opc-server-env';
 
 export const prerender = false;
 
-const SUPABASE_URL = import.meta.env.PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-const SUPABASE_SERVICE_ROLE_KEY =
-  import.meta.env.SUPABASE_SERVICE_ROLE_KEY ||
-  import.meta.env.SUPABASE_SERVICE_KEY ||
-  import.meta.env.SERVICE_ROLE_KEY;
 
 type JsonRecord = Record<string, any>;
 
@@ -771,8 +766,12 @@ async function createCalendarEntriesForJobs({
   return result;
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
+    const SUPABASE_URL = getOpcSupabaseUrl(locals);
+    const SUPABASE_ANON_KEY = getOpcSupabaseAnonKey(locals);
+    const SUPABASE_SERVICE_ROLE_KEY = getOpcSupabaseServiceRoleKey(locals);
+
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
       return jsonResponse(
         {

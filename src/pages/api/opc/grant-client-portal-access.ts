@@ -1,5 +1,6 @@
 import type { APIContext } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { getOpcServerEnvValue } from '../../../lib/opc-server-env';
 
 export const prerender = false;
 
@@ -38,11 +39,7 @@ function isValidEmail(email: string | null) {
 }
 
 function getEnvValue(locals: any, key: string) {
-  const importMetaEnv = (import.meta as any)?.env || {};
-  const processEnv = (globalThis as any)?.process?.env || {};
-  const runtimeEnv = {};
-
-  return importMetaEnv[key] || processEnv[key] || runtimeEnv[key] || '';
+  return getOpcServerEnvValue(locals, key);
 }
 
 function decodeBase64Url(input: string) {
@@ -129,16 +126,6 @@ function getSupabaseConfig(locals: any) {
 
 function getAdminSupabase(locals: any) {
   const { supabaseUrl, serviceRoleKey } = getSupabaseConfig(locals);
-
-  console.log('[grant-client-portal-access] Server Supabase project:', {
-    host: (() => {
-      try {
-        return new URL(supabaseUrl).host;
-      } catch {
-        return 'invalid-url';
-      }
-    })(),
-  });
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
@@ -426,7 +413,6 @@ async function getAuthenticatedUser(
     const error = result?.error || null;
 
     if (!error && user) {
-      console.log('[grant-client-portal-access] Authenticated via:', candidate.source);
       return {
         user,
         authenticatedVia: candidate.source,
@@ -449,7 +435,6 @@ async function getAuthenticatedUser(
     const error = result?.error || null;
 
     if (!error && user && session?.access_token) {
-      console.log('[grant-client-portal-access] Authenticated via refresh:', candidate.source);
 
       setSessionCookies(cookies, session);
 

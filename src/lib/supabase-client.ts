@@ -15,15 +15,8 @@ export function getSupabaseClient(): SupabaseClient {
   // In browser, these are embedded at build time as string literals
   const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
-
-  console.log('🔍 Supabase Client Init Check:');
-  console.log('  - URL present:', !!supabaseUrl);
-  console.log('  - Key present:', !!supabaseAnonKey);
   
   if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('❌ Missing Supabase credentials');
-    console.error('  PUBLIC_SUPABASE_URL:', supabaseUrl || 'MISSING');
-    console.error('  PUBLIC_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'SET' : 'MISSING');
     
     throw new Error(
       'Supabase configuration missing. Please ensure PUBLIC_SUPABASE_URL and PUBLIC_SUPABASE_ANON_KEY are set.'
@@ -34,11 +27,8 @@ export function getSupabaseClient(): SupabaseClient {
   try {
     new URL(supabaseUrl);
   } catch (e) {
-    console.error('❌ Invalid Supabase URL format:', supabaseUrl);
     throw new Error('Invalid Supabase URL format');
   }
-
-  console.log('✅ Creating Supabase client...');
   
   clientInstance = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
@@ -48,8 +38,6 @@ export function getSupabaseClient(): SupabaseClient {
       storage: window.localStorage,
     }
   });
-
-  console.log('✅ Supabase client created successfully');
   
   return clientInstance;
 }

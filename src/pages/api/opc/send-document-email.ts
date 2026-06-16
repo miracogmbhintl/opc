@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { getOpcServerEnvValue } from '../../../lib/opc-server-env';
 
 export const prerender = false;
 
@@ -32,10 +33,7 @@ function clean(value: unknown) {
 }
 
 function getEnvValue(locals: any, key: string) {
-  const runtimeEnv = locals?.runtime?.env;
-  const processEnv = (globalThis as any)?.process?.env;
-
-  return runtimeEnv?.[key] || import.meta.env?.[key] || processEnv?.[key] || '';
+  return getOpcServerEnvValue(locals, key);
 }
 
 function assertServerKeyLooksSafe(serviceRoleKey: string) {
