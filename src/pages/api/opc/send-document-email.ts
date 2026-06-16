@@ -131,6 +131,47 @@ function validatePayload(payload: RequestBody) {
   }
 }
 
+function getPayloadInvoiceId(payload: RequestBody) {
+  const metadata = payload?.metadata;
+
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return '';
+  }
+
+  return clean((metadata as Record<string, unknown>).invoice_id);
+}
+
+async function assertInvoiceCanBeEmailed(supabaseAdmin: any, payload: RequestBody) {
+  const invoiceId = getPayloadInvoiceId(payload);
+
+  if (!invoiceId) {
+    return;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('opc_invoice_send_preflight')
+    .select('invoice_id, recipient_email, can_send_email, send_blocker_message')
+    .eq('invoice_id', invoiceId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`E-Mail-Prüfung fehlgeschlagen: ${error.message}`);
+  }
+
+  if (!data) {
+    throw new Error('Rechnung konnte für die E-Mail-Prüfung nicht gefunden werden.');
+  }
+
+  const recipientEmail = clean(data.recipient_email);
+
+  if (data.can_send_email === false || !recipientEmail) {
+    throw new Error(
+      clean(data.send_blocker_message) ||
+        'Für diesen Kunden ist keine E-Mail-Adresse hinterlegt. Bitte ergänzen Sie eine E-Mail-Adresse im Kundenkontakt oder tragen Sie eine Empfängeradresse für diese Rechnung ein.'
+    );
+  }
+}
+
 async function invokeMailerFunction({
   functionName,
   payload,
@@ -181,6 +222,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     const supabaseAdmin = getSupabaseAdmin(locals);
     const user = await getAuthenticatedUser(request, cookies, supabaseAdmin);
     await assertCanSendDocuments(supabaseAdmin, user.id);
+    await assertInvoiceCanBeEmailed(supabaseAdmin, payload);
 
     const functionNames = ['opc-send-document-email', 'opc-send-document-smtp'];
     const failures: string[] = [];

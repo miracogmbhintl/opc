@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { sendDocumentEmail } from '../lib/opc-document-email';
-import { buildDocumentEmailHtml, downloadPdf, generateInvoicePdfDocument, getClientEmail, pdfToBase64, OPC_DEFAULT_CLOSING } from '../lib/opc-document-pdf';
+import { buildDocumentEmailHtml, downloadPdf, generateInvoicePdfDocument, pdfToBase64, OPC_DEFAULT_CLOSING } from '../lib/opc-document-pdf';
 import { buildInvoiceHtml, downloadBase64Pdf, renderHtmlToPdfBase64 } from '../lib/opc-document-html';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import {
@@ -91,6 +91,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
@@ -225,7 +226,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
   }
 
   async function saveInvoice(nextStatus?: string, options: { silent?: boolean } = {}) {
-    if (!invoice || !supabase) return;
+    if (!invoice || !supabase) return false;
 
     setSaving(true);
     setErrorMessage('');
@@ -290,8 +291,10 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);
       await loadInvoice({ clearMessages: false });
+      return true;
     } catch (error: any) {
       setErrorMessage(error?.message || 'Rechnung konnte nicht gespeichert werden.');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -333,19 +336,41 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
   }
 
   async function handleSendInvoiceEmail() {
-    if (!invoice || !supabase) return;
+    if (!invoice || !supabase || sending) return;
 
     setErrorMessage('');
     setSuccessMessage('');
+    setSending(true);
 
     try {
-      await saveInvoice('sent', { silent: true });
-      const recipientEmail = getClientEmail(invoice.client_snapshot) || clean((invoice.client_snapshot || {}).email);
-      if (!recipientEmail) throw new Error('Für diesen Kunden ist keine E-Mail-Adresse hinterlegt. Bitte zuerst beim Kunden eine Rechnungs- oder Kontakt-E-Mail eintragen.');
+      const saved = await saveInvoice(undefined, { silent: true });
+      if (!saved) {
+        throw new Error('Rechnung konnte vor dem Versand nicht gespeichert werden.');
+      }
+
+      const { data: preflight, error: preflightError } = await supabase
+        .from('opc_invoice_send_preflight')
+        .select('recipient_email, can_send_email, send_blocker_message')
+        .eq('invoice_id', invoice.id)
+        .maybeSingle();
+
+      if (preflightError) {
+        throw new Error(`E-Mail-Prüfung fehlgeschlagen: ${preflightError.message}`);
+      }
+
+      const recipientEmail = clean(preflight?.recipient_email);
+
+      if (!preflight?.can_send_email || !recipientEmail) {
+        throw new Error(
+          clean(preflight?.send_blocker_message) ||
+            'Für diesen Kunden ist keine E-Mail-Adresse hinterlegt. Bitte ergänzen Sie eine E-Mail-Adresse im Kundenkontakt oder tragen Sie eine Empfängeradresse für diese Rechnung ein.'
+        );
+      }
 
       const filename = buildInvoiceFileName(invoice);
       const pdfBase64 = await generateInvoicePdfBase64(filename);
       if (!pdfBase64) throw new Error('PDF konnte nicht erstellt werden.');
+
       const html = buildDocumentEmailHtml({
         title: 'Ihre Rechnung',
         headline: 'Ihre Rechnung',
@@ -360,10 +385,14 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         attachments: [{ filename, contentBase64: pdfBase64, contentType: 'application/pdf' }],
         metadata: { invoice_id: invoice.id, document_type: 'invoice' },
       });
+
+      await saveInvoice('sent', { silent: true });
       setSuccessMessage(`Rechnung wurde per E-Mail an ${recipientEmail} gesendet.`);
       await loadInvoice({ clearMessages: false });
     } catch (error: any) {
       setErrorMessage(error?.message || 'E-Mail konnte nicht gesendet werden.');
+    } finally {
+      setSending(false);
     }
   }
 
@@ -406,7 +435,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={`/rechnung/${invoiceId}`} fullWidth hideTopBar>
       <OPCPageShell>
         <div style={topBarStyle} className="opc-mobile-topbar">
-          <a href={`${baseUrl}/offerten`} className="opc-mobile-back" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+          <a href={`${baseUrl}/rechnung`} className="opc-mobile-back" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
             <ArrowLeft size={16} /> Zurück
           </a>
           <div style={actionRowStyle} className="opc-mobile-action-row">
@@ -416,8 +445,8 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
             <button type="button" disabled={saving} onClick={() => saveInvoice('sent')} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
               Als gesendet markieren
             </button>
-            <button type="button" disabled={saving} onClick={handleSendInvoiceEmail} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
-              Rechnung per E-Mail senden
+            <button type="button" disabled={saving || sending} onClick={handleSendInvoiceEmail} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              {sending ? 'Sendet...' : 'Rechnung per E-Mail senden'}
             </button>
             <button type="button" disabled={saving} onClick={handleDownloadInvoicePdf} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
               <Download size={16} /> PDF herunterladen
