@@ -2624,14 +2624,16 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     });
   };
 
-  const handleCompleteJob = async () => {
+    const handleCompleteJob = async () => {
     if (!job) {
       setActionError('Einsatz konnte nicht geladen werden.');
       return;
     }
 
     if (!canCompleteJob(job, activeTimeLog)) {
-      setActionError('Dieser Auftrag kann frühestens 20 Minuten vor der geplanten Endzeit abgeschlossen werden.');
+      setActionError(
+        'Dieser Auftrag kann frühestens 20 Minuten vor der geplanten Endzeit abgeschlossen werden.',
+      );
       return;
     }
 
@@ -2640,38 +2642,91 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
       if (activeTimeLog) {
         const logId = activeTimeLog.id || activeTimeLog.time_log_id;
+
+        if (!logId) {
+          throw new Error('Der aktive Zeitlog besitzt keine gültige ID.');
+        }
+
         const metadata = safeMetadata(activeTimeLog.metadata);
         const noteText = actionNoteDraft.trim() || null;
         const nextNotes = appendManualNote(activeTimeLog.notes, noteText);
+        const durationMinutes = liveMinutesFromLog(activeTimeLog);
 
-        await tryUpdateOne('opc_job_time_logs', 'id', String(logId), [
-          {
-            ended_at: now,
-            duration_minutes: liveMinutesFromLog(activeTimeLog),
-            status: 'completed',
-            notes: nextNotes,
-            metadata: {
-              ...metadata,
-              break_started_at: null,
-              last_action: 'complete_job',
-              completed_at: now,
-              completed_by: access.userId,
-              submitted_at: now,
-              submitted_by: access.userId,
-              timeline: [
-                ...asArray(metadata.timeline),
-                {
-                  action: 'complete_job',
-                  at: now,
-                  by: access.userId,
-                },
-              ],
+        await tryUpdateOne(
+          'opc_job_time_logs',
+          'id',
+          String(logId),
+          [
+            {
+              ended_at: now,
+              duration_minutes: durationMinutes,
+
+              // Time logs use the approval workflow:
+              // draft -> submitted -> approved / rejected
+              status: 'submitted',
+
+              notes: nextNotes,
+              metadata: {
+                ...metadata,
+                break_started_at: null,
+                last_action: 'complete_job',
+                completed_at: now,
+                completed_by: access.userId,
+                submitted_at: now,
+                submitted_by: access.userId,
+                timeline: [
+                  ...asArray(metadata.timeline),
+                  {
+                    action: 'complete_job',
+                    at: now,
+                    by: access.userId,
+                  },
+                ],
+              },
+              updated_at: now,
             },
-            updated_at: now,
-          },
-        ]);
+          ],
+        );
+
+        setJob((current) => {
+          if (!current) return current;
+
+          return {
+            ...current,
+            time_logs: asArray(current.time_logs).map((log) =>
+              String(log.id || log.time_log_id || '') === String(logId)
+                ? {
+                    ...log,
+                    ended_at: now,
+                    duration_minutes: durationMinutes,
+                    status: 'submitted',
+                    notes: nextNotes,
+                    metadata: {
+                      ...metadata,
+                      break_started_at: null,
+                      last_action: 'complete_job',
+                      completed_at: now,
+                      completed_by: access.userId,
+                      submitted_at: now,
+                      submitted_by: access.userId,
+                      timeline: [
+                        ...asArray(metadata.timeline),
+                        {
+                          action: 'complete_job',
+                          at: now,
+                          by: access.userId,
+                        },
+                      ],
+                    },
+                    updated_at: now,
+                  }
+                : log,
+            ),
+          };
+        });
       }
 
+      // The job itself uses the operational job status lifecycle.
       await updateJobRecord({
         status: 'completed',
         actual_end: now,
@@ -2697,8 +2752,9 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           })
           .eq('job_id', job.job_id);
       } catch {
-        // Assignment status update is best effort.
+        // Assignment status is secondary and must not block job completion.
       }
+
       setActionNoteDraft('');
       setActionMessage('Auftrag wurde abgeschlossen.');
     });
