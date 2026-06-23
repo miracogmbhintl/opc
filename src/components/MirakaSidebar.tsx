@@ -26,6 +26,7 @@ import {
   QrCode,
   Settings,
   Users,
+  UsersRound,
   WalletCards,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -159,6 +160,9 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       calendar: routeFor('calendar', '/kalender'),
 
       clients: routeFor('clients', '/kunden'),
+      employees: routeFor('employees', '/mitarbeiter'),
+      employeeDetail: routeFor('employeeDetail', '/mitarbeiter'),
+      createEmployee: routeFor('createEmployee', '/mitarbeiter-anlegen'),
       jobs: routeFor('jobs', '/einsaetze'),
       timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       files: routeFor('files', '/berichte-dateien'),
@@ -339,6 +343,23 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         key: 'clients',
         match: [routes.clients, '/kunden', '/dashboard/owner/clients', '/dashboard/clients'],
       },
+      ...(normalizedRole === 'owner' || normalizedRole === 'admin'
+        ? [
+            {
+              href: buildUrl(routes.employees),
+              label: 'Mitarbeiter',
+              icon: UsersRound,
+              key: 'employees',
+              match: [
+                routes.employees,
+                routes.employeeDetail,
+                routes.createEmployee,
+                '/mitarbeiter',
+                '/mitarbeiter-anlegen',
+              ],
+            },
+          ]
+        : []),
       {
         href: buildUrl(routes.inquiries),
         label: 'Anfragen',

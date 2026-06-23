@@ -17,6 +17,10 @@ export const OPC_ROUTES = {
   clientDetail: '/kunde',
   createClient: '/kunde-anlegen',
 
+  employees: '/mitarbeiter',
+  employeeDetail: '/mitarbeiter',
+  createEmployee: '/mitarbeiter-anlegen',
+
   jobs: '/einsaetze',
   jobDetail: '/einsatz',
   createJob: '/einsatz-planen',
@@ -59,6 +63,10 @@ export function legacyRouteToOpc(path: string): string {
     [/^\/kunden$/, OPC_ROUTES.clients],
     [/^\/kunde\/(.+)$/, `${OPC_ROUTES.clientDetail}/$1`],
     [/^\/kunde-anlegen$/, OPC_ROUTES.createClient],
+
+    [/^\/mitarbeiter$/, OPC_ROUTES.employees],
+    [/^\/mitarbeiter\/([^/]+)$/, `${OPC_ROUTES.employeeDetail}/$1`],
+    [/^\/mitarbeiter-anlegen$/, OPC_ROUTES.createEmployee],
 
     [/^\/anfragen$/, OPC_ROUTES.inquiries],
     [/^\/anfragen-schaeden$/, OPC_ROUTES.tickets],
