@@ -1499,6 +1499,36 @@ function addHoursToTime(startTime: string, hoursValue: string | number) {
   return `${pad2(nextHour)}:${pad2(nextMinute)}`;
 }
 
+function durationHoursBetweenTimes(startTime: string, endTime: string) {
+  const [startHourRaw, startMinuteRaw] = String(startTime || '').split(':');
+  const [endHourRaw, endMinuteRaw] = String(endTime || '').split(':');
+
+  const startHour = Number(startHourRaw);
+  const startMinute = Number(startMinuteRaw);
+  const endHour = Number(endHourRaw);
+  const endMinute = Number(endMinuteRaw);
+
+  if (
+    !Number.isFinite(startHour) ||
+    !Number.isFinite(startMinute) ||
+    !Number.isFinite(endHour) ||
+    !Number.isFinite(endMinute)
+  ) {
+    return '';
+  }
+
+  const startTotal = startHour * 60 + startMinute;
+  let endTotal = endHour * 60 + endMinute;
+
+  // Supports jobs that end after midnight.
+  if (endTotal < startTotal) endTotal += 24 * 60;
+
+  const durationMinutes = endTotal - startTotal;
+  if (durationMinutes <= 0) return '';
+
+  return String(Number((durationMinutes / 60).toFixed(2)));
+}
+
 function parseInputDate(inputDate: string) {
   const date = new Date(`${inputDate}T00:00:00`);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -1986,7 +2016,27 @@ function EinsatzPlanningView() {
       await tryInsertOne('opc_job_assignments', [
         {
           job_id: jobId,
-          employee_id: staff.employee_id || staff.id,
+          staff_role_id: staff.id,
+          user_id: staff.user_id || null,
+          employee_id: staff.employee_id || null,
+          employee_name: staff.display_name || staff.email || 'Mitarbeiter',
+          employee_email: staff.email || null,
+          employee_phone: staff.phone_e164 || staff.phone_raw || null,
+          status: 'assigned',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          job_id: jobId,
+          staff_role_id: staff.id,
+          user_id: staff.user_id || null,
+          employee_id: staff.employee_id || null,
+          status: 'assigned',
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          job_id: jobId,
           staff_role_id: staff.id,
           user_id: staff.user_id || null,
           status: 'assigned',
@@ -1996,13 +2046,6 @@ function EinsatzPlanningView() {
         {
           job_id: jobId,
           employee_id: staff.employee_id || staff.id,
-          status: 'assigned',
-          created_at: now,
-          updated_at: now,
-        },
-        {
-          job_id: jobId,
-          staff_role_id: staff.id,
           status: 'assigned',
           created_at: now,
           updated_at: now,
@@ -2191,7 +2234,19 @@ function EinsatzPlanningView() {
 
               <div className="opc-plan-three-row">
                 <PlanField label="Startzeit *">
-                  <input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} />
+                  <input
+                    type="time"
+                    value={startTime}
+                    onChange={(event) => {
+                      const nextStart = event.target.value;
+                      setStartTime(nextStart);
+
+                      if (!autoEndTime) {
+                        const nextHours = durationHoursBetweenTimes(nextStart, endTime);
+                        if (nextHours) setEstimatedHours(nextHours);
+                      }
+                    }}
+                  />
                 </PlanField>
 
                 <PlanField label="Endzeit *">
@@ -2199,8 +2254,12 @@ function EinsatzPlanningView() {
                     type="time"
                     value={endTime}
                     onChange={(event) => {
+                      const nextEnd = event.target.value;
                       setAutoEndTime(false);
-                      setEndTime(event.target.value);
+                      setEndTime(nextEnd);
+
+                      const nextHours = durationHoursBetweenTimes(startTime, nextEnd);
+                      if (nextHours) setEstimatedHours(nextHours);
                     }}
                   />
                 </PlanField>

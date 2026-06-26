@@ -14,12 +14,14 @@ import {
   Clock3,
   FileText,
   Coffee,
+  Download,
   Loader2,
   LogIn,
   LogOut,
   Mail,
   MapPin,
   MessageCircle,
+  Paperclip,
   Phone,
   Trash2,
 } from 'lucide-react';
@@ -105,6 +107,14 @@ type NoteRow = {
   visibility: 'internal' | 'client' | 'action' | 'system';
 };
 
+type ChecklistItem = {
+  id: string;
+  label: string;
+  completed: boolean;
+  completed_at?: string | null;
+  completed_by?: string | null;
+};
+
 interface JobDetail {
   job_id: string;
   title?: string | null;
@@ -171,6 +181,8 @@ type EditDraft = {
   employee_notes: string;
   client_notes: string;
   internal_notes: string;
+  service_requirements_text: string;
+  report_required: boolean;
 };
 
 type ManualTimeDraft = {
@@ -407,6 +419,24 @@ function durationMinutesBetween(startLocal: string, endLocal: string, breakMinut
   if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return 0;
 
   return Math.max(0, Math.round((end - start) / 60000) - breakMinutes);
+}
+
+function hoursBetweenDateTimeLocal(startLocal: string, endLocal: string) {
+  const start = new Date(startLocal).getTime();
+  const end = new Date(endLocal).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return '';
+
+  return String(Number(((end - start) / 3_600_000).toFixed(2)));
+}
+
+function addHoursToDateTimeLocal(startLocal: string, hoursRaw: string) {
+  const start = new Date(startLocal);
+  const hours = Number(String(hoursRaw || '').replace(',', '.'));
+
+  if (Number.isNaN(start.getTime()) || !Number.isFinite(hours) || hours <= 0) return '';
+
+  return toDateTimeLocal(new Date(start.getTime() + hours * 3_600_000).toISOString());
 }
 
 function createEmptyManualTimeDraft(job: JobDetail | null, assignments: JsonArray = []): ManualTimeDraft {
@@ -947,35 +977,87 @@ function liveMinutesFromLog(log: JsonRecord | null) {
   );
 }
 
+function normalizeChecklistItems(value: any): ChecklistItem[] {
+  if (!value) return [];
+
+  const source: any[] = Array.isArray(value)
+    ? value
+    : Array.isArray(value?.items)
+      ? value.items
+      : typeof value === 'string'
+        ? value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+        : typeof value === 'object'
+          ? Object.entries(value).map(([key, item]) => {
+              if (typeof item === 'boolean') {
+                return { label: key, completed: item };
+              }
+
+              if (typeof item === 'string' || typeof item === 'number') {
+                return { label: `${key}: ${item}`, completed: false };
+              }
+
+              return { label: key, completed: false };
+            })
+          : [String(value)];
+
+  return source
+    .map((item: any, index: number): ChecklistItem | null => {
+      if (typeof item === 'string') {
+        const label = item.trim().replace(/^[-•☐☑✓]\s*/, '');
+        if (!label) return null;
+
+        return {
+          id: `legacy-${index}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 36)}`,
+          label,
+          completed: /^[☑✓]/.test(item.trim()),
+        };
+      }
+
+      const label = String(item?.label || item?.title || item?.name || '').trim();
+      if (!label) return null;
+
+      return {
+        id: String(item?.id || `legacy-${index}-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 36)}`),
+        label,
+        completed: Boolean(item?.completed ?? item?.checked ?? item?.done),
+        completed_at: item?.completed_at || null,
+        completed_by: item?.completed_by || null,
+      };
+    })
+    .filter((item: ChecklistItem | null): item is ChecklistItem => Boolean(item));
+}
+
+function checklistFromText(text: string, previousValue: any): ChecklistItem[] {
+  const previousItems = normalizeChecklistItems(previousValue);
+  const previousByLabel = new Map(
+    previousItems.map((item) => [item.label.trim().toLowerCase(), item]),
+  );
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-•☐☑✓]\s*/, ''))
+    .filter(Boolean)
+    .map((label) => {
+      const existing = previousByLabel.get(label.toLowerCase());
+
+      return existing || {
+        id: createOfflineUuid(),
+        label,
+        completed: false,
+        completed_at: null,
+        completed_by: null,
+      };
+    });
+}
+
 function renderRequirements(value: any) {
-  if (!value) return 'Keine Checkliste oder Hinweise hinterlegt.';
+  const items = normalizeChecklistItems(value);
 
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        if (typeof item === 'string') return `• ${item}`;
-        if (item?.label) return `• ${item.label}`;
-        if (item?.title) return `• ${item.title}`;
-        if (item?.name) return `• ${item.name}`;
-        return `• ${JSON.stringify(item)}`;
-      })
-      .join('\n');
-  }
+  if (!items.length) return 'Keine Checkliste oder Hinweise hinterlegt.';
 
-  if (typeof value === 'object') {
-    const entries = Object.entries(value);
-    if (!entries.length) return 'Keine Checkliste oder Hinweise hinterlegt.';
-
-    return entries
-      .map(([key, item]) => {
-        if (typeof item === 'boolean') return `• ${key}: ${item ? 'Ja' : 'Nein'}`;
-        if (typeof item === 'string' || typeof item === 'number') return `• ${key}: ${item}`;
-        return `• ${key}: ${JSON.stringify(item)}`;
-      })
-      .join('\n');
-  }
-
-  return String(value);
+  return items
+    .map((item) => `${item.completed ? '☑' : '☐'} ${item.label}`)
+    .join('\n');
 }
 
 function getJobVisualState(job: JobDetail | null, activeTimeLog: JsonRecord | null) {
@@ -1121,74 +1203,61 @@ function buildAssignmentPayloadVariants({
   assignedByStaffId?: string | null;
 }) {
   const now = new Date().toISOString();
-
-  const employeeStaffId = employee.id;
-  const employeeUserId = employee.user_id || null;
-  const employeeExternalId = employee.employee_id || null;
+  const assignedBy = assignedByStaffId || assignedByUserId || null;
 
   return [
     {
       job_id: jobId,
-      employee_id: employeeExternalId || employeeStaffId,
+      staff_role_id: employee.id,
+      user_id: employee.user_id || null,
+      employee_id: employee.employee_id || null,
+      employee_name: employee.display_name || employee.email || 'Mitarbeiter',
+      employee_email: employee.email || null,
+      employee_phone: employee.phone_e164 || employee.phone_raw || null,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedByStaffId || assignedByUserId || null,
+      assigned_by: assignedBy,
       created_at: now,
       updated_at: now,
     },
     {
       job_id: jobId,
-      staff_role_id: employeeStaffId,
+      staff_role_id: employee.id,
+      user_id: employee.user_id || null,
+      employee_id: employee.employee_id || null,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedByStaffId || assignedByUserId || null,
+      assigned_by: assignedBy,
       created_at: now,
       updated_at: now,
     },
     {
       job_id: jobId,
-      staff_id: employeeStaffId,
+      staff_role_id: employee.id,
+      user_id: employee.user_id || null,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedByStaffId || assignedByUserId || null,
+      assigned_by: assignedBy,
       created_at: now,
       updated_at: now,
     },
     {
       job_id: jobId,
-      user_id: employeeUserId,
+      employee_id: employee.employee_id || employee.id,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedByStaffId || assignedByUserId || null,
+      assigned_by: assignedBy,
       created_at: now,
       updated_at: now,
     },
     {
       job_id: jobId,
-      assigned_to: employeeUserId || employeeExternalId || employeeStaffId,
+      user_id: employee.user_id || null,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedByStaffId || assignedByUserId || null,
+      assigned_by: assignedBy,
       created_at: now,
       updated_at: now,
-    },
-    {
-      job_id: jobId,
-      employee_id: employeeExternalId || employeeStaffId,
-      status: 'assigned',
-      created_at: now,
-    },
-    {
-      job_id: jobId,
-      staff_role_id: employeeStaffId,
-      status: 'assigned',
-      created_at: now,
-    },
-    {
-      job_id: jobId,
-      user_id: employeeUserId,
-      status: 'assigned',
-      created_at: now,
     },
   ];
 }
@@ -1268,6 +1337,60 @@ function buildMediaPayloadVariants({
   ];
 }
 
+function buildDocumentPayloadVariants({
+  jobId,
+  file,
+  bucketName,
+  filePath,
+  uploader,
+  uploadedByUserId,
+}: {
+  jobId: string;
+  file: File;
+  bucketName: string;
+  filePath: string;
+  uploader?: string | null;
+  uploadedByUserId?: string | null;
+}) {
+  const now = new Date().toISOString();
+
+  return [
+    {
+      job_id: jobId,
+      media_type: 'document',
+      storage_bucket: bucketName,
+      storage_path: filePath,
+      file_name: file.name,
+      original_filename: file.name,
+      mime_type: file.type || null,
+      file_size: file.size,
+      uploaded_by: uploader || uploadedByUserId || null,
+      uploaded_by_user_id: uploadedByUserId || null,
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      job_id: jobId,
+      media_type: 'document',
+      storage_bucket: bucketName,
+      storage_path: filePath,
+      original_filename: file.name,
+      mime_type: file.type || null,
+      size_bytes: file.size,
+      uploaded_by_user_id: uploadedByUserId || null,
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      job_id: jobId,
+      media_type: 'document',
+      storage_path: filePath,
+      file_name: file.name,
+      created_at: now,
+    },
+  ];
+}
+
 function buildClockInPayload({
   jobId,
   assignmentId,
@@ -1341,6 +1464,105 @@ function isVideoMedia(item: JsonRecord) {
     /\.(mp4|mov|webm|m4v|avi)(\?|$)/i.test(path) ||
     /\.(mp4|mov|webm|m4v|avi)(\?|$)/i.test(url)
   );
+}
+
+function isDocumentMedia(item: JsonRecord) {
+  const mediaType = String(item.media_type || item.file_type || '').toLowerCase();
+  const mime = String(item.mime_type || item.content_type || '').toLowerCase();
+  const path = getMediaPath(item).toLowerCase();
+
+  return (
+    mediaType === 'document' ||
+    mime === 'application/pdf' ||
+    mime.includes('spreadsheet') ||
+    mime.includes('excel') ||
+    mime.includes('word') ||
+    mime === 'text/csv' ||
+    /\.(pdf|xlsx?|csv|docx?|txt)$/i.test(path)
+  );
+}
+
+async function hydrateJobAssignments(sourceJob: JobDetail): Promise<JobDetail> {
+  if (!sourceJob.job_id) return sourceJob;
+
+  try {
+    const { data, error } = await supabase.rpc('opc_get_job_assignments', {
+      p_job_id: sourceJob.job_id,
+    });
+
+    if (!error && Array.isArray(data)) {
+      return {
+        ...sourceJob,
+        assignments: data as JsonArray,
+      };
+    }
+  } catch {
+    // Fall through to the client-side resolver.
+  }
+
+  const existingAssignments = asArray(sourceJob.assignments);
+  if (!existingAssignments.length) return sourceJob;
+
+  try {
+    const { data, error } = await supabase
+      .from('opc_staff_roles')
+      .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,whatsapp_wa_id,role,status')
+      .limit(2000);
+
+    if (error || !Array.isArray(data)) return sourceJob;
+
+    const staffRows = data as EmployeeOption[];
+
+    const hydrated = existingAssignments.map((assignment) => {
+      const assignmentIds = new Set(
+        [
+          assignment.staff_role_id,
+          assignment.staff_id,
+          assignment.employee_id,
+          assignment.user_id,
+          assignment.employee_user_id,
+          assignment.assigned_to,
+        ]
+          .filter(Boolean)
+          .map(String),
+      );
+
+      const employee = staffRows.find((candidate) =>
+        [candidate.id, candidate.user_id, candidate.employee_id]
+          .filter(Boolean)
+          .map(String)
+          .some((id) => assignmentIds.has(id)),
+      );
+
+      if (!employee) return assignment;
+
+      return {
+        ...assignment,
+        staff_role_id: assignment.staff_role_id || employee.id,
+        user_id: assignment.user_id || employee.user_id || null,
+        employee_id: assignment.employee_id || employee.employee_id || null,
+        employee_name:
+          assignment.employee_name ||
+          assignment.display_name ||
+          employee.display_name ||
+          employee.email ||
+          'Mitarbeiter',
+        display_name:
+          assignment.display_name || employee.display_name || employee.email || 'Mitarbeiter',
+        email: assignment.email || employee.email || null,
+        phone_e164: assignment.phone_e164 || employee.phone_e164 || null,
+        phone_raw: assignment.phone_raw || employee.phone_raw || null,
+        whatsapp_wa_id: assignment.whatsapp_wa_id || employee.whatsapp_wa_id || null,
+      };
+    });
+
+    return {
+      ...sourceJob,
+      assignments: hydrated,
+    };
+  } catch {
+    return sourceJob;
+  }
 }
 
 function StatusBadge({ status }: { status?: string | null }) {
@@ -1436,9 +1658,10 @@ function inputStyle(): CSSProperties {
 }
 
 function ContactButtons({ person }: { person: JsonRecord | EmployeeOption }) {
-  const phone = person.phone_e164 || person.phone_raw || person.employee_phone || person.phone || '';
-  const email = person.email || person.employee_email || '';
-  const whatsapp = person.whatsapp_wa_id || phone || '';
+  const record = person as JsonRecord;
+  const phone = record.phone_e164 || record.phone_raw || record.employee_phone || record.phone || '';
+  const email = record.email || record.employee_email || '';
+  const whatsapp = record.whatsapp_wa_id || phone || '';
 
   return (
     <div className="opc-contact-buttons">
@@ -1488,6 +1711,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const [internalNoteDraft, setInternalNoteDraft] = useState('');
   const [clientNoteDraft, setClientNoteDraft] = useState('');
   const [uploadingPhase, setUploadingPhase] = useState<'before' | 'after' | null>(null);
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
   const [showAllNotes, setShowAllNotes] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState('');
@@ -1524,13 +1748,17 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const report = job?.report || null;
   const canUseAdminActions = canManageAdminActions(access);
   const canUseReportActions = canUseAdminActions;
-  const canDeleteJob = canUseAdminActions;
+  const canDeleteJob = isOwnerOrAdminRole(access.role);
   const jobCompleted = isCompletedJobStatus(job?.status);
   const jobHasReport = hasExistingReport(report);
 
   const employeeMode = isEmployeeRole(access.role) && !access.canEdit;
   const clientMode = isClientRole(access.role);
   const canWriteClientNotes = canUseAdminActions || isOwnerOrAdminRole(access.role);
+  const canWriteInternalNotes =
+    !clientMode && Boolean(access.userId) && (canUseAdminActions || access.isAssigned);
+  const canToggleChecklist =
+    !clientMode && Boolean(access.userId) && (canUseAdminActions || access.isAssigned);
   const canSeeAllJobTimes = isOwnerOrAdminRole(access.role);
 
   const beforeMedia = useMemo(
@@ -1557,6 +1785,11 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     [media],
   );
 
+  const documentMedia = useMemo(
+    () => media.filter((item) => isDocumentMedia(item)),
+    [media],
+  );
+
   const otherMedia = useMemo(
     () =>
       media.filter((item) => {
@@ -1570,7 +1803,8 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           !phase.includes('before') &&
           !phase.includes('vorher') &&
           !phase.includes('after') &&
-          !phase.includes('nachher')
+          !phase.includes('nachher') &&
+          !isDocumentMedia(item)
         );
       }),
     [media],
@@ -1601,13 +1835,17 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const isJobOnBreak = Boolean(getBreakStartedAt(activeTimeLog));
   const showCompleteButton = canCompleteJob(job, activeTimeLog);
   const heroState = getJobVisualState(job, activeTimeLog);
+  const checklistItems = useMemo(
+    () => normalizeChecklistItems(job?.service_requirements),
+    [job?.service_requirements],
+  );
 
   const allNotes = useMemo<NoteRow[]>(() => {
     if (!job) return [];
 
     const rows: NoteRow[] = [];
 
-    if (!clientMode && access.canEdit && job.internal_notes) {
+    if (!clientMode && job.internal_notes) {
       rows.push({
         key: 'internal',
         title: 'Interne Notizen',
@@ -1616,7 +1854,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       });
     }
 
-    if (!clientMode && access.canEdit && job.dispatcher_notes) {
+    if (!clientMode && job.dispatcher_notes) {
       rows.push({
         key: 'dispatcher',
         title: 'Dispo-Notizen',
@@ -1625,7 +1863,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       });
     }
 
-    if (!clientMode && access.canEdit && job.employee_notes) {
+    if (!clientMode && job.employee_notes) {
       rows.push({
         key: 'employee',
         title: 'Mitarbeiter-Notizen',
@@ -1658,7 +1896,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       });
     }
 
-    if (!clientMode && access.canEdit) {
+    if (!clientMode) {
       damageReports.forEach((damage, index) => {
         const note = damage.description || damage.notes;
 
@@ -1674,7 +1912,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     }
 
     return rows;
-  }, [access.canEdit, clientMode, damageReports, job, visibleTimeLogs]);
+  }, [clientMode, damageReports, job, visibleTimeLogs]);
 
   const visibleNotes = useMemo(() => {
     if (clientMode) return allNotes.filter((note) => note.visibility === 'client');
@@ -1749,6 +1987,10 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       employee_notes: source.employee_notes || '',
       client_notes: source.client_notes || '',
       internal_notes: source.internal_notes || '',
+      service_requirements_text: normalizeChecklistItems(source.service_requirements)
+        .map((item) => item.label)
+        .join('\n'),
+      report_required: Boolean(source.report_required),
     };
   }, []);
 
@@ -1878,7 +2120,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           throw new Error(`Database error: ${error.message}`);
         }
 
-        const loadedJob = data as JobDetail;
+        const loadedJob = await hydrateJobAssignments(data as JobDetail);
         setJob(loadedJob);
         setEditDraft(makeEditDraft(loadedJob));
 
@@ -1975,8 +2217,38 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     }
   }, [assignModalOpen, editMode, loadEmployees]);
 
-  const updateDraft = (field: keyof EditDraft, value: string) => {
+  const updateDraft = <K extends keyof EditDraft>(field: K, value: EditDraft[K]) => {
     setEditDraft((current) => (current ? { ...current, [field]: value } : current));
+  };
+
+  const updatePlannedDateField = (
+    field: 'planned_start' | 'planned_end',
+    value: string,
+  ) => {
+    setEditDraft((current) => {
+      if (!current) return current;
+
+      const next = { ...current, [field]: value };
+      const nextHours = hoursBetweenDateTimeLocal(next.planned_start, next.planned_end);
+
+      if (nextHours) next.estimated_hours = nextHours;
+
+      return next;
+    });
+  };
+
+  const updateEstimatedHours = (value: string) => {
+    setEditDraft((current) => {
+      if (!current) return current;
+
+      const nextEnd = addHoursToDateTimeLocal(current.planned_start, value);
+
+      return {
+        ...current,
+        estimated_hours: value,
+        planned_end: nextEnd || current.planned_end,
+      };
+    });
   };
 
   async function updateJobRecord(payload: JsonRecord) {
@@ -2039,6 +2311,11 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       employee_notes: cleanNullable(editDraft.employee_notes),
       client_notes: cleanNullable(editDraft.client_notes),
       internal_notes: cleanNullable(editDraft.internal_notes),
+      service_requirements: checklistFromText(
+        editDraft.service_requirements_text,
+        job.service_requirements,
+      ),
+      report_required: editDraft.report_required,
     };
 
     try {
@@ -2159,37 +2436,34 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     setActionMessage(null);
 
     try {
-      const { data: calendarEvents, error: calendarError } = await supabase
-        .from('opc_calendar_events')
-        .select('id')
-        .eq('job_id', job.job_id);
+      const storageFiles = media
+        .map((item) => ({
+          bucket: String(item.storage_bucket || ''),
+          path: getMediaPath(item),
+        }))
+        .filter((item) => item.bucket && item.path);
 
-      if (calendarError && !isIgnorableDeleteError(calendarError)) throw calendarError;
+      const filesByBucket = new Map<string, string[]>();
 
-      const calendarEventIds = Array.isArray(calendarEvents)
-        ? calendarEvents.map((event) => String((event as JsonRecord).id || '')).filter(Boolean)
-        : [];
+      storageFiles.forEach((item) => {
+        const current = filesByBucket.get(item.bucket) || [];
+        current.push(item.path);
+        filesByBucket.set(item.bucket, current);
+      });
 
-      if (calendarEventIds.length) {
+      for (const [bucket, paths] of filesByBucket) {
         try {
-          const { error } = await supabase
-            .from('opc_calendar_event_attendees')
-            .delete()
-            .in('event_id', calendarEventIds);
-          if (error && !isIgnorableDeleteError(error)) throw error;
-        } catch (error) {
-          if (!isIgnorableDeleteError(error)) throw error;
+          await supabase.storage.from(bucket).remove(paths);
+        } catch {
+          // Database deletion must still continue. Orphan cleanup can be repeated later.
         }
       }
 
-      await deleteFromTable('opc_calendar_events', 'job_id', job.job_id);
-      await deleteFromTable('opc_job_assignments', 'job_id', job.job_id);
-      await deleteFromTable('opc_job_time_logs', 'job_id', job.job_id);
-      await deleteFromTable('opc_job_media', 'job_id', job.job_id);
-      await deleteFromTable('opc_job_damage_reports', 'job_id', job.job_id);
-      await deleteFromTable('opc_job_reports', 'job_id', job.job_id);
-      await deleteFromTable('opc_reports', 'job_id', job.job_id);
-      await deleteServiceJobRow(job.job_id);
+      const { error: rpcError } = await supabase.rpc('opc_delete_service_job', {
+        p_job_id: job.job_id,
+      });
+
+      if (rpcError) throw rpcError;
 
       setActionMessage('Einsatz wurde gelöscht.');
       window.setTimeout(() => {
@@ -2304,7 +2578,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   };
 
   const handleInternalNote = async () => {
-    if (!job || !internalNoteDraft.trim()) return;
+    if (!job || !internalNoteDraft.trim() || !canWriteInternalNotes) return;
 
     setSaving(true);
     setActionMessage(null);
@@ -2319,12 +2593,16 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       minute: '2-digit',
     }).format(new Date());
 
-    const nextNotes = [job.internal_notes, `[${stamp}] ${author}: ${internalNoteDraft.trim()}`]
-      .filter(Boolean)
-      .join('\n\n');
+    const entry = `[${stamp}] ${author}: ${internalNoteDraft.trim()}`;
 
     try {
-      await updateJobRecord({ internal_notes: nextNotes });
+      const { error } = await supabase.rpc('opc_append_job_note', {
+        p_job_id: job.job_id,
+        p_body: entry,
+        p_visibility: 'internal',
+      });
+
+      if (error) throw error;
 
       setInternalNoteDraft('');
       await loadJob(false);
@@ -2353,12 +2631,16 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       minute: '2-digit',
     }).format(new Date());
 
-    const nextNotes = [job.client_notes, `[${stamp}] ${author}: ${clientNoteDraft.trim()}`]
-      .filter(Boolean)
-      .join('\n\n');
+    const entry = `[${stamp}] ${author}: ${clientNoteDraft.trim()}`;
 
     try {
-      await updateJobRecord({ client_notes: nextNotes });
+      const { error } = await supabase.rpc('opc_append_job_note', {
+        p_job_id: job.job_id,
+        p_body: entry,
+        p_visibility: 'client',
+      });
+
+      if (error) throw error;
 
       setClientNoteDraft('');
       await loadJob(false);
@@ -2391,13 +2673,41 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
   };
 
+  const handleDeleteManualTimeLog = async (log: JsonRecord) => {
+    if (!canUseAdminActions) return;
+
+    const logId = String(log.id || log.time_log_id || '');
+    if (!logId) {
+      setActionError('Dieser Zeiteintrag besitzt keine gültige ID.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Diesen Zeiteintrag wirklich löschen?\n\n${log.employee_name || 'Mitarbeiter'}\n${formatDate(log.started_at || log.created_at)}`,
+    );
+
+    if (!confirmed) return;
+
+    await runJobAction(`manual_time_delete_${logId}`, async () => {
+      const { error } = await supabase.rpc('opc_delete_job_time_log', {
+        p_time_log_id: logId,
+      });
+
+      if (error) throw error;
+
+      setManualTimeFormOpen(false);
+      setEditingTimeLogId(null);
+      setActionMessage('Zeiteintrag wurde gelöscht.');
+    });
+  };
+
   const handleManualTimeAssignmentChange = (assignmentId: string) => {
     const assignment = assignments.find((item) => String(item.id || item.assignment_id || '') === assignmentId) || null;
 
     setManualTimeDraft((current) => ({
       ...current,
       assignmentId,
-      employeeId: assignment ? String(assignment.employee_id || '') : current.employeeId,
+      employeeId: assignment ? String(getAssignmentEmployeeId(assignment) || '') : current.employeeId,
       employeeName: assignment ? String(assignment.employee_name || assignment.display_name || current.employeeName || '') : current.employeeName,
     }));
   };
@@ -2465,6 +2775,44 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       setEditingTimeLogId(null);
       setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
       setActionMessage(editingTimeLogId ? 'Zeit wurde aktualisiert.' : 'Zeit wurde manuell erfasst.');
+    });
+  };
+
+  const handleToggleChecklistItem = async (itemId: string) => {
+    if (!job || !canToggleChecklist) return;
+
+    const now = new Date().toISOString();
+    const nextItems = checklistItems.map((item) => {
+      if (item.id !== itemId) return item;
+
+      const completed = !item.completed;
+
+      return {
+        ...item,
+        completed,
+        completed_at: completed ? now : null,
+        completed_by: completed ? access.userId : null,
+      };
+    });
+
+    await runJobAction(`checklist_${itemId}`, async () => {
+      const { error } = await supabase.rpc('opc_update_job_checklist', {
+        p_job_id: job.job_id,
+        p_items: nextItems,
+      });
+
+      if (error) throw error;
+
+      setJob((current) =>
+        current
+          ? {
+              ...current,
+              service_requirements: nextItems,
+            }
+          : current,
+      );
+
+      setActionMessage('Checkliste wurde aktualisiert.');
     });
   };
 
@@ -2982,6 +3330,101 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     }
   };
 
+  const handleUploadDocuments = async (event: ChangeEvent<HTMLInputElement>) => {
+    if (!job || !canUseAdminActions) return;
+
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+
+    if (!files.length) return;
+
+    setUploadingDocuments(true);
+    setActionMessage(null);
+    setActionError(null);
+
+    const bucketName = 'opc-job-documents';
+    const authFolder = access.userId || 'unknown-user';
+    const uploader = access.staffId || access.userId;
+
+    try {
+      for (const file of files) {
+        if (file.size > 50 * 1024 * 1024) {
+          throw new Error(`${file.name}: Die Datei ist grösser als 50 MB.`);
+        }
+
+        const timestamp = Date.now();
+        const cleanedName = safeFileName(file.name);
+        const filePath = `${authFolder}/jobs/${job.job_id}/documents/${timestamp}-${cleanedName}`;
+
+        const upload = await supabase.storage.from(bucketName).upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type || undefined,
+        });
+
+        if (upload.error) throw upload.error;
+
+        await tryInsertOne(
+          'opc_job_media',
+          buildDocumentPayloadVariants({
+            jobId: job.job_id,
+            file,
+            bucketName,
+            filePath,
+            uploader,
+            uploadedByUserId: access.userId,
+          }),
+        );
+      }
+
+      await loadJob(false);
+      setActionMessage('Dokumente wurden hochgeladen.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Dokument-Upload fehlgeschlagen.';
+      setActionError(`Dokument-Upload fehlgeschlagen: ${message}`);
+    } finally {
+      setUploadingDocuments(false);
+    }
+  };
+
+  const handleOpenDocument = async (item: JsonRecord) => {
+    const directUrl = getMediaUrl(item);
+    const bucketName = String(item.storage_bucket || 'opc-job-documents');
+    const filePath = getMediaPath(item);
+
+    if (directUrl) {
+      window.open(directUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    if (!filePath) {
+      setActionError('Für dieses Dokument ist kein Speicherpfad hinterlegt.');
+      return;
+    }
+
+    const popup = window.open('about:blank', '_blank');
+
+    try {
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(filePath, 10 * 60);
+
+      if (error || !data?.signedUrl) {
+        throw error || new Error('Signierter Link konnte nicht erstellt werden.');
+      }
+
+      if (popup) {
+        popup.location.href = data.signedUrl;
+      } else {
+        window.location.href = data.signedUrl;
+      }
+    } catch (error) {
+      if (popup) popup.close();
+      const message = error instanceof Error ? error.message : 'Dokument konnte nicht geöffnet werden.';
+      setActionError(`Dokument konnte nicht geöffnet werden: ${message}`);
+    }
+  };
+
   const renderMediaList = (items: JsonArray, emptyText: string) => {
     if (!items.length) {
       return <div className="opc-empty-box">{emptyText}</div>;
@@ -3031,6 +3474,29 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
             </a>
           );
         })}
+      </div>
+    );
+  };
+
+  const renderChecklist = () => {
+    if (!checklistItems.length) {
+      return <div className="opc-empty-box">Keine Checkliste hinterlegt.</div>;
+    }
+
+    return (
+      <div className="opc-checklist-list">
+        {checklistItems.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={`opc-checklist-item ${item.completed ? 'is-complete' : ''}`}
+            disabled={!canToggleChecklist || Boolean(actionLoading)}
+            onClick={() => void handleToggleChecklistItem(item.id)}
+          >
+            <span className="opc-checklist-box">{item.completed ? '✓' : ''}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
       </div>
     );
   };
@@ -3351,9 +3817,18 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                     <div className="opc-time-row-actions">
                       <StatusBadge status={onBreak ? 'on_break' : isActive ? 'open' : log.status} />
                       {canUseAdminActions ? (
-                        <button type="button" className="opc-mini-action" onClick={() => handleEditManualTimeLog(log)}>
-                          Bearbeiten
-                        </button>
+                        <>
+                          <button type="button" className="opc-mini-action" onClick={() => handleEditManualTimeLog(log)}>
+                            Bearbeiten
+                          </button>
+                          <button
+                            type="button"
+                            className="opc-mini-action danger"
+                            onClick={() => void handleDeleteManualTimeLog(log)}
+                          >
+                            Löschen
+                          </button>
+                        </>
                       ) : null}
                     </div>
                   </div>
@@ -3385,9 +3860,22 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                     </div>
 
                     {canUseAdminActions ? (
-                      <button type="button" className="opc-mini-action opc-mini-action-mobile" onClick={() => handleEditManualTimeLog(log)}>
-                        Einzelzeit bearbeiten
-                      </button>
+                      <div className="opc-mobile-time-actions">
+                        <button
+                          type="button"
+                          className="opc-mini-action opc-mini-action-mobile"
+                          onClick={() => handleEditManualTimeLog(log)}
+                        >
+                          Einzelzeit bearbeiten
+                        </button>
+                        <button
+                          type="button"
+                          className="opc-mini-action opc-mini-action-mobile danger"
+                          onClick={() => void handleDeleteManualTimeLog(log)}
+                        >
+                          Einzelzeit löschen
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                 );
@@ -3454,6 +3942,58 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     </section>
   );
 
+  const renderDocumentsCard = () => (
+    <section className="opc-section-card" style={cardStyle}>
+      <SectionHeader
+        title="Dokumente & Leistungsverzeichnisse"
+        action={
+          canUseAdminActions ? (
+            <label className="opc-upload-btn">
+              {uploadingDocuments ? 'Lädt...' : 'Dokument hinzufügen'}
+              <input
+                type="file"
+                accept=".pdf,.xls,.xlsx,.csv,.doc,.docx,.txt,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                multiple
+                disabled={uploadingDocuments}
+                onChange={(event) => void handleUploadDocuments(event)}
+              />
+            </label>
+          ) : null
+        }
+      />
+
+      {documentMedia.length === 0 ? (
+        <div className="opc-empty-box">Keine Dokumente hinterlegt.</div>
+      ) : (
+        <div className="opc-document-list">
+          {documentMedia.map((item, index) => {
+            const name =
+              item.original_filename ||
+              item.file_name ||
+              getMediaPath(item).split('/').pop() ||
+              `Dokument ${index + 1}`;
+
+            return (
+              <button
+                type="button"
+                key={item.id || item.media_id || getMediaPath(item) || index}
+                className="opc-document-item"
+                onClick={() => void handleOpenDocument(item)}
+              >
+                <span className="opc-document-icon"><Paperclip size={17} /></span>
+                <span className="opc-document-copy">
+                  <strong>{String(name)}</strong>
+                  <span>{String(item.mime_type || 'Dokument')}</span>
+                </span>
+                <Download size={16} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+
   const renderNotesCard = () => (
     <section className="opc-section-card" style={cardStyle}>
       <SectionHeader
@@ -3492,6 +4032,106 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       )}
     </section>
   );
+
+  const renderNotesComposer = () => {
+    if (!canWriteInternalNotes && !canWriteClientNotes) return null;
+
+    return (
+      <section className="opc-section-card" style={cardStyle}>
+        <SectionHeader title="Notiz hinzufügen" />
+
+        <div className="opc-notes-stack">
+          {canWriteInternalNotes ? (
+            <>
+              <label className="opc-note-label">
+                Interne Team-Notiz
+                <textarea
+                  style={{ ...inputStyle(), minHeight: 84, resize: 'vertical' }}
+                  placeholder="Notiz für Mitarbeitende, Disposition und Administration."
+                  value={internalNoteDraft}
+                  onChange={(event) => setInternalNoteDraft(event.target.value)}
+                />
+              </label>
+
+              <button
+                type="button"
+                className="opc-btn opc-btn-light"
+                disabled={saving || !internalNoteDraft.trim()}
+                onClick={() => void handleInternalNote()}
+              >
+                Interne Notiz speichern
+              </button>
+            </>
+          ) : null}
+
+          {canWriteClientNotes ? (
+            <>
+              <label className="opc-note-label">
+                Externe Kunden-Notiz
+                <textarea
+                  style={{ ...inputStyle(), minHeight: 84, resize: 'vertical' }}
+                  placeholder="Notiz für Kundenbericht oder Kundenportal."
+                  value={clientNoteDraft}
+                  onChange={(event) => setClientNoteDraft(event.target.value)}
+                />
+              </label>
+
+              <button
+                type="button"
+                className="opc-btn opc-btn-light"
+                disabled={saving || !clientNoteDraft.trim()}
+                onClick={() => void handleClientNote()}
+              >
+                Kunden-Notiz speichern
+              </button>
+            </>
+          ) : null}
+        </div>
+      </section>
+    );
+  };
+
+  const renderUniversalJobData = () => {
+    if (!job) return null;
+
+    return (
+      <section className="opc-section-card" style={cardStyle}>
+        <SectionHeader title="Einsatzdaten" />
+
+        <div className="opc-employee-info-grid">
+          <MiniField label="Einsatzart" value={job.service_category || job.job_type} />
+          <MiniField label="Terminstart" value={formatDate(job.planned_start)} />
+          <MiniField label="Terminende" value={formatDate(job.planned_end)} />
+          <MiniField
+            label="Geschätzte Dauer"
+            value={job.estimated_hours ? `${job.estimated_hours} h` : null}
+          />
+          <MiniField label="Kunde" value={getDisplayName(job)} />
+          <MiniField
+            label="Kunden-E-Mail"
+            value={job.email ? <a className="opc-inline-link" href={`mailto:${job.email}`}>{job.email}</a> : null}
+          />
+          <MiniField
+            label="Kunden-Telefon"
+            value={(job.phone_e164 || job.phone_raw) ? (
+              <a className="opc-inline-link" href={`tel:${job.phone_e164 || job.phone_raw}`}>
+                {job.phone_e164 || job.phone_raw}
+              </a>
+            ) : null}
+          />
+          <MiniField label="Standort" value={job.site_name} />
+          <MiniField label="Adresse" value={joinAddress(job)} />
+          <MiniField label="Priorität" value={job.priority || 'normal'} />
+        </div>
+
+        {job.service_description ? (
+          <div className="opc-note-box opc-universal-description">
+            {job.service_description}
+          </div>
+        ) : null}
+      </section>
+    );
+  };
 
   const renderHero = (mode: 'admin' | 'employee') => {
     if (!job) return null;
@@ -3575,6 +4215,8 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         <div className="opc-time-module-block">{renderJobTimeActionCard()}</div>
 
         <div className="opc-employee-execution-grid">
+          {renderUniversalJobData()}
+
           <section className="opc-section-card" style={cardStyle}>
             <SectionHeader title="Kontakt & Standort" />
 
@@ -3602,13 +4244,21 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           <section className="opc-section-card" style={cardStyle}>
             <SectionHeader title="Checkliste & Hinweise" />
 
-            <div className="opc-note-box">
-              {renderRequirements(job.service_requirements) !== 'Keine Checkliste oder Hinweise hinterlegt.'
-                ? renderRequirements(job.service_requirements)
-                : job.dispatcher_notes || job.access_notes || job.cleaning_notes || 'Keine Checkliste oder Hinweise hinterlegt.'}
-            </div>
+            {renderChecklist()}
+
+            {job.dispatcher_notes || job.access_notes || job.cleaning_notes ? (
+              <div className="opc-note-box opc-checklist-hints">
+                {[job.dispatcher_notes, job.access_notes, job.cleaning_notes]
+                  .filter(Boolean)
+                  .join('\n\n')}
+              </div>
+            ) : null}
           </section>
 
+          {renderDocumentsCard()}
+          {renderNotesCard()}
+          {renderNotesComposer()}
+          {renderTimeEntriesCard()}
           {renderMediaCard()}
         </div>
 
@@ -3710,7 +4360,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                   type="datetime-local"
                   style={inputStyle()}
                   value={editDraft.planned_start}
-                  onChange={(event) => updateDraft('planned_start', event.target.value)}
+                  onChange={(event) => updatePlannedDateField('planned_start', event.target.value)}
                 />
               </label>
               <label>
@@ -3719,7 +4369,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                   type="datetime-local"
                   style={inputStyle()}
                   value={editDraft.planned_end}
-                  onChange={(event) => updateDraft('planned_end', event.target.value)}
+                  onChange={(event) => updatePlannedDateField('planned_end', event.target.value)}
                 />
               </label>
               <label>
@@ -3727,8 +4377,27 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                 <input
                   style={inputStyle()}
                   value={editDraft.estimated_hours}
-                  onChange={(event) => updateDraft('estimated_hours', event.target.value)}
+                  onChange={(event) => updateEstimatedHours(event.target.value)}
                 />
+              </label>
+              <label>
+                Finale Stunden
+                <input
+                  style={inputStyle()}
+                  value={editDraft.final_hours}
+                  onChange={(event) => updateDraft('final_hours', event.target.value)}
+                />
+              </label>
+              <label>
+                Bericht
+                <select
+                  style={inputStyle()}
+                  value={editDraft.report_required ? 'required' : 'optional'}
+                  onChange={(event) => updateDraft('report_required', event.target.value === 'required')}
+                >
+                  <option value="required">Erforderlich</option>
+                  <option value="optional">Optional</option>
+                </select>
               </label>
               <label>
                 Verrechenbarer Betrag
@@ -3736,6 +4405,28 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                   style={inputStyle()}
                   value={editDraft.billable_amount}
                   onChange={(event) => updateDraft('billable_amount', event.target.value)}
+                />
+              </label>
+            </div>
+
+            <div className="opc-form-grid opc-form-grid-notes">
+              <label>
+                Beschreibung / Beschäftigung
+                <textarea
+                  style={{ ...inputStyle(), minHeight: 110, resize: 'vertical' }}
+                  value={editDraft.service_description}
+                  onChange={(event) => updateDraft('service_description', event.target.value)}
+                  placeholder="Was muss bei diesem Einsatz erledigt werden?"
+                />
+              </label>
+
+              <label>
+                Checkliste – ein Punkt pro Zeile
+                <textarea
+                  style={{ ...inputStyle(), minHeight: 110, resize: 'vertical' }}
+                  value={editDraft.service_requirements_text}
+                  onChange={(event) => updateDraft('service_requirements_text', event.target.value)}
+                  placeholder={'Küche reinigen\nSanitäranlagen reinigen\nBöden saugen und nass aufnehmen'}
                 />
               </label>
             </div>
@@ -3841,9 +4532,13 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
               <div className="opc-two-col">
                 <div>
                   <h3>Einsatzhinweise</h3>
-                  <div className="opc-note-box">
-                    {job.access_notes || job.cleaning_notes || renderRequirements(job.service_requirements)}
-                  </div>
+                  {renderChecklist()}
+
+                  {job.access_notes || job.cleaning_notes ? (
+                    <div className="opc-note-box opc-checklist-hints">
+                      {[job.access_notes, job.cleaning_notes].filter(Boolean).join('\n\n')}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -3863,61 +4558,14 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
               </div>
             </section>
 
+            {renderDocumentsCard()}
             {renderMediaCard()}
           </div>
 
           <aside className="opc-right-col">
             {renderAssignedEmployees()}
 
-            {access.canEdit ? (
-              <section className="opc-section-card" style={cardStyle}>
-                <SectionHeader title="Notizen erfassen" />
-
-                <div className="opc-notes-stack">
-                  <label className="opc-note-label">
-                    Interne Notiz
-                    <textarea
-                      style={{ ...inputStyle(), minHeight: 84, resize: 'vertical' }}
-                      placeholder="Interne Notiz zum Einsatz. Für Team/Admin sichtbar."
-                      value={internalNoteDraft}
-                      onChange={(event) => setInternalNoteDraft(event.target.value)}
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    className="opc-btn opc-btn-light"
-                    disabled={saving || !internalNoteDraft.trim()}
-                    onClick={handleInternalNote}
-                  >
-                    Interne Notiz speichern
-                  </button>
-
-                  {canWriteClientNotes ? (
-                    <>
-                      <label className="opc-note-label">
-                        Externe Kunden-Notiz
-                        <textarea
-                          style={{ ...inputStyle(), minHeight: 84, resize: 'vertical' }}
-                          placeholder="Notiz für Kundenbericht / Kundenportal."
-                          value={clientNoteDraft}
-                          onChange={(event) => setClientNoteDraft(event.target.value)}
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        className="opc-btn opc-btn-light"
-                        disabled={saving || !clientNoteDraft.trim()}
-                        onClick={handleClientNote}
-                      >
-                        Kunden-Notiz speichern
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              </section>
-            ) : null}
+            {renderNotesComposer()}
 
             {renderTimeEntriesCard()}
 
@@ -5237,6 +5885,136 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           gap: 10px;
           margin-top: 12px;
         }
+        .opc-checklist-list {
+          display: grid;
+          gap: 8px;
+        }
+
+        .opc-checklist-item {
+          width: 100%;
+          min-height: 44px;
+          display: grid;
+          grid-template-columns: 28px minmax(0, 1fr);
+          gap: 10px;
+          align-items: center;
+          padding: 9px 11px;
+          border: 1px solid #E5E7EB;
+          border-radius: 13px;
+          background: #FFFFFF;
+          color: #111827;
+          text-align: left;
+          font-family: inherit;
+          font-size: 13px;
+          font-weight: 720;
+          cursor: pointer;
+        }
+
+        .opc-checklist-item:disabled {
+          cursor: default;
+          opacity: 1;
+        }
+
+        .opc-checklist-item.is-complete {
+          background: #F9FAFB;
+          color: #6B7280;
+          text-decoration: line-through;
+        }
+
+        .opc-checklist-box {
+          width: 24px;
+          height: 24px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid #D1D5DB;
+          border-radius: 8px;
+          background: #FFFFFF;
+          color: #111827;
+          font-size: 14px;
+          font-weight: 900;
+        }
+
+        .opc-checklist-item.is-complete .opc-checklist-box {
+          background: #0F1115;
+          border-color: #0F1115;
+          color: #FFFFFF;
+        }
+
+        .opc-checklist-hints,
+        .opc-universal-description {
+          margin-top: 10px;
+        }
+
+        .opc-document-list {
+          display: grid;
+          gap: 9px;
+        }
+
+        .opc-document-item {
+          width: 100%;
+          min-height: 58px;
+          display: grid;
+          grid-template-columns: 38px minmax(0, 1fr) 24px;
+          gap: 10px;
+          align-items: center;
+          padding: 10px;
+          border: 1px solid #F3F4F6;
+          border-radius: 14px;
+          background: #FAFAFA;
+          color: #111827;
+          text-align: left;
+          cursor: pointer;
+          font-family: inherit;
+        }
+
+        .opc-document-icon {
+          width: 38px;
+          height: 38px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px solid #E5E7EB;
+          border-radius: 12px;
+          background: #FFFFFF;
+        }
+
+        .opc-document-copy {
+          display: grid;
+          gap: 3px;
+          min-width: 0;
+        }
+
+        .opc-document-copy strong,
+        .opc-document-copy span {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .opc-document-copy strong {
+          font-size: 13px;
+          font-weight: 820;
+        }
+
+        .opc-document-copy span {
+          font-size: 11px;
+          font-weight: 650;
+          color: #6B7280;
+        }
+
+        .opc-mini-action.danger {
+          color: #B91C1C;
+          border-color: #FECACA;
+          background: #FEF2F2;
+        }
+
+        .opc-mobile-time-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 10px;
+        }
+
         @media (max-width: 1180px) {
           .opc-main-grid {
             grid-template-columns: minmax(0, 1fr);
@@ -5265,6 +6043,10 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         }
 
         @media (max-width: 740px) {
+          .opc-mobile-time-actions {
+            grid-template-columns: 1fr;
+          }
+
           .opc-manual-time-grid,
           .opc-manual-time-actions {
             grid-template-columns: 1fr;
