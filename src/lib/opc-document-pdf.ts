@@ -44,10 +44,10 @@ const LOGO_URL = 'https://cdn.prod.website-files.com/6944470386300e196e5fc347/69
 
 export const OPC_COMPANY = {
   name: 'Orange Pro Clean GmbH',
-  tagline: 'Professionelle Reinigungsdienstleistungen',
-  addressLine: 'Hagmattstrasse 7a',
-  postcode: '4123',
-  cityName: 'Allschwil',
+  tagline: 'Professionell. Präzise. Persönlich.',
+  addressLine: 'Grosspeteranlage 29',
+  postcode: '4052',
+  cityName: 'Basel',
   city: 'Basel',
   country: 'Schweiz',
   email: 'info@orangeproclean.ch',
@@ -59,10 +59,10 @@ export const OPC_COMPANY = {
   bic: 'MIGRCHZZ',
   iban: 'CH58 0840 1000 0791 9783 3',
   vat: 'CHE-259.534.618',
-  contactPerson: 'Miriam Tschudin',
+  contactPerson: '',
 };
 
-export const OPC_DEFAULT_CLOSING = `Falls Sie Fragen haben, melden Sie sich gerne bei uns.\n\nFreundliche Grüsse\n${OPC_COMPANY.contactPerson}\n${OPC_COMPANY.name}`;
+export const OPC_DEFAULT_CLOSING = `Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\nFreundliche Grüsse\n${OPC_COMPANY.name}`;
 
 function clean(value: unknown) {
   return String(value || '').trim();
@@ -293,17 +293,16 @@ function drawItemsAndTotals(doc: jsPDF, y: number, items: OPCDocumentItem[], tot
   y = ensureSpace(doc, y, 44);
   autoTable(doc, {
     startY: y,
-    head: [['Pos.', 'Beschreibung', 'Menge', 'Einzelpreis', 'Preis in CHF']],
+    head: [['Pos.', 'Beschreibung', 'Menge', 'Preis in CHF']],
     body: items.map((item, index) => [
       String(index + 1),
       [clean(item.title) || 'Position', clean(item.description)].filter(Boolean).join('\n'),
-      `${formatPlainMoney(item.quantity || 1)} ${item.unit || 'pauschal'}`,
-      formatMoney(item.unit_price_chf || 0),
-      formatMoney(item.total_chf || 0),
+      `${clean(item.quantity || 1)} ${item.unit || ''}`.trim(),
+      formatMoney(item.total_chf ?? item.subtotal_chf ?? item.unit_price_chf ?? 0),
     ]),
     styles: { font: 'helvetica', fontSize: 8.5, cellPadding: 2.3, valign: 'top', lineColor: [0, 0, 0], lineWidth: 0, textColor: [18, 18, 18] },
     headStyles: { fillColor: [255, 255, 255], textColor: [18, 18, 18], fontStyle: 'normal', lineColor: [0, 0, 0], lineWidth: { bottom: 0.25 } as any },
-    columnStyles: { 0: { cellWidth: 11 }, 1: { cellWidth: 86 }, 2: { cellWidth: 27, halign: 'right' }, 3: { cellWidth: 31, halign: 'right' }, 4: { cellWidth: 31, halign: 'right' } },
+    columnStyles: { 0: { cellWidth: 11 }, 1: { cellWidth: 111 }, 2: { cellWidth: 28, halign: 'right' }, 3: { cellWidth: 36, halign: 'right' } },
     margin: { left: 22, right: 22, bottom: 42 },
   });
 
@@ -557,13 +556,17 @@ export async function generateInvoicePdfDocument(input: OPCInvoicePdfInput) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const logoDataUrl = await loadLogoDataUrl();
   const metadata = invoice?.metadata && typeof invoice.metadata === 'object' ? invoice.metadata : {};
-  const dateLine = `${OPC_COMPANY.city}, ${isoDate(invoice.issue_date)} · zahlbar bis ${isoDate(invoice.due_date)}`;
+  const dateLine = `${OPC_COMPANY.city}, ${isoDate(invoice.issue_date)}`;
 
   let y = drawHeader(doc, { title: 'Rechnung', number: String(invoice.invoice_number || ''), dateLine, clientSnapshot: invoice.client_snapshot, siteSnapshot: invoice.site_snapshot, fallbackClientName: invoice.title, logoDataUrl });
   const scope = buildScopeText(metadata.invoice_scope_text || metadata.source_quote_scope_text, metadata.source_quote_service_description_text, true);
   y = drawIntroAndScope(doc, y, clean(invoice.intro_text) || 'Danke für Ihr Vertrauen. Ihre Rechnung setzt sich wie folgt zusammen:', scope);
   y = drawItemsAndTotals(doc, y, items, totals, 'invoice');
-  drawClosing(doc, y, clean(metadata.customer_greeting) || OPC_DEFAULT_CLOSING);
+  const invoiceClosing = [
+    clean(invoice.payment_terms) || `Bitte bezahlen Sie den Rechnungsbetrag bis zum ${isoDate(invoice.due_date)}.`,
+    clean(metadata.customer_greeting) || OPC_DEFAULT_CLOSING,
+  ].filter(Boolean).join('\n\n');
+  drawClosing(doc, y, invoiceClosing);
   addFooterToDocumentPages(doc);
 
   const qrInfo = buildQrBillData(invoice, totals);

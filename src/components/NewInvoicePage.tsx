@@ -172,7 +172,7 @@ export default function NewInvoicePage() {
     invoiceType: 'standard',
     status: 'draft',
     issueDate: todayInput(),
-    dueDate: addDays(todayInput(), 14),
+    dueDate: addDays(todayInput(), 10),
     itemTitle: 'Neue Position',
     description: '',
     quantity: '1',

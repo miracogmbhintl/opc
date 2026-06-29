@@ -275,6 +275,12 @@ function normaliseClient(row: any): OpcClientDetail {
     row.primary_site_city || row.city
   );
 
+  const resolvedPhone = getBestPhoneValue(
+    row.billing_phone_e164,
+    row.phone_e164,
+    row.phone_raw
+  );
+
   return {
     id: row.client_id || row.id,
     contact_id: row.contact_id || null,
@@ -282,14 +288,14 @@ function normaliseClient(row: any): OpcClientDetail {
     client_type: row.client_type || 'unknown',
     billing_name: row.billing_name || row.company_name || 'Unbekannt',
     billing_email: row.billing_email || row.email || '',
-    billing_phone_e164: row.billing_phone_e164 || row.phone_e164 || row.phone_raw || '',
+    billing_phone_e164: resolvedPhone,
     billing_address: row.billing_address || row.primary_site_address || row.address_text || '',
     internal_notes: row.internal_notes || '',
     company_name: row.company_name || row.billing_name || 'Unbekannt',
     full_name: row.full_name || row.contact_person || 'Unbekannt',
     email: row.email || row.billing_email || '',
-    phone_raw: row.phone_raw || row.billing_phone_e164 || '',
-    phone_e164: row.phone_e164 || row.billing_phone_e164 || '',
+    phone_raw: resolvedPhone,
+    phone_e164: resolvedPhone,
     lifecycle_stage: row.lifecycle_stage || 'client',
     primary_site_id: row.primary_site_id || row.client_site_id || null,
     primary_site_name: row.primary_site_name || row.site_name || row.company_name || row.billing_name || '',
@@ -310,38 +316,36 @@ function mergeClientFreshFields(
   freshClient: OpcClientDetail,
   fallbackClient?: Partial<OpcClientDetail> | null
 ): OpcClientDetail {
-  if (!fallbackClient) return freshClient;
+  const resolvedPhone = getBestPhoneValue(
+    fallbackClient?.billing_phone_e164,
+    fallbackClient?.phone_e164,
+    fallbackClient?.phone_raw,
+    freshClient.billing_phone_e164,
+    freshClient.phone_e164,
+    freshClient.phone_raw
+  );
+
+  const resolvedBillingEmail =
+    fallbackClient?.billing_email ||
+    freshClient.billing_email ||
+    fallbackClient?.email ||
+    freshClient.email ||
+    '';
+
+  const resolvedContactEmail =
+    fallbackClient?.email ||
+    freshClient.email ||
+    fallbackClient?.billing_email ||
+    freshClient.billing_email ||
+    '';
 
   return {
     ...freshClient,
-    billing_phone_e164:
-      freshClient.billing_phone_e164 ||
-      fallbackClient.billing_phone_e164 ||
-      fallbackClient.phone_e164 ||
-      fallbackClient.phone_raw ||
-      '',
-    phone_raw:
-      freshClient.phone_raw ||
-      fallbackClient.phone_raw ||
-      fallbackClient.phone_e164 ||
-      fallbackClient.billing_phone_e164 ||
-      '',
-    phone_e164:
-      freshClient.phone_e164 ||
-      fallbackClient.phone_e164 ||
-      fallbackClient.phone_raw ||
-      fallbackClient.billing_phone_e164 ||
-      '',
-    billing_email:
-      freshClient.billing_email ||
-      fallbackClient.billing_email ||
-      fallbackClient.email ||
-      '',
-    email:
-      freshClient.email ||
-      fallbackClient.email ||
-      fallbackClient.billing_email ||
-      '',
+    billing_phone_e164: resolvedPhone,
+    phone_raw: resolvedPhone,
+    phone_e164: resolvedPhone,
+    billing_email: resolvedBillingEmail,
+    email: resolvedContactEmail,
   };
 }
 
@@ -374,9 +378,9 @@ function getBestClientPhone(client?: Partial<OpcClientDetail> | null) {
   if (!client) return '';
 
   return getBestPhoneValue(
+    client.billing_phone_e164,
     client.phone_e164,
-    client.phone_raw,
-    client.billing_phone_e164
+    client.phone_raw
   );
 }
 
@@ -388,6 +392,40 @@ function shouldReplacePhone(currentValue?: string | null, nextValue?: string | n
   if (!currentDigits) return true;
 
   return nextDigits.length >= currentDigits.length;
+}
+
+function buildCanonicalClientState(
+  baseClient: OpcClientDetail,
+  nextClient?: Partial<OpcClientDetail> | null
+): OpcClientDetail {
+  const resolvedPhone = getBestPhoneValue(
+    nextClient?.billing_phone_e164,
+    nextClient?.phone_e164,
+    nextClient?.phone_raw,
+    baseClient.billing_phone_e164,
+    baseClient.phone_e164,
+    baseClient.phone_raw
+  );
+
+  return {
+    ...baseClient,
+    ...(nextClient || {}),
+    billing_phone_e164: resolvedPhone,
+    phone_raw: resolvedPhone,
+    phone_e164: resolvedPhone,
+    billing_email:
+      nextClient?.billing_email ||
+      nextClient?.email ||
+      baseClient.billing_email ||
+      baseClient.email ||
+      '',
+    email:
+      nextClient?.email ||
+      nextClient?.billing_email ||
+      baseClient.email ||
+      baseClient.billing_email ||
+      '',
+  };
 }
 
 function getInitials(name?: string) {
@@ -735,47 +773,23 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         throw new Error(result?.error || 'Änderungen konnten nicht gespeichert werden.');
       }
 
-      const optimisticClient: OpcClientDetail = {
-        ...client,
+      const optimisticClient = buildCanonicalClientState(client, {
         ...editedClient,
-        billing_phone_e164:
-          editedClient.billing_phone_e164 ||
-          editedClient.phone_e164 ||
-          editedClient.phone_raw ||
-          client.billing_phone_e164 ||
-          '',
-        phone_raw:
-          editedClient.phone_raw ||
-          editedClient.phone_e164 ||
-          editedClient.billing_phone_e164 ||
-          client.phone_raw ||
-          '',
-        phone_e164:
-          editedClient.phone_e164 ||
-          editedClient.phone_raw ||
-          editedClient.billing_phone_e164 ||
-          client.phone_e164 ||
-          '',
-        billing_email:
-          editedClient.billing_email ||
-          editedClient.email ||
-          client.billing_email ||
-          '',
-        email:
-          editedClient.email ||
-          editedClient.billing_email ||
-          client.email ||
-          '',
         updated_at: new Date().toISOString(),
-      };
+      });
 
-      setClient(optimisticClient);
-      setEditedClient(optimisticClient);
+      const savedClient = result?.client
+        ? buildCanonicalClientState(optimisticClient, normaliseClient(result.client))
+        : optimisticClient;
+
+      setClient(savedClient);
+      setEditedClient(savedClient);
       invalidateClientListCache();
 
       await Promise.all([
-        loadClientData(resolvedClientId, optimisticClient),
         loadClientRelatedSections(resolvedClientId),
+        loadClientJobs(resolvedClientId),
+        loadClientUser(resolvedClientId),
       ]);
 
       setEditMode(false);
@@ -955,36 +969,39 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         [key]: value,
       };
 
-      if (key === 'billing_phone_e164') {
-        const nextBillingPhone = String(value || '').trim();
+      if (key === 'billing_phone_e164' || key === 'phone_raw' || key === 'phone_e164') {
+        const nextPhone = String(value || '').trim();
+        next.billing_phone_e164 = nextPhone;
+        next.phone_raw = nextPhone;
+        next.phone_e164 = nextPhone;
+      }
 
-        if (shouldReplacePhone(prev.phone_raw, nextBillingPhone)) {
-          next.phone_raw = nextBillingPhone;
-        }
-
-        if (shouldReplacePhone(prev.phone_e164, nextBillingPhone)) {
-          next.phone_e164 = nextBillingPhone;
+      if (key === 'billing_email') {
+        const nextEmail = String(value || '').trim();
+        if (!prev.email || prev.email === prev.billing_email) {
+          next.email = nextEmail;
         }
       }
 
-      if (key === 'phone_raw' || key === 'phone_e164') {
-        const nextContactPhone = String(value || '').trim();
-
-        if (shouldReplacePhone(prev.billing_phone_e164, nextContactPhone)) {
-          next.billing_phone_e164 = nextContactPhone;
-        }
-
-        if (key === 'phone_raw' && shouldReplacePhone(prev.phone_e164, nextContactPhone)) {
-          next.phone_e164 = nextContactPhone;
-        }
-
-        if (key === 'phone_e164' && shouldReplacePhone(prev.phone_raw, nextContactPhone)) {
-          next.phone_raw = nextContactPhone;
+      if (key === 'email') {
+        const nextEmail = String(value || '').trim();
+        if (!prev.billing_email || prev.billing_email === prev.email) {
+          next.billing_email = nextEmail;
         }
       }
 
       return next;
     });
+  }
+
+  function getEditedFieldValue(field: keyof OpcClientDetail, fallbackValue: string | number | null | undefined) {
+    if (!editedClient) return '';
+
+    if (field === 'billing_phone_e164' || field === 'phone_raw' || field === 'phone_e164') {
+      return getBestClientPhone(editedClient);
+    }
+
+    return String(editedClient[field] ?? fallbackValue ?? '');
   }
 
   function renderField(
@@ -1006,14 +1023,14 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         {editMode && field && !options?.disabled ? (
           inputType === 'textarea' ? (
             <textarea
-              value={String(editedClient?.[field] || '')}
+              value={getEditedFieldValue(field, value)}
               onChange={(event) => updateEditedClient(field, event.target.value as any)}
               rows={4}
               style={{ ...inputStyle, resize: 'vertical', minHeight: '96px', paddingTop: '12px' }}
             />
           ) : inputType === 'select' ? (
             <select
-              value={String(editedClient?.[field] || '')}
+              value={getEditedFieldValue(field, value)}
               onChange={(event) => updateEditedClient(field, event.target.value as any)}
               style={inputStyle}
             >
@@ -1026,7 +1043,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
           ) : (
             <input
               type={inputType}
-              value={String(editedClient?.[field] || '')}
+              value={getEditedFieldValue(field, value)}
               onChange={(event) => updateEditedClient(field, event.target.value as any)}
               style={inputStyle}
             />
@@ -1121,9 +1138,9 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
             </div>
           </div>
 
-          {(displayClient.phone_e164 || displayClient.phone_raw || displayClient.billing_phone_e164) && (
+          {getBestClientPhone(displayClient) && (
             <a
-              href={`tel:${displayClient.phone_e164 || displayClient.phone_raw || displayClient.billing_phone_e164}`}
+              href={`tel:${getBestClientPhone(displayClient)}`}
               style={phoneButtonStyle}
               aria-label="Kunden anrufen"
               title="Kunden anrufen"
@@ -1238,7 +1255,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
 
           <div style={fieldStackStyle}>
             {renderField('Rechnungs-E-Mail', displayClient.billing_email, 'billing_email', { type: 'email' })}
-            {renderField('Rechnungstelefon', displayClient.billing_phone_e164, 'billing_phone_e164', { type: 'tel' })}
+            {renderField('Rechnungstelefon', getBestClientPhone(displayClient), 'billing_phone_e164', { type: 'tel' })}
             {renderField('Rechnungsadresse', displayClient.billing_address, 'billing_address')}
             {renderField('Interne Notizen', displayClient.internal_notes, 'internal_notes', { type: 'textarea' })}
           </div>

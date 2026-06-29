@@ -19,6 +19,8 @@ type InspectionStatus = 'draft' | 'scheduled' | 'in_progress' | 'completed' | 'c
 
 type InspectionForm = {
   id?: string;
+  inspection_number: string;
+  metadata: Record<string, any>;
   inquiry_id: string | null;
   client_id: string;
   contact_id: string | null;
@@ -61,7 +63,11 @@ type SiteInspectionDetailPageProps = {
   inspectionId: string;
 };
 
+const DOCUMENT_CORRECTION_MODE = String(import.meta.env.PUBLIC_OPC_DOCUMENT_CORRECTION_MODE || '').toLowerCase() === 'true';
+
 const emptyForm: InspectionForm = {
+  inspection_number: '',
+  metadata: {},
   inquiry_id: null,
   client_id: '',
   contact_id: null,
@@ -278,6 +284,8 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
       const nextForm: InspectionForm = {
         id: data.id,
+        inspection_number: data.inspection_number || '',
+        metadata: data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata) ? data.metadata : {},
         inquiry_id: data.inquiry_id || null,
         client_id: data.client_id,
         contact_id: data.contact_id || null,
@@ -410,6 +418,16 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
     setForm((previous) => ({ ...previous, [key]: value }));
   }
 
+  function updateInspectionMetadata(key: string, value: any) {
+    setForm((previous) => ({
+      ...previous,
+      metadata: {
+        ...(previous.metadata || {}),
+        [key]: value,
+      },
+    }));
+  }
+
   async function saveInspection(nextStatus?: InspectionStatus) {
     setSaving(true);
     setErrorMessage('');
@@ -420,7 +438,22 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
       if (!form.client_id) throw new Error('Kunde fehlt.');
 
       const status = nextStatus || form.status;
+      const correctedInspectionNumber = clean(form.inspection_number);
+
+      if (DOCUMENT_CORRECTION_MODE && form.id && correctedInspectionNumber) {
+        const { data: duplicate, error: duplicateError } = await supabase
+          .from('opc_site_inspections')
+          .select('id, inspection_number')
+          .eq('inspection_number', correctedInspectionNumber)
+          .neq('id', form.id)
+          .limit(1)
+          .maybeSingle();
+        if (duplicateError) throw duplicateError;
+        if (duplicate) throw new Error(`Die Besichtigungsnummer ${correctedInspectionNumber} wird bereits verwendet.`);
+      }
+
       const payload = {
+        ...(DOCUMENT_CORRECTION_MODE && correctedInspectionNumber ? { inspection_number: correctedInspectionNumber } : {}),
         inquiry_id: form.inquiry_id,
         client_id: form.client_id,
         contact_id: form.contact_id,
@@ -449,6 +482,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         scheduled_at: dateTimeLocalToIso(form.scheduled_at),
         completed_at: status === 'completed' && form.status !== 'completed' ? new Date().toISOString() : undefined,
         metadata: {
+          ...(form.metadata || {}),
           source: isNew ? 'manual_from_client' : 'inspection_detail_page',
           manual_inspection_address: !site && hasManualAddress(manualSiteAddress),
         },
@@ -473,7 +507,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
       if (!savedId) throw new Error('Besichtigung wurde gespeichert, aber keine ID wurde zurückgegeben.');
 
-      setForm((previous) => ({ ...previous, id: savedId, status }));
+      setForm((previous) => ({ ...previous, id: savedId, status, inspection_number: correctedInspectionNumber || previous.inspection_number }));
       setSuccessMessage('Besichtigung wurde gespeichert.');
 
       if (isNew) {
@@ -765,6 +799,22 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
         {successMessage && <div style={successStyle}><Check size={16} />{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
+
+        {DOCUMENT_CORRECTION_MODE && !isNew && (
+          <section style={{ marginBottom: 22 }}>
+            <OPCListCard>
+              <CardHeader title="Temporärer Dokument-Korrekturmodus" />
+              <p style={{ margin: '0 0 16px', color: OPC_BRAND.muted, fontSize: 13 }}>
+                Hier können bestehende Besichtigungsnummern und die vorgesehenen Dokumentangaben geordnet werden.
+              </p>
+              <div className="opc-inspection-row three">
+                <Field label="Besichtigungsnummer"><input value={form.inspection_number} onChange={(e) => updateField('inspection_number', e.target.value)} style={inputStyle} /></Field>
+                <Field label="Dokumenttitel"><input value={form.metadata?.document_title || ''} onChange={(e) => updateInspectionMetadata('document_title', e.target.value)} style={inputStyle} placeholder="Besichtigungsprotokoll" /></Field>
+                <Field label="PDF-Dateiname"><input value={form.metadata?.document_filename || ''} onChange={(e) => updateInspectionMetadata('document_filename', e.target.value)} style={inputStyle} placeholder={`${form.inspection_number || 'BS-00000'}_Besichtigung.pdf`} /></Field>
+              </div>
+            </OPCListCard>
+          </section>
+        )}
 
         <div style={gridStyle} className="opc-inspection-grid">
           <OPCListCard>

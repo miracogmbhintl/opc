@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { sendDocumentEmail } from '../lib/opc-document-email';
 import { buildDocumentEmailHtml, downloadPdf, generateInvoicePdfDocument, pdfToBase64, OPC_DEFAULT_CLOSING } from '../lib/opc-document-pdf';
-import { buildInvoiceHtml, downloadBase64Pdf, renderHtmlToPdfBase64 } from '../lib/opc-document-html';
+import { buildFirstReminderHtml, buildInvoiceHtml, buildPaymentReminderHtml, downloadBase64Pdf, renderHtmlToPdfBase64 } from '../lib/opc-document-html';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import {
   OPCPageShell,
@@ -23,6 +23,8 @@ type InvoiceItem = Record<string, any>;
 type InvoiceDetailPageProps = {
   invoiceId: string;
 };
+
+const DOCUMENT_CORRECTION_MODE = String(import.meta.env.PUBLIC_OPC_DOCUMENT_CORRECTION_MODE || '').toLowerCase() === 'true';
 
 function clean(value: unknown) {
   return String(value || '').trim();
@@ -81,9 +83,34 @@ function getGreeting(invoice?: InvoiceRow | null) {
   return clean(metadata.customer_greeting) || OPC_DEFAULT_CLOSING;
 }
 
+function normalizePdfFileName(value: unknown, fallback: string) {
+  const source = clean(value) || fallback;
+  const safe = source.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+  return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
+}
+
 function buildInvoiceFileName(invoice: InvoiceRow) {
   const number = clean(invoice.invoice_number) || 'Rechnung';
-  return `${number}_Rechnung.pdf`.replace(/[\\/:*?"<>|]+/g, '-');
+  return normalizePdfFileName(getMetadata(invoice).invoice_filename, `${number}_Rechnung.pdf`);
+}
+
+function buildEscalationFileName(invoice: InvoiceRow, label: string) {
+  const number = clean(invoice.invoice_number) || 'Rechnung';
+  const metadata = getMetadata(invoice);
+  const isPaymentReminder = label === 'Zahlungserinnerung';
+  const override = isPaymentReminder
+    ? metadata.payment_reminder_filename
+    : metadata.first_reminder_filename;
+  const documentNumber = isPaymentReminder
+    ? clean(metadata.payment_reminder_number) || number
+    : clean(metadata.first_reminder_number) || number;
+  return normalizePdfFileName(override, `${documentNumber}_${label}.pdf`);
+}
+
+function addCalendarDays(value: string, days: number) {
+  const date = new Date(`${value.slice(0, 10)}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps) {
@@ -234,7 +261,23 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
     try {
       const status = nextStatus || invoice.status || 'draft';
+      const correctedInvoiceNumber = clean(invoice.invoice_number);
+
+      if (DOCUMENT_CORRECTION_MODE) {
+        if (!correctedInvoiceNumber) throw new Error('Die Rechnungsnummer darf im Korrekturmodus nicht leer sein.');
+        const { data: duplicate, error: duplicateError } = await supabase
+          .from('opc_invoices')
+          .select('id, invoice_number')
+          .eq('invoice_number', correctedInvoiceNumber)
+          .neq('id', invoice.id)
+          .limit(1)
+          .maybeSingle();
+        if (duplicateError) throw duplicateError;
+        if (duplicate) throw new Error(`Die Rechnungsnummer ${correctedInvoiceNumber} wird bereits verwendet.`);
+      }
+
       const invoicePayload = {
+        ...(DOCUMENT_CORRECTION_MODE ? { invoice_number: correctedInvoiceNumber } : {}),
         status,
         invoice_type: invoice.invoice_type || 'standard',
         title: clean(invoice.title) || 'Rechnung',
@@ -415,6 +458,54 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
     setSuccessMessage('PDF wurde erstellt.');
   }
 
+  async function handleDownloadPaymentReminder() {
+    try {
+      await saveInvoice(undefined, { silent: true });
+      const input = buildInvoicePdfInput();
+      if (!input) return;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const filename = buildEscalationFileName(invoice!, 'Zahlungserinnerung');
+      const html = buildPaymentReminderHtml(input, {
+        documentDate: today,
+        newDueDate: addCalendarDays(today, 7),
+      });
+      const rendered = await renderHtmlToPdfBase64(html, filename);
+      if (!rendered?.base64) {
+        throw new Error('Für Zahlungserinnerungen ist der HTML-PDF-Renderer erforderlich.');
+      }
+      downloadBase64Pdf(rendered.base64, filename);
+      setSuccessMessage('Zahlungserinnerung wurde erstellt.');
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Zahlungserinnerung konnte nicht erstellt werden.');
+    }
+  }
+
+  async function handleDownloadFirstReminder() {
+    try {
+      await saveInvoice(undefined, { silent: true });
+      const input = buildInvoicePdfInput();
+      if (!input) return;
+
+      const today = new Date().toISOString().slice(0, 10);
+      const filename = buildEscalationFileName(invoice!, '1-Mahnung');
+      const html = buildFirstReminderHtml(input, {
+        documentDate: today,
+        newDueDate: addCalendarDays(today, 7),
+        reminderFee: 0,
+        showEnforcementInformation: true,
+      });
+      const rendered = await renderHtmlToPdfBase64(html, filename);
+      if (!rendered?.base64) {
+        throw new Error('Für Mahnungen ist der HTML-PDF-Renderer erforderlich.');
+      }
+      downloadBase64Pdf(rendered.base64, filename);
+      setSuccessMessage('1. Mahnung wurde erstellt.');
+    } catch (error: any) {
+      setErrorMessage(error?.message || '1. Mahnung konnte nicht erstellt werden.');
+    }
+  }
+
   if (loading) {
     return (
       <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={`/rechnung/${invoiceId}`} fullWidth hideTopBar>
@@ -451,6 +542,12 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
             <button type="button" disabled={saving} onClick={handleDownloadInvoicePdf} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
               <Download size={16} /> PDF herunterladen
             </button>
+            <button type="button" disabled={saving} onClick={handleDownloadPaymentReminder} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <Download size={16} /> Zahlungserinnerung
+            </button>
+            <button type="button" disabled={saving} onClick={handleDownloadFirstReminder} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <Download size={16} /> 1. Mahnung
+            </button>
           </div>
         </div>
 
@@ -470,6 +567,28 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
         {successMessage && <div style={successStyle}><Check size={16} />{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
+
+        {DOCUMENT_CORRECTION_MODE && (
+          <section style={{ marginBottom: 22 }}>
+            <OPCListCard>
+              <CardHeader title="Temporärer Dokument-Korrekturmodus" />
+              <p style={{ margin: '0 0 16px', color: OPC_BRAND.muted, fontSize: 13 }}>
+                Nummern, PDF-Titel und Dateinamen können vorübergehend korrigiert werden. Nach dem Abschalten bleiben alle gespeicherten Werte aktiv.
+              </p>
+              <div style={fieldGridStyle} className="opc-invoice-field-grid">
+                <Field label="Rechnungsnummer"><input value={invoice.invoice_number || ''} onChange={(e) => updateInvoiceField('invoice_number', e.target.value)} style={inputStyle} /></Field>
+                <Field label="Rechnungs-PDF-Titel"><input value={getMetadata(invoice).invoice_document_title || ''} onChange={(e) => updateInvoiceMetadata('invoice_document_title', e.target.value)} style={inputStyle} placeholder={`Rechnung zur ${invoice.title || 'Reinigungsleistung'}`} /></Field>
+                <Field label="Rechnungs-Dateiname"><input value={getMetadata(invoice).invoice_filename || ''} onChange={(e) => updateInvoiceMetadata('invoice_filename', e.target.value)} style={inputStyle} placeholder={`${invoice.invoice_number || 'RE-00000'}_Rechnung.pdf`} /></Field>
+                <Field label="Zahlungserinnerungsnummer"><input value={getMetadata(invoice).payment_reminder_number || ''} onChange={(e) => updateInvoiceMetadata('payment_reminder_number', e.target.value)} style={inputStyle} placeholder={invoice.invoice_number || 'RE-00000'} /></Field>
+                <Field label="Zahlungserinnerungs-PDF-Titel"><input value={getMetadata(invoice).payment_reminder_title || ''} onChange={(e) => updateInvoiceMetadata('payment_reminder_title', e.target.value)} style={inputStyle} placeholder={`Zahlungserinnerung zu ${invoice.invoice_number || 'RE-00000'}`} /></Field>
+                <Field label="Zahlungserinnerungs-Dateiname"><input value={getMetadata(invoice).payment_reminder_filename || ''} onChange={(e) => updateInvoiceMetadata('payment_reminder_filename', e.target.value)} style={inputStyle} placeholder={`${invoice.invoice_number || 'RE-00000'}_Zahlungserinnerung.pdf`} /></Field>
+                <Field label="1.-Mahnungsnummer"><input value={getMetadata(invoice).first_reminder_number || ''} onChange={(e) => updateInvoiceMetadata('first_reminder_number', e.target.value)} style={inputStyle} placeholder={invoice.invoice_number || 'RE-00000'} /></Field>
+                <Field label="1.-Mahnungs-PDF-Titel"><input value={getMetadata(invoice).first_reminder_title || ''} onChange={(e) => updateInvoiceMetadata('first_reminder_title', e.target.value)} style={inputStyle} placeholder={`1. Mahnung zu Rechnung ${invoice.invoice_number || 'RE-00000'}`} /></Field>
+                <Field label="1.-Mahnungs-Dateiname"><input value={getMetadata(invoice).first_reminder_filename || ''} onChange={(e) => updateInvoiceMetadata('first_reminder_filename', e.target.value)} style={inputStyle} placeholder={`${invoice.invoice_number || 'RE-00000'}_1-Mahnung.pdf`} /></Field>
+              </div>
+            </OPCListCard>
+          </section>
+        )}
 
         <div style={gridStyle} className="opc-invoice-grid">
           <OPCListCard>
@@ -518,13 +637,13 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         <section style={{ marginTop: 22 }}>
           <OPCListCard>
             <div style={cardHeaderWithActionStyle}>
-              <h2 style={cardTitleStyle}>Rechnungstext</h2>
+              <h2 style={cardTitleStyle}>Interne Rechnungsreferenzen</h2>
             </div>
             <div style={textGridStyle} className="opc-invoice-text-grid">
-              <TextArea label="Einleitung" value={invoice.intro_text || ''} onChange={(value) => updateInvoiceField('intro_text', value)} />
-              <TextArea label="Leistungsumfang / Rechnungstext" value={getInvoiceScope(invoice)} onChange={(value) => updateInvoiceMetadata('invoice_scope_text', value)} />
-              <TextArea label="Zahlungsbedingungen" value={invoice.payment_terms || ''} onChange={(value) => updateInvoiceField('payment_terms', value)} />
-              <TextArea label="Grusszeile" value={getGreeting(invoice)} onChange={(value) => updateInvoiceMetadata('customer_greeting', value)} />
+              <TextArea label="Interne Einleitung (nicht im Rechnungs-PDF)" value={invoice.intro_text || ''} onChange={(value) => updateInvoiceField('intro_text', value)} />
+              <TextArea label="Interne Leistungsreferenz (nicht im Rechnungs-PDF)" value={getInvoiceScope(invoice)} onChange={(value) => updateInvoiceMetadata('invoice_scope_text', value)} />
+              <TextArea label="Interne Zahlungsnotiz (nicht im Rechnungs-PDF)" value={invoice.payment_terms || ''} onChange={(value) => updateInvoiceField('payment_terms', value)} />
+              <TextArea label="Interne Kundennotiz (nicht im Rechnungs-PDF)" value={getGreeting(invoice)} onChange={(value) => updateInvoiceMetadata('customer_greeting', value)} />
               <TextArea label="Interne Notizen" value={invoice.internal_notes || ''} onChange={(value) => updateInvoiceField('internal_notes', value)} wide />
             </div>
           </OPCListCard>
@@ -540,11 +659,10 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
               {items.map((item, index) => (
                 <div key={item.id} style={itemCardStyle}>
                   <div style={itemGridStyle} className="opc-invoice-item-grid">
-                    <Field label="Titel"><input value={item.title || ''} onChange={(e) => updateItem(index, 'title', e.target.value)} style={inputStyle} /></Field>
-                    <Field label="Einheit"><input value={item.unit || 'pauschal'} onChange={(e) => updateItem(index, 'unit', e.target.value)} style={inputStyle} /></Field>
+                    <Field label="Reinigungsart / Positionstitel"><input value={item.title || ''} onChange={(e) => updateItem(index, 'title', e.target.value)} style={inputStyle} /></Field>
+                    <Field label="Einheit (intern)"><input value={item.unit || 'pauschal'} onChange={(e) => updateItem(index, 'unit', e.target.value)} style={inputStyle} /></Field>
                     <Field label="Menge"><input value={item.quantity || 1} onChange={(e) => updateItem(index, 'quantity', e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
                     <Field label="Einzelpreis exkl."><input value={item.unit_price_chf || 0} onChange={(e) => updateItem(index, 'unit_price_chf', e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-                    <Field label="Beschreibung"><textarea value={item.description || ''} onChange={(e) => updateItem(index, 'description', e.target.value)} style={textareaStyle} rows={3} /></Field>
                     <div style={itemTotalStyle} className="opc-invoice-item-total">{formatMoney(item.total_chf)}</div>
                     <button type="button" onClick={() => removeItem(item, index)} style={iconButtonStyle}><Trash2 size={16} /></button>
                   </div>

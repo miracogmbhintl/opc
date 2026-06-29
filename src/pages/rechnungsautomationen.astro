@@ -1,0 +1,20 @@
+---
+import InvoiceAutomationPage from '../components/InvoiceAutomationPage';
+import { ClientRouter } from 'astro:transitions';
+---
+
+<!doctype html>
+<html lang="de" transition:name="root" transition:animate="none">
+  <head>
+    <ClientRouter fallback="swap" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ff6a00" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+    <title>Rechnungsautomatisierungen | Orange Pro Clean</title>
+  </head>
+  <body>
+    <InvoiceAutomationPage client:only="react" />
+  </body>
+</html>

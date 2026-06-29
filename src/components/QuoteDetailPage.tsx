@@ -52,6 +52,7 @@ const statusLabels: Record<string, string> = {
   invoiced: 'Verrechnet',
 };
 
+const DOCUMENT_CORRECTION_MODE = String(import.meta.env.PUBLIC_OPC_DOCUMENT_CORRECTION_MODE || '').toLowerCase() === 'true';
 
 function clean(value: unknown) {
   return String(value || '').trim();
@@ -152,9 +153,23 @@ function getItemInputPrice(item: QuoteItem, mode: PriceInputMode) {
   return formatPlainMoney(unitPrice);
 }
 
+function normalizePdfFileName(value: unknown, fallback: string) {
+  const source = clean(value) || fallback;
+  const safe = source.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+  return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
+}
+
 function buildQuoteFileName(quote: QuoteRow, suffix = 'Offerte') {
   const number = clean(quote.quote_number) || 'Offerte';
-  return `${number}_${suffix}.pdf`.replace(/[\\/:*?"<>|]+/g, '-');
+  const metadata = getMetadata(quote);
+  const isOrderConfirmation = suffix === 'Auftragsbestaetigung';
+  const override = isOrderConfirmation
+    ? metadata.order_confirmation_filename
+    : metadata.offer_filename;
+  const documentNumber = isOrderConfirmation
+    ? clean(metadata.order_confirmation_number) || number
+    : number;
+  return normalizePdfFileName(override, `${documentNumber}_${suffix}.pdf`);
 }
 
 export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
@@ -351,8 +366,23 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
       const issueDate = quote.issue_date || new Date().toISOString().slice(0, 10);
       const validUntil = quote.valid_until || addDays(issueDate, 14);
       const status = nextStatus || quote.status || 'draft';
+      const correctedQuoteNumber = clean(quote.quote_number);
+
+      if (DOCUMENT_CORRECTION_MODE) {
+        if (!correctedQuoteNumber) throw new Error('Die Offertennummer darf im Korrekturmodus nicht leer sein.');
+        const { data: duplicate, error: duplicateError } = await supabase
+          .from('opc_quotes')
+          .select('id, quote_number')
+          .eq('quote_number', correctedQuoteNumber)
+          .neq('id', quote.id)
+          .limit(1)
+          .maybeSingle();
+        if (duplicateError) throw duplicateError;
+        if (duplicate) throw new Error(`Die Offertennummer ${correctedQuoteNumber} wird bereits verwendet.`);
+      }
 
       const quotePayload = {
+        ...(DOCUMENT_CORRECTION_MODE ? { quote_number: correctedQuoteNumber } : {}),
         status,
         title: clean(quote.title) || 'Offerte',
         quote_type: quote.quote_type || 'standard',
@@ -542,7 +572,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         language: quote.language || 'de',
         currency: quote.currency || 'CHF',
         issue_date: new Date().toISOString().slice(0, 10),
-        due_date: addDays(new Date().toISOString().slice(0, 10), 14),
+        due_date: addDays(new Date().toISOString().slice(0, 10), 10),
         client_snapshot: quote.client_snapshot || {},
         site_snapshot: quote.site_snapshot || {},
         quote_snapshot: {
@@ -826,6 +856,25 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         {successMessage && <div style={successStyle}><Check size={16} />{successMessage}</div>}
         {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
 
+        {DOCUMENT_CORRECTION_MODE && (
+          <section style={{ marginBottom: 22 }}>
+            <OPCListCard>
+              <CardHeader title="Temporärer Dokument-Korrekturmodus" />
+              <p style={{ margin: '0 0 16px', color: OPC_BRAND.muted, fontSize: 13 }}>
+                Diese Felder dienen nur zur Bereinigung bestehender Dokumente. Nach Abschluss kann der Modus wieder deaktiviert werden; gespeicherte Werte bleiben erhalten.
+              </p>
+              <div style={fieldGridStyle} className="opc-quote-field-grid">
+                <Field label="Offertennummer"><input value={quote.quote_number || ''} onChange={(e) => updateQuoteField('quote_number', e.target.value)} style={inputStyle} /></Field>
+                <Field label="Offerten-PDF-Titel"><input value={getMetadata(quote).offer_document_title || ''} onChange={(e) => updateQuoteMetadata('offer_document_title', e.target.value)} style={inputStyle} placeholder={`Offerte zur ${quote.title || 'Reinigungsleistung'}`} /></Field>
+                <Field label="Offerten-Dateiname"><input value={getMetadata(quote).offer_filename || ''} onChange={(e) => updateQuoteMetadata('offer_filename', e.target.value)} style={inputStyle} placeholder={`${quote.quote_number || 'AN-00000'}_Offerte.pdf`} /></Field>
+                <Field label="Auftragsbestätigungsnummer"><input value={getMetadata(quote).order_confirmation_number || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_number', e.target.value)} style={inputStyle} placeholder={quote.quote_number || 'AN-00000'} /></Field>
+                <Field label="Auftragsbestätigungs-PDF-Titel"><input value={getMetadata(quote).order_confirmation_title || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_title', e.target.value)} style={inputStyle} placeholder={`Auftragsbestätigung zur ${quote.title || 'Reinigungsleistung'}`} /></Field>
+                <Field label="Auftragsbestätigungs-Dateiname"><input value={getMetadata(quote).order_confirmation_filename || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_filename', e.target.value)} style={inputStyle} placeholder={`${quote.quote_number || 'AN-00000'}_Auftragsbestaetigung.pdf`} /></Field>
+              </div>
+            </OPCListCard>
+          </section>
+        )}
+
         <section style={{ marginBottom: 22 }}>
           <OPCListCard>
             <CardHeader title="Nächste Schritte" />
@@ -853,7 +902,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           <OPCListCard>
             <CardHeader title="Offertenkopf" />
             <div style={fieldGridStyle} className="opc-quote-field-grid">
-              <Field label="Titel"><input value={quote.title || ''} onChange={(e) => updateQuoteField('title', e.target.value)} style={inputStyle} /></Field>
+              <Field label="Reinigungsart / Offertentitel"><input value={quote.title || ''} onChange={(e) => updateQuoteField('title', e.target.value)} style={inputStyle} placeholder="z. B. Umzugsreinigung" /></Field>
               <Field label="Status">
                 <select value={quote.status || 'draft'} onChange={(e) => updateQuoteField('status', e.target.value)} style={opcSelectStyle}>
                   <option value="draft">Entwurf</option>
@@ -894,42 +943,6 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
 
         <section style={{ marginTop: 22 }}>
           <OPCListCard>
-            <div style={cardHeaderWithActionStyle}>
-              <CardHeader title="Positionen" compact />
-              <button type="button" onClick={addItem} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><Plus size={16} />Position</button>
-            </div>
-
-            <div style={itemsStackStyle} className="opc-quote-items-stack">
-              {items.map((item, index) => (
-                <div key={item.id || index} style={itemCardStyle}>
-                  <div style={itemGridStyle} className="opc-quote-item-grid">
-                    <Field label="Titel"><input value={item.title || ''} onChange={(e) => updateItem(index, 'title', e.target.value)} style={inputStyle} /></Field>
-                    <Field label="Einheit"><input value={item.unit || 'pauschal'} onChange={(e) => updateItem(index, 'unit', e.target.value)} style={inputStyle} /></Field>
-                    <Field label="Menge"><input value={item.quantity || 1} onChange={(e) => updateItem(index, 'quantity', e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
-                    <Field label={priceInputMode === 'incl' ? 'Preis Eingabe inkl. CHF' : 'Preis Eingabe exkl. CHF'}>
-                      <input
-                        value={getItemInputPrice(item, priceInputMode)}
-                        onChange={(e) => updateItemPriceInput(index, e.target.value)}
-                        style={inputStyle}
-                        inputMode="decimal"
-                        placeholder={priceInputMode === 'incl' ? 'z.B. CHF 1’250.00' : 'z.B. 1156.34'}
-                      />
-                    </Field>
-                    <Field label="Beschreibung"><textarea value={item.description || ''} onChange={(e) => updateItem(index, 'description', e.target.value)} style={textareaStyle} rows={3} /></Field>
-                    <div style={itemTotalStyle} className="opc-quote-item-total">{formatMoney(item.total_chf)}</div>
-                    <button type="button" onClick={() => removeItem(item, index)} style={iconButtonStyle}><Trash2 size={16} /></button>
-                  </div>
-                  <div style={itemHintStyle}>
-                    Intern gespeichert: {formatMoney(item.unit_price_chf)} exkl. MWST · Total: {formatMoney(item.total_chf)} inkl. MWST
-                  </div>
-                </div>
-              ))}
-            </div>
-          </OPCListCard>
-        </section>
-
-        <section style={{ marginTop: 22 }}>
-          <OPCListCard>
             <CardHeader title="Texte & Leistungsbeschreibung" />
             <div style={textGridStyle} className="opc-quote-text-grid">
               <TextArea label="Einleitung" value={quote.intro_text || ''} onChange={(value) => updateQuoteField('intro_text', value)} />
@@ -953,6 +966,42 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
               <TextArea label="Zahlungsbedingungen" value={quote.payment_terms || ''} onChange={(value) => updateQuoteField('payment_terms', value)} />
               <TextArea label="Grusszeile unten" value={quote.customer_notes || ''} onChange={(value) => updateQuoteField('customer_notes', value)} wide />
               <TextArea label="Interne Notizen" value={quote.internal_notes || ''} onChange={(value) => updateQuoteField('internal_notes', value)} wide />
+            </div>
+          </OPCListCard>
+        </section>
+
+
+        <section style={{ marginTop: 22 }}>
+          <OPCListCard>
+            <div style={cardHeaderWithActionStyle}>
+              <CardHeader title="Positionen" compact />
+              <button type="button" onClick={addItem} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><Plus size={16} />Position</button>
+            </div>
+
+            <div style={itemsStackStyle} className="opc-quote-items-stack">
+              {items.map((item, index) => (
+                <div key={item.id || index} style={itemCardStyle}>
+                  <div style={itemGridStyle} className="opc-quote-item-grid">
+                    <Field label="Reinigungsart / Positionstitel"><input value={item.title || ''} onChange={(e) => updateItem(index, 'title', e.target.value)} style={inputStyle} /></Field>
+                    <Field label="Einheit (intern)"><input value={item.unit || 'pauschal'} onChange={(e) => updateItem(index, 'unit', e.target.value)} style={inputStyle} /></Field>
+                    <Field label="Menge"><input value={item.quantity || 1} onChange={(e) => updateItem(index, 'quantity', e.target.value)} style={inputStyle} inputMode="decimal" /></Field>
+                    <Field label={priceInputMode === 'incl' ? 'Preis Eingabe inkl. CHF' : 'Preis Eingabe exkl. CHF'}>
+                      <input
+                        value={getItemInputPrice(item, priceInputMode)}
+                        onChange={(e) => updateItemPriceInput(index, e.target.value)}
+                        style={inputStyle}
+                        inputMode="decimal"
+                        placeholder={priceInputMode === 'incl' ? 'z.B. CHF 1’250.00' : 'z.B. 1156.34'}
+                      />
+                    </Field>
+                    <div style={itemTotalStyle} className="opc-quote-item-total">{formatMoney(item.total_chf)}</div>
+                    <button type="button" onClick={() => removeItem(item, index)} style={iconButtonStyle}><Trash2 size={16} /></button>
+                  </div>
+                  <div style={itemHintStyle}>
+                    Intern gespeichert: {formatMoney(item.unit_price_chf)} exkl. MWST · Total: {formatMoney(item.total_chf)} inkl. MWST
+                  </div>
+                </div>
+              ))}
             </div>
           </OPCListCard>
         </section>

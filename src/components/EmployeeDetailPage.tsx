@@ -38,6 +38,12 @@ import {
 import MirakaDashboardShell from './MirakaDashboardShell';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import {
+  buildPayrollHtml,
+  downloadBase64Pdf,
+  renderHtmlToPdfBase64,
+  type OPCPayrollHtmlInput,
+} from '../lib/opc-document-html';
 
 type JsonRow = Record<string, any>;
 type JsonArray = JsonRow[];
@@ -52,6 +58,28 @@ type ApiPayload = {
   canManagePayroll?: boolean;
   detail?: JsonRow;
   error?: string;
+};
+
+type PayrollPreviewPayload = {
+  success: boolean;
+  payroll?: OPCPayrollHtmlInput;
+  filename?: string;
+  summary?: {
+    periodFrom: string;
+    periodTo: string;
+    entriesCount: number;
+    totalMinutes: number;
+    totalHours: number;
+    grossSalary: number;
+    rateBreakdown: Array<{ hourlyRate: number; minutes: number; hours: number; amount: number }>;
+  };
+  error?: string;
+};
+
+type HourlyRateDraft = {
+  hourlyRate: string;
+  validFrom: string;
+  validUntil: string;
 };
 
 type DayRule = {
@@ -118,6 +146,25 @@ function formatDate(value?: string | null) {
   return new Intl.DateTimeFormat('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date);
 }
 
+function monthStartIso() {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+function monthEndIso() {
+  const date = new Date();
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+}
+
+function formatHours(value?: number | null) {
+  const amount = Number(value || 0);
+  return new Intl.NumberFormat('de-CH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return 'Nicht hinterlegt';
   const date = new Date(value);
@@ -180,6 +227,22 @@ function initials(name: string) {
 function employeeName(detail: JsonRow | null) {
   const employee = detail?.employee || {};
   return employee.preferred_name || [employee.legal_first_name, employee.legal_last_name].filter(Boolean).join(' ') || 'Mitarbeiter';
+}
+
+function makeHourlyRateDraft(detail: JsonRow | null): HourlyRateDraft {
+  const employee = safeObject(detail?.employee);
+  const metadata = safeObject(employee.metadata);
+  const override = safeObject(metadata.payroll_hourly_rate_override);
+  const contracts = asArray(detail?.contracts)
+    .filter((contract) => normalize(contract.salary_type) === 'hourly' && Number(contract.hourly_rate_chf || 0) > 0)
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
+  const contract = contracts[0] || {};
+
+  return {
+    hourlyRate: String(override.hourly_rate_chf ?? contract.hourly_rate_chf ?? ''),
+    validFrom: String(override.valid_from || contract.valid_from || employee.entry_date || monthStartIso()),
+    validUntil: String(override.valid_until || contract.valid_until || ''),
+  };
 }
 
 function addressText(address: JsonRow | null) {
@@ -352,6 +415,14 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
   const [contractSubtype, setContractSubtype] = useState('hourly_employment');
   const [contractTitle, setContractTitle] = useState('');
   const [contractValidFrom, setContractValidFrom] = useState('');
+  const [payrollFrom, setPayrollFrom] = useState(monthStartIso);
+  const [payrollTo, setPayrollTo] = useState(monthEndIso);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [payrollSummary, setPayrollSummary] = useState<PayrollPreviewPayload['summary'] | null>(null);
+  const [hourlyRate, setHourlyRate] = useState('');
+  const [hourlyRateValidFrom, setHourlyRateValidFrom] = useState(monthStartIso);
+  const [hourlyRateValidUntil, setHourlyRateValidUntil] = useState('');
+  const [hourlyRateSaving, setHourlyRateSaving] = useState(false);
   const detailStripRef = useRef<HTMLDivElement | null>(null);
 
   const loadDetail = useCallback(async (showLoader = true) => {
@@ -366,6 +437,10 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
       setCanManagePayroll(payload.canManagePayroll === true);
       setDraft(makeDraft(next));
       setDayRules(makeDayRules(next));
+      const rateDraft = makeHourlyRateDraft(next);
+      setHourlyRate(rateDraft.hourlyRate);
+      setHourlyRateValidFrom(rateDraft.validFrom);
+      setHourlyRateValidUntil(rateDraft.validUntil);
       const skillsMap: Record<string, JsonRow> = {};
       asArray(next?.skills).filter((skill) => skill.is_active !== false).forEach((skill) => { skillsMap[String(skill.skill_id)] = { ...skill }; });
       setSelectedSkills(skillsMap);
@@ -504,6 +579,92 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
       setErrorMessage(error?.message || 'Vertrag konnte nicht hochgeladen werden.');
     } finally {
       setContractUploading(false);
+    }
+  }
+
+  async function saveHourlyRate() {
+    if (hourlyRateSaving) return;
+
+    const rate = Number(String(hourlyRate).replace(',', '.'));
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setErrorMessage('Bitte geben Sie einen gültigen Stundenansatz grösser als CHF 0.00 ein.');
+      return;
+    }
+    if (!hourlyRateValidFrom) {
+      setErrorMessage('Bitte geben Sie an, ab welchem Datum der Stundenansatz gilt.');
+      return;
+    }
+    if (hourlyRateValidUntil && hourlyRateValidUntil < hourlyRateValidFrom) {
+      setErrorMessage('Das Gültig-bis-Datum darf nicht vor dem Gültig-ab-Datum liegen.');
+      return;
+    }
+
+    setHourlyRateSaving(true);
+    setErrorMessage('');
+    setMessage('');
+
+    try {
+      const response = await apiRequest<ApiPayload>(`/api/opc/employees/${employeeId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          hourly_rate_override: {
+            hourly_rate_chf: rate,
+            valid_from: hourlyRateValidFrom,
+            valid_until: hourlyRateValidUntil || null,
+          },
+        }),
+      });
+
+      const next = response.detail || detail;
+      setDetail(next);
+      const rateDraft = makeHourlyRateDraft(next);
+      setHourlyRate(rateDraft.hourlyRate);
+      setHourlyRateValidFrom(rateDraft.validFrom);
+      setHourlyRateValidUntil(rateDraft.validUntil);
+      setPayrollSummary(null);
+      setMessage(`Stundenansatz von CHF ${rate.toFixed(2)} wurde gespeichert.`);
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Der Stundenansatz konnte nicht gespeichert werden.');
+    } finally {
+      setHourlyRateSaving(false);
+    }
+  }
+
+  async function handlePayrollDownload() {
+    if (payrollLoading) return;
+    if (!payrollFrom || !payrollTo) {
+      setErrorMessage('Bitte wählen Sie einen vollständigen Abrechnungszeitraum.');
+      return;
+    }
+    if (payrollFrom > payrollTo) {
+      setErrorMessage('Das Startdatum darf nicht nach dem Enddatum liegen.');
+      return;
+    }
+
+    setPayrollLoading(true);
+    setErrorMessage('');
+    setMessage('');
+
+    try {
+      const query = new URLSearchParams({ from: payrollFrom, to: payrollTo });
+      const payload = await apiRequest<PayrollPreviewPayload>(
+        `/api/opc/employees/${employeeId}/payroll-preview?${query.toString()}`,
+      );
+
+      if (!payload.payroll) {
+        throw new Error(payload.error || 'Die Lohnabrechnung konnte nicht erstellt werden.');
+      }
+
+      const filename = payload.filename || `Lohnabrechnung_${employee.employee_number || employeeId}_${payrollFrom}_${payrollTo}.pdf`;
+      const html = buildPayrollHtml(payload.payroll);
+      const rendered = await renderHtmlToPdfBase64(html, filename);
+      downloadBase64Pdf(rendered.base64, rendered.filename || filename);
+      setPayrollSummary(payload.summary || null);
+      setMessage('Die Lohnabrechnung wurde erstellt und heruntergeladen.');
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Die Lohnabrechnung konnte nicht erstellt werden.');
+    } finally {
+      setPayrollLoading(false);
     }
   }
 
@@ -700,6 +861,84 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                   <div className="opc-payroll-notice">
                     <ShieldCheck size={18} />
                     <span>Dieser Bereich ist nur für Owner sichtbar.</span>
+                  </div>
+
+                  <div className="opc-contract-upload-panel">
+                    <div className="opc-contract-upload-copy">
+                      <strong>Stundenansatz festlegen</strong>
+                      <span>Dieser Ansatz wird für die Lohnabrechnung innerhalb des angegebenen Gültigkeitszeitraums verwendet. Er hat Vorrang vor unvollständigen Vertragsdaten.</span>
+                    </div>
+
+                    <div className="opc-hourly-rate-grid">
+                      <label className="opc-edit-field">
+                        <span>Stundenansatz CHF</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.05"
+                          inputMode="decimal"
+                          value={hourlyRate}
+                          onChange={(event) => { setHourlyRate(event.target.value); setPayrollSummary(null); }}
+                          placeholder="z. B. 26.50"
+                        />
+                      </label>
+                      <label className="opc-edit-field">
+                        <span>Gültig ab</span>
+                        <input type="date" value={hourlyRateValidFrom} onChange={(event) => { setHourlyRateValidFrom(event.target.value); setPayrollSummary(null); }} />
+                      </label>
+                      <label className="opc-edit-field">
+                        <span>Gültig bis (optional)</span>
+                        <input type="date" value={hourlyRateValidUntil} onChange={(event) => { setHourlyRateValidUntil(event.target.value); setPayrollSummary(null); }} />
+                      </label>
+                      <button
+                        type="button"
+                        className="opc-btn opc-btn-dark"
+                        disabled={hourlyRateSaving || !hourlyRate || !hourlyRateValidFrom}
+                        onClick={() => void saveHourlyRate()}
+                      >
+                        {hourlyRateSaving ? <Loader2 size={15} className="spin" /> : <Save size={15} />}
+                        Stundenansatz speichern
+                      </button>
+                    </div>
+
+                    <div className="opc-document-hint">Beispiel Filip: CHF 26.50, gültig ab 01.06.2026. Bereits genehmigte Arbeitsstunden in diesem Zeitraum werden danach mit diesem Ansatz berechnet.</div>
+                  </div>
+
+                  <div className="opc-contract-upload-panel">
+                    <div className="opc-contract-upload-copy">
+                      <strong>Lohnabrechnung aus genehmigten Arbeitszeiten</strong>
+                      <span>Wählen Sie den Zeitraum. Berücksichtigt werden ausschliesslich genehmigte Zeiteinträge und der im jeweiligen Zeitraum gültige Stundenansatz.</span>
+                    </div>
+
+                    <div className="opc-payroll-filter-grid">
+                      <label className="opc-edit-field">
+                        <span>Zeitraum von</span>
+                        <input type="date" value={payrollFrom} onChange={(event) => { setPayrollFrom(event.target.value); setPayrollSummary(null); }} />
+                      </label>
+                      <label className="opc-edit-field">
+                        <span>Zeitraum bis</span>
+                        <input type="date" value={payrollTo} onChange={(event) => { setPayrollTo(event.target.value); setPayrollSummary(null); }} />
+                      </label>
+                      <button
+                        type="button"
+                        className="opc-btn opc-btn-dark"
+                        disabled={payrollLoading || !payrollFrom || !payrollTo}
+                        onClick={() => void handlePayrollDownload()}
+                      >
+                        {payrollLoading ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
+                        Lohnabrechnung herunterladen
+                      </button>
+                    </div>
+
+                    {payrollSummary ? (
+                      <div className="opc-payroll-summary-grid">
+                        <MiniField label="Genehmigte Einträge" value={payrollSummary.entriesCount} />
+                        <MiniField label="Arbeitszeit" value={`${formatHours(payrollSummary.totalHours)} h`} />
+                        <MiniField label="Bruttolohn" value={`CHF ${payrollSummary.grossSalary.toFixed(2)}`} />
+                      </div>
+                    ) : null}
+
+                    <div className="opc-document-hint">Diese erste Ausbaustufe berechnet den Grundlohn aus genehmigten Netto-Arbeitsminuten × gültigem Stundenansatz. Sozialabzüge, Spesen und weitere Lohnbestandteile werden derzeit mit CHF 0.00 ausgewiesen, bis deren Regeln im Payroll-System hinterlegt sind.</div>
                   </div>
 
                   <div className="opc-contract-upload-panel">
@@ -909,6 +1148,9 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         .opc-document-list small { display:block; margin-top:3px; color:${BRAND.muted}; font-size:10px; }
         .opc-payroll-owner-card { border-color: #D1D5DB !important; }
         .opc-payroll-notice { display:flex; align-items:center; gap:8px; border:1px solid ${BRAND.border}; background:${BRAND.soft}; border-radius:13px; padding:10px 11px; color:${BRAND.muted}; font-size:11px; font-weight:700; margin-bottom:10px; }
+        .opc-hourly-rate-grid { display: grid; grid-template-columns: minmax(150px,.75fr) repeat(2,minmax(150px,.9fr)) minmax(210px,1fr); gap: 8px; align-items: end; }
+        .opc-payroll-filter-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)) minmax(210px,.9fr); gap: 8px; align-items: end; }
+        .opc-payroll-summary-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid ${BRAND.border}; }
         .opc-contract-upload-panel { border: 1px solid ${BRAND.border}; border-radius: 14px; padding: 12px; margin-bottom: 10px; background: #FFFFFF; }
         .opc-contract-upload-copy { display: grid; gap: 4px; margin-bottom: 10px; }
         .opc-contract-upload-copy strong { font-size: 12px; }
@@ -939,7 +1181,7 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         @media(max-width:980px){.opc-employee-main-grid{grid-template-columns:1fr;}.opc-edit-grid.three{grid-template-columns:repeat(2,minmax(0,1fr));}}
         @media(max-width:720px){
           .opc-employee-page{padding-bottom:110px;}.opc-employee-hero{padding:17px;}.opc-employee-hero-main{align-items:flex-start;}.opc-employee-hero h1{font-size:24px;}.opc-employee-hero-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}.opc-employee-hero-actions .opc-btn{width:100%;}.opc-employee-hero-actions .opc-btn-dark{grid-column:1/-1;}
-          .opc-edit-head{display:grid;}.opc-edit-head>div:last-child{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}.opc-edit-grid.three,.opc-two-col,.opc-availability-summary{grid-template-columns:1fr;}.opc-edit-skill-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.opc-edit-checks{grid-template-columns:repeat(2,minmax(0,1fr));}.opc-edit-days>div{grid-template-columns:1fr 1fr;}.opc-edit-days button{grid-column:1/-1;}.opc-skill-display-grid{grid-template-columns:1fr;}.opc-availability-list>div{grid-template-columns:1fr auto;}.opc-availability-list small{grid-column:1/-1;}.opc-document-upload-head{display:grid;grid-template-columns:1fr;}.opc-document-meta-row{grid-template-columns:1fr;}.opc-contract-upload-grid{grid-template-columns:1fr;}.opc-upload-button{width:100%;}.opc-section-card{padding:15px;}
+          .opc-edit-head{display:grid;}.opc-edit-head>div:last-child{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}.opc-edit-grid.three,.opc-two-col,.opc-availability-summary{grid-template-columns:1fr;}.opc-edit-skill-grid{grid-template-columns:repeat(2,minmax(0,1fr));}.opc-edit-checks{grid-template-columns:repeat(2,minmax(0,1fr));}.opc-edit-days>div{grid-template-columns:1fr 1fr;}.opc-edit-days button{grid-column:1/-1;}.opc-skill-display-grid{grid-template-columns:1fr;}.opc-availability-list>div{grid-template-columns:1fr auto;}.opc-availability-list small{grid-column:1/-1;}.opc-document-upload-head{display:grid;grid-template-columns:1fr;}.opc-document-meta-row{grid-template-columns:1fr;}.opc-contract-upload-grid,.opc-hourly-rate-grid,.opc-payroll-filter-grid{grid-template-columns:1fr;}.opc-payroll-summary-grid{grid-template-columns:1fr;}.opc-upload-button{width:100%;}.opc-section-card{padding:15px;}
         }
         @media(max-width:460px){
           .opc-edit-skill-grid,.opc-edit-checks{grid-template-columns:1fr;}

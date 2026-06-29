@@ -76,6 +76,24 @@ interface FormState {
   assignmentNote: string;
 }
 
+interface QuoteJobPrefill {
+  source?: string;
+  quote_id?: string;
+  quote_number?: string;
+  order_confirmation_id?: string;
+  client_id?: string;
+  client_site_id?: string;
+  contact_id?: string;
+  title?: string;
+  service_category?: string;
+  service_description?: string;
+  estimated_hours?: string | number;
+  estimated_staff_count?: string | number;
+  dispatcher_notes?: string;
+  internal_notes?: string;
+  total_chf?: string | number;
+}
+
 const serviceOptions = [
   'Allgemeine Reinigung',
   'Treppenhausreinigung',
@@ -286,6 +304,53 @@ function normalize(value?: string | null) {
   return String(value || '').trim().toLowerCase();
 }
 
+function cleanSourceId(value: unknown) {
+  const text = String(value || '').trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)
+    ? text
+    : '';
+}
+
+function readQuoteJobPrefill(): QuoteJobPrefill | null {
+  if (typeof window === 'undefined') return null;
+
+  const params = new URLSearchParams(window.location.search);
+  let stored: QuoteJobPrefill = {};
+
+  try {
+    const raw = window.localStorage.getItem('opc_quote_job_prefill');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        stored = parsed as QuoteJobPrefill;
+      }
+    }
+  } catch {
+    stored = {};
+  }
+
+  const quoteId = cleanSourceId(params.get('quote_id') || stored.quote_id);
+  const orderConfirmationId = cleanSourceId(
+    params.get('order_confirmation_id') || stored.order_confirmation_id,
+  );
+  const clientId = cleanSourceId(params.get('client_id') || stored.client_id);
+  const clientSiteId = cleanSourceId(
+    params.get('client_site_id') || stored.client_site_id,
+  );
+  const contactId = cleanSourceId(params.get('contact_id') || stored.contact_id);
+
+  if (!quoteId && !clientId) return null;
+
+  return {
+    ...stored,
+    quote_id: quoteId || undefined,
+    order_confirmation_id: orderConfirmationId || undefined,
+    client_id: clientId || undefined,
+    client_site_id: clientSiteId || undefined,
+    contact_id: contactId || undefined,
+  };
+}
+
 function getEmployeeName(employee?: EmployeeOption | null) {
   if (!employee) return 'Mitarbeiter';
   return employee.display_name || employee.email || employee.phone_e164 || employee.phone_raw || 'Mitarbeiter';
@@ -322,10 +387,46 @@ export default function CreateProjectForm() {
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState<number>(0);
   const [endTimeTouched, setEndTimeTouched] = useState(false);
+  const [sourceQuoteId, setSourceQuoteId] = useState('');
+  const [sourceQuoteNumber, setSourceQuoteNumber] = useState('');
+  const [sourceOrderConfirmationId, setSourceOrderConfirmationId] = useState('');
+  const [sourceContactId, setSourceContactId] = useState('');
+  const [requestedSiteId, setRequestedSiteId] = useState('');
 
   useEffect(() => {
     void loadClients();
     void loadEmployees();
+  }, []);
+
+  useEffect(() => {
+    const prefill = readQuoteJobPrefill();
+    if (!prefill) return;
+
+    const serviceCategory = String(prefill.service_category || '').trim();
+    const isKnownService = serviceOptions.includes(serviceCategory);
+    const estimatedHours = String(prefill.estimated_hours ?? '').trim();
+
+    setSourceQuoteId(cleanSourceId(prefill.quote_id));
+    setSourceQuoteNumber(String(prefill.quote_number || '').trim());
+    setSourceOrderConfirmationId(cleanSourceId(prefill.order_confirmation_id));
+    setSourceContactId(cleanSourceId(prefill.contact_id));
+    setRequestedSiteId(cleanSourceId(prefill.client_site_id));
+
+    setForm((current) => ({
+      ...current,
+      clientId: cleanSourceId(prefill.client_id) || current.clientId,
+      clientSiteId: cleanSourceId(prefill.client_site_id) || current.clientSiteId,
+      serviceCategory: serviceCategory
+        ? (isKnownService ? serviceCategory : 'Andere')
+        : current.serviceCategory,
+      customServiceCategory: serviceCategory && !isKnownService
+        ? serviceCategory
+        : current.customServiceCategory,
+      serviceDescription: String(prefill.service_description || current.serviceDescription || ''),
+      estimatedHours: estimatedHours || current.estimatedHours,
+      dispatcherNotes: String(prefill.dispatcher_notes || current.dispatcherNotes || ''),
+      internalNotes: String(prefill.internal_notes || current.internalNotes || ''),
+    }));
   }, []);
 
   useEffect(() => {
@@ -336,7 +437,7 @@ export default function CreateProjectForm() {
     }
 
     void loadClientSites(form.clientId);
-  }, [form.clientId]);
+  }, [form.clientId, requestedSiteId]);
 
   useEffect(() => {
     if (endTimeTouched) return;
@@ -470,10 +571,15 @@ export default function CreateProjectForm() {
       const loadedSites = ((data || []) as SiteOption[]).filter((site) => site.id);
 
       if (loadedSites.length > 0) {
+        const requestedSite = requestedSiteId
+          ? loadedSites.find((site) => site.id === requestedSiteId)
+          : null;
+        const selectedSiteId = requestedSite?.id || loadedSites[0].id;
+
         setSites(loadedSites);
         setForm((current) => ({
           ...current,
-          clientSiteId: loadedSites[0].id,
+          clientSiteId: selectedSiteId,
         }));
         return;
       }
@@ -627,9 +733,11 @@ export default function CreateProjectForm() {
       const title = `${finalServiceCategory} · ${getClientName(selectedClient)}`;
 
       const payload = {
+        quote_id: sourceQuoteId || null,
+        order_confirmation_id: sourceOrderConfirmationId || null,
         client_id: selectedClient.client_id,
         client_site_id: selectedSite.id,
-        contact_id: selectedSite.contact_id || selectedClient.contact_id || null,
+        contact_id: sourceContactId || selectedSite.contact_id || selectedClient.contact_id || null,
         title,
         job_type: isRecurring ? 'recurring' : 'one_time',
         status: form.assignedEmployeeIds.length > 0 ? 'assigned' : form.status,
@@ -665,6 +773,11 @@ export default function CreateProjectForm() {
           selected_site_address: getSiteAddress(selectedSite),
           recurrence_enabled: isRecurring,
           recurrence_type: form.recurrenceType,
+          quote_id: sourceQuoteId || null,
+          source_quote_id: sourceQuoteId || null,
+          source_quote_number: sourceQuoteNumber || null,
+          order_confirmation_id: sourceOrderConfirmationId || null,
+          created_from_quote: Boolean(sourceQuoteId),
         },
       };
 
@@ -697,6 +810,18 @@ export default function CreateProjectForm() {
 
       setSuccessJobId(jobId);
       setSuccessCount(result.created_count || result.job_ids?.length || 1);
+
+      try {
+        window.localStorage.removeItem('opc_quote_job_prefill');
+      } catch {
+        // localStorage can be unavailable without affecting the created job.
+      }
+
+      setSourceQuoteId('');
+      setSourceQuoteNumber('');
+      setSourceOrderConfirmationId('');
+      setSourceContactId('');
+      setRequestedSiteId('');
       setForm(createInitialFormState());
       setSites([]);
       setEndTimeTouched(false);

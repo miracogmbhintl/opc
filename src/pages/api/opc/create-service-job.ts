@@ -30,6 +30,17 @@ function optionalString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function optionalUuid(value: unknown, label: string) {
+  const text = optionalString(value);
+  if (!text) return null;
+
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) {
+    throw new Error(`${label} enthält keine gültige UUID.`);
+  }
+
+  return text;
+}
+
 function compactPayload(payload: JsonRecord) {
   const copy: JsonRecord = { ...payload };
 
@@ -224,7 +235,11 @@ async function insertJobs(adminClient: any, payloads: JsonRecord[]): Promise<str
     recurringColumnError.includes('recurring_series_id') ||
     recurringColumnError.includes('occurrence_date') ||
     recurringColumnError.includes('occurrence_key') ||
-    recurringColumnError.includes('series_version');
+    recurringColumnError.includes('series_version') ||
+    recurringColumnError.includes('quote_id') ||
+    recurringColumnError.includes('order_confirmation_id') ||
+    recurringColumnError.includes('billing_status') ||
+    recurringColumnError.includes('invoice_id');
 
   if (!canFallback) {
     throw new Error(error?.message || 'Einsätze konnten nicht erstellt werden.');
@@ -236,6 +251,10 @@ async function insertJobs(adminClient: any, payloads: JsonRecord[]): Promise<str
     delete copy.occurrence_date;
     delete copy.occurrence_key;
     delete copy.series_version;
+    delete copy.quote_id;
+    delete copy.order_confirmation_id;
+    delete copy.billing_status;
+    delete copy.invoice_id;
     return compactPayload(copy);
   });
 
@@ -856,6 +875,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const plannedStart = requireString(body.planned_start, 'Startzeit');
     const plannedEnd = requireString(body.planned_end, 'Endzeit');
     const serviceCategory = requireString(body.service_category, 'Dienstleistung');
+    const quoteId = optionalUuid(body.quote_id, 'Offerte');
+    const orderConfirmationId = optionalUuid(
+      body.order_confirmation_id,
+      'Auftragsbestätigung',
+    );
 
     const startDate = optionalString(body.planned_date) || plannedStart.slice(0, 10);
     const startTime = optionalString(body.start_time) || getTimeFromIso(plannedStart);
@@ -922,6 +946,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
           created_by_user_id: user.id,
           created_by_staff_role_id: staffRole.id,
           period_preset: recurrence.period_preset || null,
+          quote_id: quoteId,
+          source_quote_id: quoteId,
+          order_confirmation_id: orderConfirmationId,
         },
       });
     }
@@ -931,6 +958,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const occurrenceEnd = recurrenceEnabled ? toIsoDateTime(occurrenceDate, endTime) : plannedEnd;
 
       return {
+        quote_id: quoteId,
+        order_confirmation_id: orderConfirmationId,
+        billing_status: 'not_ready',
         client_id: clientId,
         client_site_id: clientSiteId,
         contact_id: body.contact_id || site.contact_id || null,
@@ -964,6 +994,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
           recurrence_type: recurrenceType,
           recurring_series_id: recurringSeriesId,
           occurrence_date: occurrenceDate,
+          quote_id: quoteId,
+          source_quote_id: quoteId,
+          order_confirmation_id: orderConfirmationId,
+          created_from_quote: Boolean(quoteId),
         },
       };
     });
@@ -996,6 +1030,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
           recurrence_enabled: recurrenceEnabled,
           recurring_series_id: recurringSeriesId,
           occurrence_date: occurrenceDates[index],
+          quote_id: quoteId,
+          source_quote_id: quoteId,
+          order_confirmation_id: orderConfirmationId,
         },
       }));
 
@@ -1056,6 +1093,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       job_ids: jobIds,
       created_count: jobIds.length,
       recurring_series_id: recurringSeriesId,
+      quote_id: quoteId,
+      order_confirmation_id: orderConfirmationId,
       recurrence_enabled: recurrenceEnabled,
       assigned_employee_count: employeeRows.length,
       calendar_sync: calendarSync,

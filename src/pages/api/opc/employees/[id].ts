@@ -941,6 +941,76 @@ export const PATCH: APIRoute = async ({ request, locals, cookies, params }) => {
       return jsonResponse({ success: false, error: 'Mitarbeiter wurde nicht gefunden.' }, 404);
     }
 
+    if (Object.prototype.hasOwnProperty.call(body, 'hourly_rate_override')) {
+      if (!access.canManagePayroll) {
+        return jsonResponse(
+          { success: false, error: 'Sie haben keine Berechtigung, den Stundenansatz zu ändern.' },
+          403,
+        );
+      }
+
+      const override = safeObject(body.hourly_rate_override);
+      const hourlyRate = asNumber(override.hourly_rate_chf);
+      const validFrom = cleanText(override.valid_from);
+      const validUntil = cleanText(override.valid_until);
+      const isIsoDate = (value: string | null) => !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+      if (!hourlyRate || hourlyRate <= 0) {
+        return jsonResponse(
+          { success: false, error: 'Der Stundenansatz muss grösser als CHF 0.00 sein.' },
+          400,
+        );
+      }
+      if (!validFrom || !isIsoDate(validFrom) || !isIsoDate(validUntil)) {
+        return jsonResponse(
+          { success: false, error: 'Bitte geben Sie einen gültigen Gültigkeitszeitraum an.' },
+          400,
+        );
+      }
+      if (validUntil && validUntil < validFrom) {
+        return jsonResponse(
+          { success: false, error: 'Das Gültig-bis-Datum darf nicht vor dem Gültig-ab-Datum liegen.' },
+          400,
+        );
+      }
+
+      const nextMetadata = {
+        ...safeObject(employee.metadata),
+        payroll_hourly_rate_override: {
+          hourly_rate_chf: hourlyRate,
+          valid_from: validFrom,
+          valid_until: validUntil,
+          currency: 'CHF',
+          source: 'mitarbeiter-detail',
+          updated_at: new Date().toISOString(),
+          updated_by: access.user.id,
+        },
+      };
+
+      const updateRateResponse = await supabase
+        .from('opc_employees')
+        .update({
+          metadata: nextMetadata,
+          updated_by: access.user.id,
+        })
+        .eq('id', employeeId)
+        .select('*')
+        .single();
+      throwOnError(updateRateResponse.error, 'Stundenansatz konnte nicht gespeichert werden');
+
+      const detail = await loadEmployeeDetail({
+        supabase,
+        employeeId,
+        isOwner: access.isOwner,
+      });
+
+      return jsonResponse({
+        success: true,
+        message: 'Stundenansatz wurde gespeichert.',
+        detail,
+      });
+    }
+
     const firstName = cleanText(body.legal_first_name) || employee.legal_first_name;
     const lastName = cleanText(body.legal_last_name) || employee.legal_last_name;
     if (!firstName || !lastName) {
