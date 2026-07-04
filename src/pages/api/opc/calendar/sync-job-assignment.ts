@@ -7,6 +7,8 @@ import {
 } from '../../../../lib/opc-server-env';
 import { syncJobCalendarState } from '../../../../lib/opc-calendar-job-sync';
 
+type AnyRow = Record<string, any>;
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -59,7 +61,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     if (staffError) throw staffError;
 
-    const allowed = (staffRows || []).some((row: Record<string, any>) => {
+    const allowed = (staffRows || []).some((row: AnyRow) => {
       const role = normalizeRole(row.role);
       return (
         ['owner', 'admin', 'dispatch'].includes(role) ||
@@ -71,7 +73,44 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (!allowed) return jsonResponse({ error: 'Keine Berechtigung für Kalender-Synchronisation.' }, 403);
 
     const payload = await request.json().catch(() => null);
-    const jobId = String(payload?.job_id || '').trim();
+    let jobId = String(payload?.job_id || '').trim();
+    const assignmentId = String(payload?.remove_assignment_id || '').trim();
+    let removedAssignmentId: string | null = null;
+
+    if (assignmentId) {
+      const { data: assignment, error: assignmentError } = await serviceClient
+        .from('opc_job_assignments')
+        .select('*')
+        .eq('id', assignmentId)
+        .maybeSingle();
+
+      if (assignmentError) throw assignmentError;
+      if (!assignment) return jsonResponse({ error: 'Zuweisung wurde nicht gefunden.' }, 404);
+
+      const assignmentJobId = String(assignment.job_id || '').trim();
+      if (!assignmentJobId) {
+        return jsonResponse({ error: 'Die Zuweisung besitzt keine Einsatz-ID.' }, 400);
+      }
+
+      if (jobId && jobId !== assignmentJobId) {
+        return jsonResponse({ error: 'Zuweisung und Einsatz stimmen nicht überein.' }, 409);
+      }
+
+      jobId = assignmentJobId;
+
+      const { data: deletedRows, error: deleteError } = await serviceClient
+        .from('opc_job_assignments')
+        .delete()
+        .eq('id', assignmentId)
+        .select('id');
+
+      if (deleteError) throw deleteError;
+      if (!deletedRows?.length) {
+        return jsonResponse({ error: 'Zuweisung konnte nicht entfernt werden.' }, 409);
+      }
+
+      removedAssignmentId = assignmentId;
+    }
 
     if (!jobId) return jsonResponse({ error: 'job_id fehlt.' }, 400);
 
@@ -81,7 +120,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       actorUserId: user.id,
     });
 
-    return jsonResponse({ success: true, sync: result });
+    return jsonResponse({
+      success: true,
+      removed_assignment_id: removedAssignmentId,
+      sync: result,
+    });
   } catch (error) {
     return jsonResponse(
       {
