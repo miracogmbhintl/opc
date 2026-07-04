@@ -53,7 +53,7 @@ import { ClientRouter } from 'astro:transitions';
       }
     })();
   </script>
-  <script src="/opc-calendar-fetch-bridge.js"></script>
+  <script is:inline src="/opc-calendar-fetch-bridge.js"></script>
   <ClientRouter fallback="swap" />
   
   <!-- Orange Pro Clean Web App / PWA -->
