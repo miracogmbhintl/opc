@@ -1,5 +1,6 @@
 ---
 import EinsatzDetailPage from '../../components/EinsatzDetailPage';
+import JobAssignmentCalendarManager from '../../components/opc/jobs/JobAssignmentCalendarManager';
 import '../../styles/miraka-portal.css';
 
 const { id } = Astro.params;
@@ -52,6 +53,7 @@ import { ClientRouter } from 'astro:transitions';
       }
     })();
   </script>
+  <script src="/opc-calendar-fetch-bridge.js"></script>
   <ClientRouter fallback="swap" />
   
   <!-- Orange Pro Clean Web App / PWA -->
@@ -77,5 +79,6 @@ import { ClientRouter } from 'astro:transitions';
 </head>
 <body>
   <EinsatzDetailPage client:only="react" jobId={id || ''} />
+  <JobAssignmentCalendarManager client:only="react" jobId={id || ''} />
 </body>
 </html>
