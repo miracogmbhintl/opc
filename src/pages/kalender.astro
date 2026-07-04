@@ -86,6 +86,67 @@ import { ClientRouter } from 'astro:transitions';
   >
     <OPCCalendarPage client:only="react" />
   </MirakaDashboardShell>
+
+  <script is:inline>
+    (() => {
+      if (window.__OPC_TEAM_CALENDAR_DEFAULTS__) return;
+      window.__OPC_TEAM_CALENDAR_DEFAULTS__ = true;
+
+      const dispatchChange = (select, value) => {
+        if (!select || select.value === value) return;
+        select.value = value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+
+      const findTeamOption = (select) =>
+        Array.from(select?.options || []).find((option) => {
+          const label = String(option.textContent || '').toLowerCase();
+          return label.includes('team') || label.includes('gesamtes team');
+        });
+
+      const applyDefaults = () => {
+        const page = document.querySelector('.opc-calendar-page');
+
+        if (page && page.dataset.teamCalendarDefaultApplied !== 'true') {
+          const filterSelect = Array.from(page.querySelectorAll('select')).find((select) => {
+            const values = Array.from(select.options).map((option) => option.value);
+            return values.includes('team') && values.includes('all') && values.includes('employee');
+          });
+
+          if (filterSelect) {
+            dispatchChange(filterSelect, 'team');
+            page.dataset.teamCalendarDefaultApplied = 'true';
+          }
+        }
+
+        document.querySelectorAll('[role="dialog"]').forEach((dialog) => {
+          const heading = String(dialog.querySelector('h2')?.textContent || '').toLowerCase();
+          const isNewEntry = heading.includes('neuer kalendereintrag') || heading.includes('google meet');
+          if (!isNewEntry) return;
+
+          const calendarLabel = Array.from(dialog.querySelectorAll('label')).find((label) =>
+            String(label.childNodes[0]?.textContent || label.textContent || '')
+              .trim()
+              .toLowerCase()
+              .startsWith('kalender'),
+          );
+          const select = calendarLabel?.querySelector('select');
+          if (!select || select.dataset.teamCalendarDefaultApplied === 'true') return;
+
+          const teamOption = findTeamOption(select);
+          if (!teamOption) return;
+
+          dispatchChange(select, teamOption.value);
+          select.dataset.teamCalendarDefaultApplied = 'true';
+        });
+      };
+
+      const observer = new MutationObserver(applyDefaults);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      document.addEventListener('astro:page-load', applyDefaults);
+      applyDefaults();
+    })();
+  </script>
 </body>
 </html>
 

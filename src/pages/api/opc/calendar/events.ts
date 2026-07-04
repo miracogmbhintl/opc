@@ -1,8 +1,19 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { getOpcSupabaseUrl, getOpcSupabaseAnonKey, getOpcSupabaseServiceRoleKey } from '../../../../lib/opc-server-env';
+import { syncJobCalendarState } from '../../../../lib/opc-calendar-job-sync';
 
 type AnyRow = Record<string, any>;
+
+const INACTIVE_ASSIGNMENT_STATUSES = new Set([
+  'removed',
+  'unassigned',
+  'cancelled',
+  'canceled',
+  'deleted',
+  'inactive',
+  'rejected',
+]);
 
 function getSupabaseUrl(locals?: any) {
   return getOpcSupabaseUrl(locals);
@@ -131,11 +142,13 @@ async function resolveCurrentUserContext(
 
   const staffRoleIds = activeStaffRoleRows
     .map((row: AnyRow) => row.id)
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(String);
 
   const employeeIds = activeStaffRoleRows
     .map((row: AnyRow) => row.employee_id)
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(String);
 
   const canViewAllJobs =
     isAdminRole(currentRole) ||
@@ -166,6 +179,22 @@ function isJobCalendarEvent(event: AnyRow) {
   );
 }
 
+function isMissingColumnError(error: any) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+
+  return code === '42703' || (message.includes('column') && message.includes('does not exist'));
+}
+
+function chunk<T>(items: T[], size: number) {
+  const output: T[][] = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    output.push(items.slice(index, index + size));
+  }
+
+  return output;
+}
 
 async function fetchAllRows(
   serviceSupabase: ReturnType<typeof createClient>,
@@ -193,6 +222,98 @@ async function fetchAllRows(
   return rows;
 }
 
+async function fetchAssignedJobIdsForUser(
+  serviceSupabase: ReturnType<typeof createClient>,
+  context: Awaited<ReturnType<typeof resolveCurrentUserContext>>,
+  userId: string
+) {
+  const jobIds = new Set<string>();
+  const allIdentifiers = Array.from(
+    new Set([...context.staffRoleIds, ...context.employeeIds, userId].filter(Boolean).map(String))
+  );
+  const attempts: Array<{ column: string; values: string[] }> = [
+    { column: 'staff_role_id', values: context.staffRoleIds },
+    { column: 'staff_id', values: context.staffRoleIds },
+    { column: 'employee_id', values: context.employeeIds },
+    { column: 'user_id', values: [userId] },
+    { column: 'employee_user_id', values: [userId] },
+    { column: 'assigned_to', values: allIdentifiers },
+  ];
+
+  for (const attempt of attempts) {
+    if (attempt.values.length === 0) continue;
+
+    for (const values of chunk(attempt.values, 100)) {
+      const { data, error } = await serviceSupabase
+        .from('opc_job_assignments')
+        .select('job_id,status')
+        .in(attempt.column, values)
+        .not('job_id', 'is', null)
+        .range(0, 9999);
+
+      if (error) {
+        if (isMissingColumnError(error)) continue;
+        throw error;
+      }
+
+      for (const row of data || []) {
+        const status = String(row.status || 'assigned').toLowerCase();
+
+        if (!INACTIVE_ASSIGNMENT_STATUSES.has(status) && row.job_id) {
+          jobIds.add(String(row.job_id));
+        }
+      }
+    }
+  }
+
+  return jobIds;
+}
+
+async function syncAssignedJobsInWindow(
+  serviceSupabase: ReturnType<typeof createClient>,
+  assignedJobIds: Set<string>,
+  userId: string,
+  timeMin: string,
+  timeMax: string
+) {
+  if (assignedJobIds.size === 0) return;
+
+  const relevantIds: string[] = [];
+
+  for (const jobIds of chunk(Array.from(assignedJobIds), 200)) {
+    const { data, error } = await serviceSupabase
+      .from('opc_service_jobs')
+      .select('id')
+      .in('id', jobIds)
+      .not('planned_start', 'is', null)
+      .not('planned_end', 'is', null)
+      .gte('planned_end', timeMin)
+      .lte('planned_start', timeMax);
+
+    if (error) throw error;
+    relevantIds.push(...(data || []).map((row: AnyRow) => String(row.id)).filter(Boolean));
+  }
+
+  for (const jobIds of chunk(relevantIds, 5)) {
+    await Promise.all(
+      jobIds.map(async (jobId) => {
+        try {
+          await syncJobCalendarState({
+            supabase: serviceSupabase,
+            jobId,
+            actorUserId: userId,
+          });
+        } catch (error) {
+          console.warn(
+            `[OPC Calendar] Assigned job ${jobId} could not be self-healed:`,
+            error instanceof Error ? error.message : error
+          );
+        }
+      })
+    );
+  }
+}
+
 function canEmployeeSeeEvent(
   event: AnyRow,
   calendarById: Map<string, AnyRow>,
@@ -206,20 +327,19 @@ function canEmployeeSeeEvent(
 
   const ownsCalendar =
     calendar.owner_user_id === userId ||
-    (calendar.owner_staff_role_id && context.staffRoleIds.includes(calendar.owner_staff_role_id));
+    (calendar.owner_staff_role_id && context.staffRoleIds.includes(String(calendar.owner_staff_role_id)));
 
-  if (ownsCalendar) return true;
+  // The company calendar is intentionally shared with every portal employee.
+  if (calendar.calendar_type === 'team' && calendar.is_private !== true) return true;
 
+  // Job copies in a personal calendar are assignment-based. This also hides stale
+  // copies immediately after an employee is removed from a job.
   if (isJobCalendarEvent(event)) {
     if (!event.job_id) return false;
-    return assignedJobIds.has(event.job_id);
+    return assignedJobIds.has(String(event.job_id));
   }
 
-  if (calendar.calendar_type === 'team') {
-    return true;
-  }
-
-  return false;
+  return ownsCalendar;
 }
 
 export const GET: APIRoute = async ({ request, locals }) => {
@@ -241,6 +361,25 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const context = await resolveCurrentUserContext(serviceSupabase, user.id);
     const currentRole = context.currentRole;
     const normalizedCurrentRole = normalizeRole(currentRole);
+    const timeMin = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString();
+    const timeMax = new Date(Date.now() + 1000 * 60 * 60 * 24 * 400).toISOString();
+
+    let assignedJobIds = new Set<string>();
+
+    if (
+      !context.canViewAllJobs &&
+      normalizedCurrentRole === 'employee' &&
+      context.canViewAssignedJobs
+    ) {
+      assignedJobIds = await fetchAssignedJobIdsForUser(serviceSupabase, context, user.id);
+      await syncAssignedJobsInWindow(
+        serviceSupabase,
+        assignedJobIds,
+        user.id,
+        timeMin,
+        timeMax
+      );
+    }
 
     const [calendarsResult, staffResult, notificationsResult] = await Promise.all([
       serviceSupabase
@@ -276,52 +415,28 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const allCalendars = calendarsResult.data || [];
 
     const visibleCalendars = allCalendars.filter((calendar: AnyRow) => {
-      if (context.canViewAllJobs || isAdminRole(currentRole)) return true;
+      const ownsCalendar =
+        calendar.owner_user_id === user.id ||
+        (calendar.owner_staff_role_id &&
+          context.staffRoleIds.includes(String(calendar.owner_staff_role_id)));
 
-      if (normalizedCurrentRole === 'employee') {
-        return (
-          calendar.calendar_type === 'team' ||
-          calendar.owner_user_id === user.id ||
-          context.staffRoleIds.includes(calendar.owner_staff_role_id)
-        );
-      }
+      // The general company calendar is available to every authenticated portal role.
+      if (calendar.calendar_type === 'team' && calendar.is_private !== true) return true;
+      if (ownsCalendar) return true;
 
-      return calendar.owner_user_id === user.id;
+      // Private calendars are never exposed to another owner/admin/dispatch user.
+      if (calendar.is_private === true) return false;
+
+      return context.canViewAllJobs || isAdminRole(currentRole);
     });
 
     const visibleCalendarIds = visibleCalendars.map((calendar: AnyRow) => calendar.id);
     const calendarById = new Map(visibleCalendars.map((calendar: AnyRow) => [calendar.id, calendar]));
 
-    let assignedJobIds = new Set<string>();
-
-    if (
-      !context.canViewAllJobs &&
-      normalizedCurrentRole === 'employee' &&
-      context.canViewAssignedJobs &&
-      context.employeeIds.length > 0
-    ) {
-      const { data: assignedRows, error: assignedError } = await serviceSupabase
-        .from('opc_job_assignments')
-        .select('job_id')
-        .in('employee_id', context.employeeIds)
-        .not('job_id', 'is', null);
-
-      if (assignedError) throw assignedError;
-
-      assignedJobIds = new Set(
-        (assignedRows || [])
-          .map((row: AnyRow) => row.job_id)
-          .filter(Boolean)
-      );
-    }
-
     let events: AnyRow[] = [];
     let attendees: AnyRow[] = [];
 
     if (visibleCalendarIds.length > 0) {
-      const timeMin = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString();
-      const timeMax = new Date(Date.now() + 1000 * 60 * 60 * 24 * 400).toISOString();
-
       const rawEvents = await fetchAllRows(
         serviceSupabase,
         'opc_calendar_events',

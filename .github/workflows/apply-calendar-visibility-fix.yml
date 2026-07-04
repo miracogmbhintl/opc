@@ -1,0 +1,55 @@
+name: Calendar fix validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'public/opc-calendar-fetch-bridge.js'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/apply-calendar-visibility-fix.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --silent
+      - name: Build
+        id: build
+        shell: bash
+        run: |
+          set +e
+          npm run build > /tmp/opc-build.log 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ "$status" -ne 0 ]; then
+            {
+              echo '<!-- opc-calendar-build-error -->'
+              echo '### Calendar fix build error'
+              echo
+              echo '```text'
+              tail -n 90 /tmp/opc-build.log
+              echo '```'
+            } > /tmp/opc-build-comment.md
+          fi
+          exit 0
+      - name: Report build failure
+        if: steps.build.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file /tmp/opc-build-comment.md
+      - name: Fail when build failed
+        if: steps.build.outputs.status != '0'
+        run: exit 1

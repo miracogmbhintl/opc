@@ -4,6 +4,16 @@ import { getOpcSupabaseUrl, getOpcSupabaseAnonKey, getOpcSupabaseServiceRoleKey 
 
 type AnyRow = Record<string, any>;
 
+const INACTIVE_ASSIGNMENT_STATUSES = new Set([
+  'removed',
+  'unassigned',
+  'cancelled',
+  'canceled',
+  'deleted',
+  'inactive',
+  'rejected',
+]);
+
 function getSupabaseUrl(locals?: any) {
   return getOpcSupabaseUrl(locals);
 }
@@ -116,6 +126,13 @@ function chunk<T>(items: T[], size = 500) {
   return chunks;
 }
 
+function isMissingColumnError(error: any) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+
+  return code === '42703' || (message.includes('column') && message.includes('does not exist'));
+}
+
 async function resolveCurrentUserContext(
   serviceSupabase: ReturnType<typeof createClient>,
   userId: string
@@ -165,25 +182,47 @@ async function resolveCurrentUserContext(
 
 async function fetchAssignedJobIds(
   serviceSupabase: ReturnType<typeof createClient>,
-  employeeIds: string[]
+  identifiers: { staffRoleIds: string[]; employeeIds: string[]; userId: string }
 ) {
-  if (employeeIds.length === 0) return [];
-
   const jobIds = new Set<string>();
+  const allIdentifiers = uniqueValues([
+    ...identifiers.staffRoleIds,
+    ...identifiers.employeeIds,
+    identifiers.userId,
+  ]);
+  const attempts: Array<{ column: string; values: string[] }> = [
+    { column: 'staff_role_id', values: identifiers.staffRoleIds },
+    { column: 'staff_id', values: identifiers.staffRoleIds },
+    { column: 'employee_id', values: identifiers.employeeIds },
+    { column: 'user_id', values: [identifiers.userId] },
+    { column: 'employee_user_id', values: [identifiers.userId] },
+    { column: 'assigned_to', values: allIdentifiers },
+  ];
 
-  for (const employeeIdChunk of chunk(employeeIds, 100)) {
-    const rows = await fetchAllRows((from, to) =>
-      serviceSupabase
-        .from('opc_job_assignments')
-        .select('job_id')
-        .in('employee_id', employeeIdChunk)
-        .not('job_id', 'is', null)
-        .range(from, to)
-    );
+  for (const attempt of attempts) {
+    if (attempt.values.length === 0) continue;
 
-    rows.forEach((row) => {
-      if (row.job_id) jobIds.add(String(row.job_id));
-    });
+    for (const valueChunk of chunk(attempt.values, 100)) {
+      const rows = await fetchAllRows((from, to) =>
+        serviceSupabase
+          .from('opc_job_assignments')
+          .select('*')
+          .in(attempt.column, valueChunk)
+          .not('job_id', 'is', null)
+          .range(from, to)
+      ).catch((error) => {
+        if (isMissingColumnError(error)) return [];
+        throw error;
+      });
+
+      for (const row of rows) {
+        const status = String(row.status || row.assignment_status || 'assigned').toLowerCase();
+
+        if (!INACTIVE_ASSIGNMENT_STATUSES.has(status) && row.job_id) {
+          jobIds.add(String(row.job_id));
+        }
+      }
+    }
   }
 
   return Array.from(jobIds);
@@ -319,10 +358,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
       jobs = await fetchAllVisibleJobs(serviceSupabase, fromIso, toIso);
     } else if (
       normalizeRole(context.currentRole) === 'employee' &&
-      context.canViewAssignedJobs &&
-      context.employeeIds.length > 0
+      context.canViewAssignedJobs
     ) {
-      const assignedJobIds = await fetchAssignedJobIds(serviceSupabase, context.employeeIds);
+      const assignedJobIds = await fetchAssignedJobIds(serviceSupabase, {
+        staffRoleIds: context.staffRoleIds,
+        employeeIds: context.employeeIds,
+        userId: user.id,
+      });
       jobs = assignedJobIds.length > 0 ? await fetchJobsByIds(serviceSupabase, assignedJobIds) : [];
 
       jobs = jobs.filter((job) => {
