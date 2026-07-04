@@ -152,17 +152,6 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
     setError('');
 
     try {
-      const { data, error: deleteError } = await supabase
-        .from('opc_job_assignments')
-        .delete()
-        .eq('id', assignmentId)
-        .select('id');
-
-      if (deleteError) throw deleteError;
-      if (!Array.isArray(data) || data.length === 0) {
-        throw new Error('Die Zuweisung wurde nicht gefunden oder durfte nicht entfernt werden.');
-      }
-
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -176,12 +165,15 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ job_id: jobId }),
+        body: JSON.stringify({
+          job_id: jobId,
+          remove_assignment_id: assignmentId,
+        }),
       });
       const result = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(result?.error || 'Kalender konnte nach der Entfernung nicht synchronisiert werden.');
+        throw new Error(result?.error || 'Zuweisung und Kalender konnten nicht aktualisiert werden.');
       }
 
       await load();
