@@ -19,7 +19,13 @@ type KnownEnvKey =
   | 'GOOGLE_REDIRECT_URI'
   | 'GOOGLE_TOKEN_ENCRYPTION_KEY'
   | 'GITHUB_TOKEN'
-  | 'OPC_DEBUG_API';
+  | 'OPC_DEBUG_API'
+  | 'EURO_OFFICE_URL'
+  | 'EURO_OFFICE_JWT_SECRET'
+  | 'PUBLIC_SITE_URL'
+  | 'PUBLIC_APP_URL'
+  | 'PUBLIC_BASE_URL'
+  | 'SITE_URL';
 
 const STATIC_ASTRO_ENV: Partial<Record<KnownEnvKey, string | undefined>> = {
   PUBLIC_SUPABASE_URL: import.meta.env.PUBLIC_SUPABASE_URL,
@@ -39,6 +45,12 @@ const STATIC_ASTRO_ENV: Partial<Record<KnownEnvKey, string | undefined>> = {
   GOOGLE_TOKEN_ENCRYPTION_KEY: import.meta.env.GOOGLE_TOKEN_ENCRYPTION_KEY,
   GITHUB_TOKEN: import.meta.env.GITHUB_TOKEN,
   OPC_DEBUG_API: import.meta.env.OPC_DEBUG_API,
+  EURO_OFFICE_URL: import.meta.env.EURO_OFFICE_URL,
+  EURO_OFFICE_JWT_SECRET: import.meta.env.EURO_OFFICE_JWT_SECRET,
+  PUBLIC_SITE_URL: import.meta.env.PUBLIC_SITE_URL,
+  PUBLIC_APP_URL: import.meta.env.PUBLIC_APP_URL,
+  PUBLIC_BASE_URL: import.meta.env.PUBLIC_BASE_URL,
+  SITE_URL: import.meta.env.SITE_URL,
 };
 
 function readProcessEnvValue(key: string): string {
@@ -165,6 +177,42 @@ export function getOpcSupabaseServerConfig(source?: any) {
     anonKey: getOpcSupabaseAnonKey(source),
     serviceRoleKey: getOpcSupabaseServiceRoleKey(source),
   };
+}
+
+export function getOpcOfficeConfig(source?: any) {
+  const serverUrl = getOpcServerEnvValue(source, 'EURO_OFFICE_URL').replace(/\/+$/, '');
+  const jwtSecret = getOpcServerEnvValue(source, 'EURO_OFFICE_JWT_SECRET');
+
+  if (!serverUrl) {
+    throw new Error('EURO_OFFICE_URL is missing.');
+  }
+
+  if (!/^https?:\/\//i.test(serverUrl)) {
+    throw new Error('EURO_OFFICE_URL must be an absolute HTTP or HTTPS URL.');
+  }
+
+  if (!jwtSecret || jwtSecret.length < 24) {
+    throw new Error('EURO_OFFICE_JWT_SECRET must contain at least 24 characters.');
+  }
+
+  return {
+    serverUrl,
+    jwtSecret,
+    apiScriptUrl: `${serverUrl}/web-apps/apps/api/documents/api.js`,
+  };
+}
+
+export function getOpcPublicOrigin(source: any, request?: Request) {
+  const configured =
+    getOpcServerEnvValue(source, 'PUBLIC_SITE_URL') ||
+    getOpcServerEnvValue(source, 'PUBLIC_APP_URL') ||
+    getOpcServerEnvValue(source, 'PUBLIC_BASE_URL') ||
+    getOpcServerEnvValue(source, 'SITE_URL');
+
+  if (configured) return configured.replace(/\/+$/, '');
+  if (request) return new URL(request.url).origin;
+
+  throw new Error('A public application origin could not be resolved.');
 }
 
 export function createOpcSupabaseAdmin(source?: any): SupabaseClient {

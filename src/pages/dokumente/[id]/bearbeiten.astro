@@ -1,0 +1,19 @@
+---
+import OfficeEditorPage from '../../../components/documents/OfficeEditorPage';
+import '../../../components/documents/office-editor.css';
+const documentId = Astro.params.id || '';
+---
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Dokument bearbeiten | Orange Pro Clean</title>
+  </head>
+  <body>
+    <OfficeEditorPage documentId={documentId} client:only="react" />
+  </body>
+</html>
+<style>
+  :global(html), :global(body) { margin: 0; background: #fff; }
+  :global(*) { box-sizing: border-box; }
+</style>
