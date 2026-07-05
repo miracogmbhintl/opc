@@ -12,6 +12,7 @@ import { supabase } from '../../lib/supabase';
 import { baseUrl } from '../../lib/base-url';
 import MirakaDashboardShell from '../MirakaDashboardShell';
 import './documents.css';
+import './office-apps.css';
 
 type DocumentRow = {
   id: string;
