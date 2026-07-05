@@ -114,9 +114,11 @@ export async function requireOpcOfficeAuth({
     throw new OpcOfficeHttpError(`Staff role lookup failed: ${staffRoleError.message}`, 500);
   }
 
+  // Select the complete profile record instead of naming optional legacy columns.
+  // The production user_profiles schema does not contain is_owner/is_admin.
   const { data: profile, error: profileError } = await admin
     .from('user_profiles')
-    .select('id, role, is_owner, is_admin, full_name, email')
+    .select('*')
     .eq('id', user.id)
     .limit(1)
     .maybeSingle();
@@ -125,16 +127,24 @@ export async function requireOpcOfficeAuth({
     throw new OpcOfficeHttpError(`Profile lookup failed: ${profileError.message}`, 500);
   }
 
+  const profileRecord = (profile || {}) as Record<string, any>;
   let role: OpcOfficeRole;
 
-  if (profile?.is_owner === true) {
-    role = 'owner';
-  } else if (profile?.is_admin === true) {
-    role = 'admin';
-  } else if (staffRole?.role) {
+  // opc_staff_roles is the authoritative role source for internal OPC users.
+  if (staffRole?.role) {
     role = normalizeOfficeRole(staffRole.role);
+  } else if (profileRecord.is_owner === true) {
+    role = 'owner';
+  } else if (profileRecord.is_admin === true) {
+    role = 'admin';
   } else {
-    role = normalizeOfficeRole(profile?.role || user.app_metadata?.opc_role || user.user_metadata?.opc_role);
+    role = normalizeOfficeRole(
+      profileRecord.role ||
+        profileRecord.opc_staff_role ||
+        profileRecord.staff_role ||
+        user.app_metadata?.opc_role ||
+        user.user_metadata?.opc_role,
+    );
   }
 
   let clientId: string | null = null;
@@ -155,7 +165,9 @@ export async function requireOpcOfficeAuth({
 
   const userName =
     staffRole?.display_name ||
-    profile?.full_name ||
+    profileRecord.full_name ||
+    profileRecord.display_name ||
+    profileRecord.name ||
     user.user_metadata?.full_name ||
     user.user_metadata?.display_name ||
     user.email ||

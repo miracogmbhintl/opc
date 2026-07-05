@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, FileSpreadsheet, FileText, Plus, Presentation, Search, Upload } from 'lucide-react';
+import {
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Plus,
+  Presentation,
+  Search,
+  Upload,
+} from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { baseUrl } from '../../lib/base-url';
 import MirakaDashboardShell from '../MirakaDashboardShell';
 import './documents.css';
+import './office-apps.css';
 
 type DocumentRow = {
   id: string;
@@ -58,7 +67,9 @@ export default function DocumentsPage() {
   const [error, setError] = useState('');
   const fileInput = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+  }, []);
 
   async function load() {
     try {
@@ -75,6 +86,7 @@ export default function DocumentsPage() {
   async function createBlank(documentKind: string) {
     setBusy(true);
     setError('');
+
     try {
       const payload = await request('/api/opc/documents', {
         method: 'POST',
@@ -91,6 +103,7 @@ export default function DocumentsPage() {
   async function upload(file: File) {
     setBusy(true);
     setError('');
+
     try {
       const body = new FormData();
       body.set('file', file);
@@ -107,7 +120,9 @@ export default function DocumentsPage() {
 
   async function download(documentId: string) {
     try {
-      const payload = await request(`/api/opc/documents/${documentId}/signed-download`, { method: 'POST' });
+      const payload = await request(`/api/opc/documents/${documentId}/signed-download`, {
+        method: 'POST',
+      });
       window.location.assign(payload.signedUrl);
     } catch (next: any) {
       setError(next.message || 'Download konnte nicht gestartet werden.');
@@ -116,52 +131,163 @@ export default function DocumentsPage() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return documents.filter((item) =>
-      (kind === 'all' || item.document_kind === kind) &&
-      (!needle || `${item.title} ${item.file_name} ${item.description || ''}`.toLowerCase().includes(needle)),
+    return documents.filter(
+      (item) =>
+        (kind === 'all' || item.document_kind === kind) &&
+        (!needle ||
+          `${item.title} ${item.file_name} ${item.description || ''}`
+            .toLowerCase()
+            .includes(needle)),
     );
   }, [documents, kind, query]);
 
   return (
-    <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch', 'employee']} currentPath="/dokumente" fullWidth>
+    <MirakaDashboardShell
+      requiredRole={['owner', 'admin', 'dispatch', 'employee']}
+      currentPath="/dokumente"
+      fullWidth
+    >
       <div className="opc-docs-page">
         <header className="opc-docs-header">
-          <div><small>OFFICE</small><h1>Dokumente</h1><p>Dokumente, Tabellen und Präsentationen direkt im Portal.</p></div>
-          {canCreate && <div className="opc-docs-actions">
-            <input ref={fileInput} type="file" hidden accept=".doc,.docx,.odt,.rtf,.txt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); }} />
-            <button onClick={() => fileInput.current?.click()} disabled={busy}><Upload size={16} /> Hochladen</button>
-            <a href={`${baseUrl}/dokumente/neu`}><Plus size={16} /> Neu</a>
-          </div>}
+          <div>
+            <small>OFFICE</small>
+            <h1>Dokumente</h1>
+            <p>Word-Dokumente, Excel-Tabellen und PowerPoint-Präsentationen direkt im Portal.</p>
+          </div>
         </header>
+
+        <input
+          ref={fileInput}
+          type="file"
+          hidden
+          accept=".doc,.docx,.odt,.rtf,.txt,.xls,.xlsx,.ods,.csv,.ppt,.pptx,.odp,.pdf"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void upload(file);
+          }}
+        />
 
         {error && <div className="opc-docs-error">{error}</div>}
 
-        {canCreate && <section className="opc-docs-create">
-          <button disabled={busy} onClick={() => void createBlank('document')}><FileText /> <span>Dokument<small>DOCX</small></span></button>
-          <button disabled={busy} onClick={() => void createBlank('spreadsheet')}><FileSpreadsheet /> <span>Tabelle<small>XLSX</small></span></button>
-          <button disabled={busy} onClick={() => void createBlank('presentation')}><Presentation /> <span>Präsentation<small>PPTX</small></span></button>
-        </section>}
+        {canCreate && (
+          <section className="opc-office-launcher" aria-label="Neues Office-Dokument erstellen">
+            <div className="opc-office-launcher-heading">
+              <div>
+                <h2>Neu erstellen</h2>
+                <p>Wähle die gewünschte Office-Anwendung.</p>
+              </div>
+            </div>
+
+            <div className="opc-office-app-grid">
+              <button
+                className="opc-office-app opc-office-app-word"
+                disabled={busy}
+                onClick={() => void createBlank('document')}
+              >
+                <span className="opc-office-app-logo">W</span>
+                <span className="opc-office-app-copy">
+                  <strong>Word-Dokument</strong>
+                  <small>Leeres DOCX-Dokument erstellen</small>
+                </span>
+                <Plus className="opc-office-app-action" size={19} />
+              </button>
+
+              <button
+                className="opc-office-app opc-office-app-excel"
+                disabled={busy}
+                onClick={() => void createBlank('spreadsheet')}
+              >
+                <span className="opc-office-app-logo">X</span>
+                <span className="opc-office-app-copy">
+                  <strong>Excel-Tabelle</strong>
+                  <small>Leere XLSX-Arbeitsmappe erstellen</small>
+                </span>
+                <Plus className="opc-office-app-action" size={19} />
+              </button>
+
+              <button
+                className="opc-office-app opc-office-app-powerpoint"
+                disabled={busy}
+                onClick={() => void createBlank('presentation')}
+              >
+                <span className="opc-office-app-logo">P</span>
+                <span className="opc-office-app-copy">
+                  <strong>PowerPoint</strong>
+                  <small>Leere PPTX-Präsentation erstellen</small>
+                </span>
+                <Plus className="opc-office-app-action" size={19} />
+              </button>
+
+              <button
+                className="opc-office-app opc-office-app-upload"
+                disabled={busy}
+                onClick={() => fileInput.current?.click()}
+              >
+                <span className="opc-office-app-logo"><Upload size={24} /></span>
+                <span className="opc-office-app-copy">
+                  <strong>Datei hochladen</strong>
+                  <small>Bestehende Office- oder PDF-Datei öffnen</small>
+                </span>
+                <Plus className="opc-office-app-action" size={19} />
+              </button>
+            </div>
+          </section>
+        )}
 
         <section className="opc-docs-toolbar">
-          <label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Dokumente durchsuchen" /></label>
+          <label>
+            <Search size={16} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Dokumente durchsuchen"
+            />
+          </label>
           <select value={kind} onChange={(event) => setKind(event.target.value)}>
-            <option value="all">Alle Dateitypen</option><option value="document">Dokumente</option><option value="spreadsheet">Tabellen</option><option value="presentation">Präsentationen</option><option value="pdf">PDF</option>
+            <option value="all">Alle Dateitypen</option>
+            <option value="document">Word-Dokumente</option>
+            <option value="spreadsheet">Excel-Tabellen</option>
+            <option value="presentation">PowerPoint</option>
+            <option value="pdf">PDF</option>
           </select>
         </section>
 
-        {loading ? <div className="opc-docs-empty">Dokumente werden geladen …</div> : filtered.length === 0 ? <div className="opc-docs-empty">Keine Dokumente gefunden.</div> : <section className="opc-docs-grid">
-          {filtered.map((item) => <article key={item.id}>
-            <div className="opc-docs-card-icon">{icon(item.document_kind)}</div>
-            <span className="opc-docs-extension">{item.file_extension.toUpperCase()}</span>
-            <h3>{item.title}</h3><p>{item.file_name}</p>
-            <small>Version {item.current_version_number || 1} · {size(item.file_size_bytes)}</small>
-            <div className="opc-docs-card-actions">
-              <a href={`${baseUrl}/dokumente/${item.id}`}>Öffnen</a>
-              <a className="primary" href={`${baseUrl}/dokumente/${item.id}/bearbeiten`}>Bearbeiten</a>
-              <button onClick={() => void download(item.id)} title="Herunterladen"><Download size={15} /></button>
+        {loading ? (
+          <div className="opc-docs-empty">Dokumente werden geladen …</div>
+        ) : filtered.length === 0 ? (
+          <div className="opc-docs-empty">
+            <div>
+              <strong>Noch keine Dokumente</strong>
+              <span>Erstelle oben ein neues Word-, Excel- oder PowerPoint-Dokument.</span>
             </div>
-          </article>)}
-        </section>}
+          </div>
+        ) : (
+          <section className="opc-docs-grid">
+            {filtered.map((item) => (
+              <article key={item.id}>
+                <div className="opc-docs-card-icon">{icon(item.document_kind)}</div>
+                <span className="opc-docs-extension">{item.file_extension.toUpperCase()}</span>
+                <h3>{item.title}</h3>
+                <p>{item.file_name}</p>
+                <small>
+                  Version {item.current_version_number || 1} · {size(item.file_size_bytes)}
+                </small>
+                <div className="opc-docs-card-actions">
+                  <a href={`${baseUrl}/dokumente/${item.id}`}>Öffnen</a>
+                  <a
+                    className="primary"
+                    href={`${baseUrl}/dokumente/${item.id}/bearbeiten`}
+                  >
+                    Bearbeiten
+                  </a>
+                  <button onClick={() => void download(item.id)} title="Herunterladen">
+                    <Download size={15} />
+                  </button>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
       </div>
     </MirakaDashboardShell>
   );
