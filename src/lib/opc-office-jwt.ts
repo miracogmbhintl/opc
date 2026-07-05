@@ -58,7 +58,7 @@ export async function signOfficeJwt(payload: JsonRecord, secret: string) {
   return `${unsignedToken}.${encodeBase64Url(new Uint8Array(signature))}`;
 }
 
-export async function verifyOfficeJwt<T extends JsonRecord = JsonRecord>(
+export async function verifyOfficeJwt<T = JsonRecord>(
   token: string,
   secret: string,
 ): Promise<T> {
@@ -90,9 +90,9 @@ export async function verifyOfficeJwt<T extends JsonRecord = JsonRecord>(
   const payload = JSON.parse(
     new TextDecoder().decode(decodeBase64Url(bodyPart)),
   ) as T;
-
+  const tokenClaims = payload as JsonRecord;
   const now = Math.floor(Date.now() / 1000);
-  const expiresAt = Number(payload?.exp || 0);
+  const expiresAt = Number(tokenClaims?.exp || 0);
 
   if (expiresAt && expiresAt < now) {
     throw new Error('Office token expired.');
