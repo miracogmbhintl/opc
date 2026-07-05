@@ -7,6 +7,88 @@ on:
       - '.github/workflows/deploy-euro-office-now.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: opc-office-immediate-deploy
+  cancel-in-progress: true
+
 jobs:
   deploy:
-    uses: ./.github/workflows/deploy-euro-office-container.yml
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      EURO_OFFICE_JWT_SECRET: ${{ secrets.EURO_OFFICE_JWT_SECRET }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          test ${#EURO_OFFICE_JWT_SECRET} -ge 24 || { echo "Missing or invalid EURO_OFFICE_JWT_SECRET"; exit 1; }
+
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet || true
+          docker system prune --all --force || true
+          df -h
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Office worker dependencies
+        working-directory: workers/euro-office
+        run: npm install --no-audit --no-fund
+
+      - name: Deploy Office container worker
+        working-directory: workers/euro-office
+        run: npx wrangler deploy
+
+      - name: Apply Office worker secret
+        working-directory: workers/euro-office
+        shell: bash
+        run: printf '%s' "$EURO_OFFICE_JWT_SECRET" | npx wrangler secret put EURO_OFFICE_JWT_SECRET
+
+      - name: Redeploy Office container worker
+        working-directory: workers/euro-office
+        run: npx wrangler deploy
+
+      - name: Apply OPC Pages variables
+        shell: bash
+        run: |
+          printf '%s' "$EURO_OFFICE_JWT_SECRET" | npx wrangler pages secret put EURO_OFFICE_JWT_SECRET --project-name opc
+          printf '%s' 'https://office.opc.miraka.ch' | npx wrangler pages secret put EURO_OFFICE_URL --project-name opc
+          printf '%s' 'https://opc.miraka.ch' | npx wrangler pages secret put PUBLIC_SITE_URL --project-name opc
+
+      - name: Install portal dependencies
+        run: npm ci
+
+      - name: Build portal
+        run: npm run build
+
+      - name: Deploy portal to Cloudflare Pages
+        run: npx wrangler pages deploy dist --project-name opc --branch main
+
+      - name: Verify Office runtime
+        shell: bash
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS https://office.opc.miraka.ch/healthcheck; then
+              echo
+              echo "Office runtime is ready."
+              exit 0
+            fi
+            echo "Waiting for Office runtime ($attempt/30)..."
+            sleep 20
+          done
+          exit 1
