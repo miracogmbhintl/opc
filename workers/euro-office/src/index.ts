@@ -1,6 +1,8 @@
 import { Container, getContainer } from '@cloudflare/containers';
 import { env as workerEnv } from 'cloudflare:workers';
 
+const runtimeEnv = workerEnv as unknown as Record<string, unknown>;
+
 export class EuroOfficeContainer extends Container {
   defaultPort = 80;
   sleepAfter = '30m';
@@ -8,7 +10,7 @@ export class EuroOfficeContainer extends Container {
   envVars = {
     EXAMPLE_ENABLED: 'false',
     JWT_ENABLED: 'true',
-    JWT_SECRET: String(workerEnv.EURO_OFFICE_JWT_SECRET || ''),
+    JWT_SECRET: String(runtimeEnv.EURO_OFFICE_JWT_SECRET || ''),
   };
 
   override onStart() {
@@ -25,7 +27,7 @@ export class EuroOfficeContainer extends Container {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: { EURO_OFFICE: any }): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === '/_opc/runtime') {
