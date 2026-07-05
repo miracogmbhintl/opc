@@ -14,6 +14,7 @@
     'opc_job_damage_reports',
     'opc_job_reports',
     'opc_reports',
+    'opc_staff_roles',
   ]);
 
   let accessPromise = null;
