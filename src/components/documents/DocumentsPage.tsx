@@ -24,9 +24,12 @@ async function token() {
 }
 
 async function request(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${await token()}`);
+
   const response = await fetch(path, {
     ...init,
-    headers: { Authorization: `Bearer ${await token()}`, ...(init.headers || {}) },
+    headers,
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || 'Anfrage fehlgeschlagen.');
