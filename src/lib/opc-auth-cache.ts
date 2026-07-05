@@ -8,8 +8,13 @@ import { supabase, type UserProfile, type UserRole } from './supabase';
  * restarts and temporary network outages. It is only profile metadata, not the
  * Supabase session itself.
  */
-const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v4:persistent';
-const LEGACY_AUTH_CACHE_KEYS = ['opc:auth-profile-cache', 'opc:auth-profile-cache:v2', 'opc:auth-profile-cache:v3'];
+const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v5:persistent';
+const LEGACY_AUTH_CACHE_KEYS = [
+  'opc:auth-profile-cache',
+  'opc:auth-profile-cache:v2',
+  'opc:auth-profile-cache:v3',
+  'opc:auth-profile-cache:v4:persistent',
+];
 const AUTH_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 type AuthCachePayload = {
@@ -60,24 +65,34 @@ function normalizeRole(value: unknown): UserRole {
   return 'client';
 }
 
-function normalizeStaffRole(row: StaffRoleRow | null | undefined): UserRole {
-  if (!row) return 'client';
+function normalizeStaffRole(
+  row: StaffRoleRow | null | undefined,
+  profileRole: UserRole = 'client',
+): UserRole {
+  if (!row) return profileRole;
 
   const explicitRole = normalizeRole(row.role);
 
-  if (explicitRole === 'owner' || explicitRole === 'admin' || explicitRole === 'dispatch') {
-    return explicitRole;
-  }
+  if (explicitRole === 'owner' || profileRole === 'owner') return 'owner';
+  if (explicitRole === 'admin' || profileRole === 'admin') return 'admin';
+  if (explicitRole === 'dispatch' || profileRole === 'dispatch') return 'dispatch';
 
-  if (explicitRole === 'employee') {
-    return 'employee';
-  }
-
+  // Operational permissions must win over a stale legacy employee label.
+  // This is the dispatch-admin case: full planning access without finance access.
   if (row.can_manage_jobs === true || row.can_view_all_jobs === true) {
     return 'dispatch';
   }
 
-  return 'employee';
+  if (explicitRole === 'employee') return 'employee';
+
+  return profileRole === 'client' ? 'employee' : profileRole;
+}
+
+function normalizeLegacyProfileRole(profile: Record<string, any> | null | undefined): UserRole {
+  if (profile?.is_owner === true) return 'owner';
+  if (profile?.is_admin === true) return 'admin';
+
+  return normalizeRole(profile?.role || profile?.opc_staff_role || profile?.staff_role);
 }
 
 function isNetworkLikeError(error: unknown) {
@@ -268,7 +283,16 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
   }
 
   try {
-    const staffRole = await fetchActiveStaffRoleByUser(user.id, user.email);
+    const [staffRole, legacyProfileResult] = await Promise.all([
+      fetchActiveStaffRoleByUser(user.id, user.email),
+      supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle(),
+    ]);
+    const legacyProfile = legacyProfileResult.data || null;
+    const legacyRole = normalizeLegacyProfileRole(legacyProfile);
 
     if (staffRole) {
       let employeeName = '';
@@ -289,7 +313,7 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
         id: user.id,
         email: staffRole.email || employeeEmail || user.email || '',
         full_name: staffRole.display_name || employeeName || user.email || 'User',
-        role: normalizeStaffRole(staffRole),
+        role: normalizeStaffRole(staffRole, legacyRole),
         created_at: '',
         updated_at: '',
       };
@@ -298,12 +322,6 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
       return profile;
     }
 
-    const { data: legacyProfile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
-
     if (!legacyProfile) return cachedProfile || null;
 
     const profile: UserProfile = {
@@ -311,7 +329,7 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
       id: user.id,
       email: legacyProfile.email || user.email || '',
       full_name: legacyProfile.full_name || legacyProfile.name || user.email || 'User',
-      role: normalizeRole(legacyProfile.role || legacyProfile.opc_staff_role || legacyProfile.staff_role),
+      role: normalizeLegacyProfileRole(legacyProfile),
     } as UserProfile;
 
     writeCachedOpcAuthProfile(profile);
