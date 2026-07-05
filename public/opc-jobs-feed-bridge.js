@@ -16,6 +16,11 @@
     'opc_reports',
     'opc_staff_roles',
   ]);
+  const managedRpcs = new Set([
+    'opc_delete_service_job',
+    'opc_append_job_note',
+    'opc_get_job_assignments',
+  ]);
 
   let accessPromise = null;
   let isManager = false;
@@ -128,7 +133,10 @@
 
     if (!url.pathname.includes('/rest/v1/')) return originalFetch(input, init);
 
-    const table = url.pathname.split('/rest/v1/')[1]?.split('/')[0] || '';
+    const restPath = url.pathname.split('/rest/v1/')[1] || '';
+    const parts = restPath.split('/').filter(Boolean);
+    const table = parts[0] || '';
+    const rpc = table === 'rpc' ? parts[1] || '' : '';
     const select = String(url.searchParams.get('select') || '');
     const token = bearer(headers);
     if (!token) return originalFetch(input, init);
@@ -143,7 +151,7 @@
       catch { return originalFetch(input, init); }
     }
 
-    if (!managedTables.has(table)) return originalFetch(input, init);
+    if (!managedTables.has(table) && !managedRpcs.has(rpc)) return originalFetch(input, init);
 
     try {
       const response = await proxy(input, init, url, method, headers, token);
