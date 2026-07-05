@@ -7,21 +7,4 @@ services:
       - "127.0.0.1:${EURO_OFFICE_PORT:-8080}:80"
     environment:
       EXAMPLE_ENABLED: "false"
-      JWT_ENABLED: "true"
       JWT_SECRET: "${EURO_OFFICE_JWT_SECRET}"
-      JWT_HEADER: "AuthorizationJwt"
-    volumes:
-      - euro_office_data:/var/www/onlyoffice/Data
-      - euro_office_logs:/var/log/onlyoffice
-      - euro_office_cache:/var/lib/onlyoffice
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/healthcheck || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 120s
-
-volumes:
-  euro_office_data:
-  euro_office_logs:
-  euro_office_cache:
