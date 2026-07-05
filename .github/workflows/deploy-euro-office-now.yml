@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/deploy-euro-office-now.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-euro-office-now.yml'
   workflow_dispatch:
 
 permissions:
