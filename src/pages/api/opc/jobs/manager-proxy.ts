@@ -21,6 +21,12 @@ const MANAGED_TABLES = new Set([
   'opc_reports',
 ]);
 
+const JOB_RPCS = new Set([
+  'opc_delete_service_job',
+  'opc_append_job_note',
+  'opc_get_job_assignments',
+]);
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -38,14 +44,29 @@ function resolveTarget(request: Request) {
   if (!target.startsWith('/rest/v1/')) return null;
 
   const parsed = new URL(target, 'https://opc.internal');
-  const table = parsed.pathname.split('/rest/v1/')[1]?.split('/')[0] || '';
+  const restPath = parsed.pathname.split('/rest/v1/')[1] || '';
+  const parts = restPath.split('/').filter(Boolean);
+
+  if (parts[0] === 'rpc') {
+    const rpc = parts[1] || '';
+    if (!JOB_RPCS.has(rpc)) return null;
+
+    return {
+      kind: 'rpc' as const,
+      name: rpc,
+      pathAndQuery: `${parsed.pathname}${parsed.search}`,
+    };
+  }
+
+  const table = parts[0] || '';
 
   if (!table || (!READ_ONLY_TABLES.has(table) && !MANAGED_TABLES.has(table))) {
     return null;
   }
 
   return {
-    table,
+    kind: 'table' as const,
+    name: table,
     pathAndQuery: `${parsed.pathname}${parsed.search}`,
   };
 }
@@ -64,9 +85,12 @@ const handler: APIRoute = async ({ request, locals }) => {
     }
 
     const method = request.method.toUpperCase();
-    const allowedMethods = READ_ONLY_TABLES.has(target.table)
-      ? new Set(['GET', 'HEAD'])
-      : new Set(['GET', 'HEAD', 'POST', 'PATCH', 'DELETE']);
+    const allowedMethods =
+      target.kind === 'rpc'
+        ? new Set(['GET', 'HEAD', 'POST'])
+        : READ_ONLY_TABLES.has(target.name)
+          ? new Set(['GET', 'HEAD'])
+          : new Set(['GET', 'HEAD', 'POST', 'PATCH', 'DELETE']);
 
     if (!allowedMethods.has(method)) {
       return json({ error: 'Unsupported job data operation.' }, 405);
