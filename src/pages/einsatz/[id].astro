@@ -13,17 +13,13 @@ import { ClientRouter } from 'astro:transitions';
     <script is:inline>
     (() => {
       if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
-
       window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
-
       const noMotionTransition = (callback) => {
         let callbackResult;
-
         try {
           callbackResult = typeof callback === 'function' ? callback() : undefined;
         } catch (error) {
           const rejected = Promise.reject(error);
-
           return {
             ready: rejected,
             updateCallbackDone: rejected,
@@ -31,9 +27,7 @@ import { ClientRouter } from 'astro:transitions';
             skipTransition() {},
           };
         }
-
         const done = Promise.resolve(callbackResult);
-
         return {
           ready: done,
           updateCallbackDone: done,
@@ -41,7 +35,6 @@ import { ClientRouter } from 'astro:transitions';
           skipTransition() {},
         };
       };
-
       try {
         Object.defineProperty(document, 'startViewTransition', {
           configurable: true,
@@ -53,30 +46,23 @@ import { ClientRouter } from 'astro:transitions';
       }
     })();
   </script>
-  <script is:inline src="/opc-jobs-feed-bridge.js"></script>
+  <script is:inline src="/opc-jobs-feed-bridge.js?v=20260705-2"></script>
   <script is:inline src="/opc-calendar-fetch-bridge.js"></script>
   <ClientRouter fallback="swap" />
-  
-  <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
-
   <meta name="theme-color" content="#ff6a00" />
   <meta name="application-name" content="Orange Pro Clean" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta charset="UTF-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Einsatzdetails - Orange Pro Clean</title>
-  <link
-    rel="icon"
-    type="image/png"
-    href="/favicon.ico"
-  />
+  <link rel="icon" type="image/png" href="/favicon.ico" />
 </head>
 <body>
   <EinsatzDetailPage client:only="react" jobId={id || ''} />
