@@ -4,13 +4,37 @@ import { supabase } from '../../../lib/supabase';
 function normalizeRole(value: unknown) {
   const role = String(value || '').toLowerCase().trim();
 
-  if (role === 'owner') return 'owner';
-  if (role === 'admin') return 'admin';
+  if (role === 'owner' || role === 'godmode') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
   if (role === 'dispatch' || role === 'dispatcher' || role === 'disposition') return 'dispatch';
   if (role === 'employee' || role === 'mitarbeiter' || role === 'staff') return 'employee';
   if (role === 'client' || role === 'kunde') return 'client';
 
   return 'client';
+}
+
+function resolveProfileRole(profile: Record<string, any> | null | undefined) {
+  if (profile?.is_owner === true) return 'owner';
+  if (profile?.is_admin === true) return 'admin';
+
+  return normalizeRole(profile?.role || profile?.opc_staff_role || profile?.staff_role);
+}
+
+function resolveStaffRole(staffRole: Record<string, any> | null | undefined, profileRole: string) {
+  if (!staffRole) return profileRole;
+
+  const explicitRole = normalizeRole(staffRole.role);
+
+  if (['owner', 'admin', 'dispatch'].includes(explicitRole)) return explicitRole;
+  if (['owner', 'admin', 'dispatch'].includes(profileRole)) return profileRole;
+
+  if (staffRole.can_manage_jobs === true || staffRole.can_view_all_jobs === true) {
+    return 'dispatch';
+  }
+
+  if (explicitRole === 'employee') return 'employee';
+
+  return profileRole || 'client';
 }
 
 export const GET: APIRoute = async ({ locals }) => {
@@ -26,13 +50,15 @@ export const GET: APIRoute = async ({ locals }) => {
 
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('id, email, full_name, role, client_id, created_at')
+      .select('*')
       .eq('id', session.user.id)
       .maybeSingle();
 
     const { data: staffRole } = await supabase
       .from('opc_staff_roles')
-      .select('id, user_id, employee_id, email, display_name, role, status, can_access_portal')
+      .select(
+        'id, user_id, employee_id, email, display_name, role, status, can_access_portal, can_manage_jobs, can_view_all_jobs',
+      )
       .eq('user_id', session.user.id)
       .eq('status', 'active')
       .eq('can_access_portal', true)
@@ -47,14 +73,21 @@ export const GET: APIRoute = async ({ locals }) => {
       });
     }
 
+    const profileRole = resolveProfileRole(profile);
+    const effectiveRole = resolveStaffRole(staffRole, profileRole);
+
     const enrichedProfile = {
       ...(profile || {}),
       id: session.user.id,
       email: staffRole?.email || profile?.email || session.user.email || '',
       full_name: staffRole?.display_name || profile?.full_name || session.user.email || 'User',
-      role: staffRole ? normalizeRole(staffRole.role) : normalizeRole(profile?.role),
+      role: effectiveRole,
       opc_staff_role_id: staffRole?.id || null,
       employee_id: staffRole?.employee_id || null,
+      can_manage_jobs:
+        staffRole?.can_manage_jobs === true || ['owner', 'admin', 'dispatch'].includes(effectiveRole),
+      can_view_all_jobs:
+        staffRole?.can_view_all_jobs === true || ['owner', 'admin', 'dispatch'].includes(effectiveRole),
       last_sign_in_at: session.user.last_sign_in_at || null,
     };
 
