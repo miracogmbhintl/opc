@@ -55,7 +55,7 @@ function copyHeader(source: Headers, target: Headers, name: string) {
   if (value) target.set(name, value);
 }
 
-export const ALL: APIRoute = async ({ request, locals }) => {
+const handler: APIRoute = async ({ request, locals }) => {
   try {
     const target = resolveTarget(request);
 
@@ -143,3 +143,9 @@ export const ALL: APIRoute = async ({ request, locals }) => {
     );
   }
 };
+
+export const GET = handler;
+export const HEAD = handler;
+export const POST = handler;
+export const PATCH = handler;
+export const DELETE = handler;
