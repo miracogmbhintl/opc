@@ -1,0 +1,16 @@
+{
+  "name": "opc-euro-office-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.0.30"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "wrangler": "4.56.0"
+  }
+}

@@ -26,6 +26,13 @@ type DocumentRow = {
   updated_at: string;
 };
 
+type EngineStatus = {
+  configured: boolean;
+  reachable: boolean;
+  status: 'ready' | 'starting' | 'unreachable' | 'configuration_required';
+  message: string;
+};
+
 async function token() {
   const { data } = await supabase.auth.getSession();
   if (!data.session?.access_token) throw new Error('Anmeldung abgelaufen.');
@@ -60,6 +67,7 @@ function size(bytes?: number | null) {
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [canCreate, setCanCreate] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<EngineStatus | null>(null);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('all');
   const [loading, setLoading] = useState(true);
@@ -73,9 +81,19 @@ export default function DocumentsPage() {
 
   async function load() {
     try {
-      const payload = await request('/api/opc/documents');
-      setDocuments(payload.documents || []);
-      setCanCreate(payload.canCreate === true);
+      const [documentsPayload, statusPayload] = await Promise.all([
+        request('/api/opc/documents'),
+        request('/api/opc/documents/engine-status').catch(() => ({
+          configured: false,
+          reachable: false,
+          status: 'unreachable',
+          message: 'Der Office-Editor ist momentan nicht erreichbar.',
+        })),
+      ]);
+
+      setDocuments(documentsPayload.documents || []);
+      setCanCreate(documentsPayload.canCreate === true);
+      setEngineStatus(statusPayload as EngineStatus);
     } catch (next: any) {
       setError(next.message || 'Dokumente konnten nicht geladen werden.');
     } finally {
@@ -93,7 +111,15 @@ export default function DocumentsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind: documentKind }),
       });
-      window.location.assign(`${baseUrl}/dokumente/${payload.document.id}/bearbeiten`);
+
+      if (engineStatus?.reachable) {
+        window.location.assign(`${baseUrl}/dokumente/${payload.document.id}/bearbeiten`);
+        return;
+      }
+
+      setDocuments((current) => [payload.document, ...current]);
+      setError('Das Dokument wurde erstellt. Der Office-Editor wird noch bereitgestellt; die Datei bleibt sicher gespeichert.');
+      setBusy(false);
     } catch (next: any) {
       setError(next.message || 'Dokument konnte nicht erstellt werden.');
       setBusy(false);
@@ -109,7 +135,15 @@ export default function DocumentsPage() {
       body.set('file', file);
       body.set('title', file.name.replace(/\.[^.]+$/, ''));
       const payload = await request('/api/opc/documents', { method: 'POST', body });
-      window.location.assign(`${baseUrl}/dokumente/${payload.document.id}`);
+
+      if (engineStatus?.reachable) {
+        window.location.assign(`${baseUrl}/dokumente/${payload.document.id}`);
+        return;
+      }
+
+      setDocuments((current) => [payload.document, ...current]);
+      setError('Die Datei wurde hochgeladen. Der Office-Editor wird noch bereitgestellt; die Datei bleibt sicher gespeichert.');
+      setBusy(false);
     } catch (next: any) {
       setError(next.message || 'Datei konnte nicht hochgeladen werden.');
       setBusy(false);
@@ -154,6 +188,16 @@ export default function DocumentsPage() {
             <h1>Dokumente</h1>
             <p>Word-Dokumente, Excel-Tabellen und PowerPoint-Präsentationen direkt im Portal.</p>
           </div>
+
+          {engineStatus && (
+            <div className={`opc-office-runtime-status ${engineStatus.reachable ? 'ready' : 'pending'}`}>
+              <span className="opc-office-runtime-dot" />
+              <span>
+                <strong>{engineStatus.reachable ? 'Office bereit' : 'Office wird eingerichtet'}</strong>
+                <small>{engineStatus.message}</small>
+              </span>
+            </div>
+          )}
         </header>
 
         <input
