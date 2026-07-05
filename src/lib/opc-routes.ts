@@ -26,6 +26,8 @@ export const OPC_ROUTES = {
   createJob: '/einsatz-planen',
 
   files: '/berichte-dateien',
+  documents: '/dokumente',
+  createDocument: '/dokumente/neu',
   tickets: '/anfragen-schaeden',
   qrCodes: '/qr-codes',
   settings: '/einstellungen',
@@ -88,6 +90,8 @@ export function legacyRouteToOpc(path: string): string {
     [/^\/einsatz-planen$/, OPC_ROUTES.createJob],
 
     [/^\/berichte-dateien$/, OPC_ROUTES.files],
+    [/^\/dokumente$/, OPC_ROUTES.documents],
+    [/^\/dokumente\/neu$/, OPC_ROUTES.createDocument],
     [/^\/qr-codes$/, OPC_ROUTES.qrCodes],
     [/^\/einstellungen$/, OPC_ROUTES.settings],
     [/^\/logout$/, OPC_ROUTES.logout],
