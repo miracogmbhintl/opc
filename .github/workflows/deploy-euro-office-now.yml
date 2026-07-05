@@ -1,5 +1,6 @@
 name: Deploy Office Now
 
+# This comment intentionally creates a visible same-repository deployment check.
 on:
   push:
     branches: [main]
