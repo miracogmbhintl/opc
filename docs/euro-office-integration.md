@@ -9,29 +9,75 @@ User-facing routes:
 - `/dokumente/:id`
 - `/dokumente/:id/bearbeiten`
 
-Euro-Office remains a backend document engine. It does not provide a separate OPC login, dashboard or user-facing application.
+Euro-Office remains a technical document engine. It does not provide a separate OPC login, dashboard or user-facing application.
 
-## Required Cloudflare environment variables
+## Production architecture
 
-```text
-EURO_OFFICE_URL=https://office-engine.example.internal
-EURO_OFFICE_JWT_SECRET=<minimum-24-character-random-secret>
-PUBLIC_SITE_URL=https://<orange-pro-clean-portal-domain>
-```
-
-`EURO_OFFICE_JWT_SECRET` must be identical in the portal and the Euro-Office DocumentServer configuration.
-
-The engine URL can be hidden behind a same-domain reverse proxy path such as `/office-engine`. In that setup, set `EURO_OFFICE_URL` to the externally reachable proxy origin/path and ensure these paths are forwarded to DocumentServer:
+The production DocumentServer runs as a Cloudflare Container at:
 
 ```text
-/office-engine/web-apps/*
-/office-engine/coauthoring/*
-/office-engine/cache/*
-/office-engine/sdkjs/*
-/office-engine/doc/*
+https://office.opc.miraka.ch
 ```
 
-The portal itself remains the only user-facing application.
+Users continue to work only at:
+
+```text
+https://opc.miraka.ch/dokumente
+```
+
+The large container image is built by GitHub Actions. Docker Desktop is not required on an OPC administrator's Mac.
+
+Cloudflare Containers currently require the Workers Paid plan. The configured `standard-3` instance provides 2 vCPU, 8 GiB memory and 16 GB disk, and scales down after 30 minutes without requests.
+
+## One-time GitHub repository secrets
+
+Add these Actions secrets under repository **Settings → Secrets and variables → Actions**:
+
+```text
+CLOUDFLARE_ACCOUNT_ID=<Cloudflare account ID>
+CLOUDFLARE_API_TOKEN=<token with Workers, Containers, Pages and custom-domain permissions>
+EURO_OFFICE_JWT_SECRET=<random value with at least 32 bytes>
+```
+
+Generate the JWT secret without Docker:
+
+```bash
+openssl rand -hex 32
+```
+
+Do not commit or paste the value into issues, logs or source files.
+
+## Remote deployment
+
+Run the GitHub Actions workflow:
+
+```text
+Actions → Deploy Euro Office Container → Run workflow
+```
+
+The workflow performs the complete production setup:
+
+1. builds `ghcr.io/euro-office/documentserver:latest` on a GitHub-hosted runner;
+2. deploys the image as the `opc-euro-office` Cloudflare Container Worker;
+3. creates the custom domain `office.opc.miraka.ch`;
+4. stores the JWT secret in the Container Worker;
+5. writes the matching Office variables to the `opc` Pages project;
+6. builds and deploys the OPC portal;
+7. waits for `https://office.opc.miraka.ch/healthcheck` to return `true`.
+
+No local tunnel, local Docker daemon or manually managed DNS record is required. The custom-domain deployment creates and manages the necessary Cloudflare DNS association.
+
+## Pages environment values
+
+The deployment workflow applies these production values:
+
+```text
+EURO_OFFICE_URL=https://office.opc.miraka.ch
+EURO_OFFICE_JWT_SECRET=<same value as the Container Worker>
+PUBLIC_SITE_URL=https://opc.miraka.ch
+```
+
+`EURO_OFFICE_JWT_SECRET` must be identical in the portal and DocumentServer.
 
 ## Document flow
 
@@ -51,38 +97,38 @@ The portal itself remains the only user-facing application.
 - employees only receive access through ownership or explicit document permissions.
 - clients only receive explicitly shared documents.
 - Supabase files remain private.
-- browser clients do not receive the service-role key.
+- browser clients do not receive the service-role key or Office JWT secret.
 - DocumentServer callback downloads are restricted to the configured engine origin.
+- the insecure DocumentServer example application is disabled.
 - file size is limited to 100 MB.
 - supported extensions are validated before upload.
 
 ## Production checks
 
-Before enabling the module in production:
+After the first container deployment:
 
-1. Pin a tested Euro-Office DocumentServer image version.
-2. Configure HTTPS between the portal and DocumentServer.
-3. Set the same JWT secret on both systems.
-4. Confirm DocumentServer can reach the public portal callback URL.
-5. Confirm DocumentServer can reach Supabase signed storage URLs.
-6. Test DOCX, XLSX and PPTX create, edit, autosave and download flows.
-7. Test role access with owner, admin, dispatch and employee accounts.
-8. Confirm version rows are created after editor saves.
-9. Back up the private document bucket and document tables.
+1. open `/dokumente` and confirm the status shows **Office bereit**;
+2. create one DOCX, XLSX and PPTX file;
+3. edit and save each file;
+4. reopen each file and confirm the changes persisted;
+5. confirm a new row exists in `opc_document_versions` after every save;
+6. test owner, admin, dispatch and explicitly assigned employee access;
+7. confirm downloads use short-lived signed URLs.
 
-## Current implementation scope
+## Implemented scope
 
-Implemented:
-
+- app-style Word, Excel, PowerPoint and upload launchers
 - blank DOCX, XLSX and PPTX creation
 - existing file upload
 - document list and filtering
+- runtime readiness indicator
 - embedded editor
 - signed editor configuration
 - callback validation
 - immutable version creation
 - private signed downloads
 - role-aware access checks
+- remote Cloudflare Container deployment workflow
 
 Future extensions:
 
