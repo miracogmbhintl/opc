@@ -7,6 +7,7 @@ import {
 const READ_ONLY_TABLES = new Set([
   'opc_job_detail_view',
   'opc_my_portal_job_feed',
+  'opc_staff_roles',
 ]);
 
 const MANAGED_TABLES = new Set([
