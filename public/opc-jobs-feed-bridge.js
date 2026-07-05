@@ -115,6 +115,10 @@
   }
 
   new MutationObserver(chooseAllJobs).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener('astro:page-load', () => {
+    selectedAll = false;
+    chooseAllJobs();
+  });
 
   window.fetch = async (input, init = {}) => {
     const request = input instanceof Request ? input : null;
