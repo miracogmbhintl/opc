@@ -1,0 +1,22 @@
+.opc-office-launcher{margin-bottom:24px;padding:20px;border:1px solid #e5e7eb;border-radius:22px;background:linear-gradient(180deg,#fff 0%,#fafafa 100%);box-shadow:0 10px 30px rgba(15,23,42,.05)}
+.opc-office-launcher-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:15px}
+.opc-office-launcher-heading h2{margin:0;font-size:18px;line-height:1.2;letter-spacing:-.025em}
+.opc-office-launcher-heading p{margin:5px 0 0;color:#6b7280;font-size:12px}
+.opc-office-app-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
+.opc-office-app{position:relative;min-height:132px;padding:17px;border:1px solid #e5e7eb;border-radius:18px;background:#fff;color:#111827;display:flex;flex-direction:column;align-items:flex-start;gap:13px;text-align:left;cursor:pointer;transition:transform 160ms ease,border-color 160ms ease,box-shadow 160ms ease,background 160ms ease}
+.opc-office-app:hover{transform:translateY(-2px);border-color:var(--opc-app-color);box-shadow:0 14px 28px rgba(15,23,42,.1);background:var(--opc-app-tint)}
+.opc-office-app:focus-visible{outline:3px solid var(--opc-app-color);outline-offset:2px}
+.opc-office-app:disabled{opacity:.55;cursor:wait;transform:none}
+.opc-office-app-word{--opc-app-color:#2563eb;--opc-app-tint:#eff6ff}
+.opc-office-app-excel{--opc-app-color:#15803d;--opc-app-tint:#f0fdf4}
+.opc-office-app-powerpoint{--opc-app-color:#c2410c;--opc-app-tint:#fff7ed}
+.opc-office-app-upload{--opc-app-color:#6d28d9;--opc-app-tint:#f5f3ff}
+.opc-office-app-logo{width:48px;height:48px;border-radius:14px;background:var(--opc-app-color);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;line-height:1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+.opc-office-app-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+.opc-office-app-copy strong{font-size:14px;line-height:1.2}
+.opc-office-app-copy small{color:#6b7280;font-size:11px;line-height:1.4}
+.opc-office-app-action{position:absolute;top:18px;right:18px;color:var(--opc-app-color)}
+.opc-docs-empty>div{display:flex;flex-direction:column;gap:7px}
+.opc-docs-empty strong{color:#111827;font-size:16px}
+@media(max-width:1120px){.opc-office-app-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.opc-office-launcher{padding:15px;border-radius:18px}.opc-office-app-grid{grid-template-columns:1fr}.opc-office-app{min-height:104px;display:grid;grid-template-columns:48px 1fr auto;align-items:center}.opc-office-app-action{position:static}}
