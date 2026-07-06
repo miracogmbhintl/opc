@@ -14,6 +14,7 @@ import {
   Clock3,
   FileText,
   Coffee,
+  Copy,
   Download,
   Loader2,
   LogIn,
@@ -1485,6 +1486,15 @@ function isDocumentMedia(item: JsonRecord) {
 async function hydrateJobAssignments(sourceJob: JobDetail): Promise<JobDetail> {
   if (!sourceJob.job_id) return sourceJob;
 
+  // OPC_JOB_ASSIGNMENTS_ALREADY_HYDRATED_20260706_V3
+  if (
+    Array.isArray(
+      sourceJob.assignments,
+    )
+  ) {
+    return sourceJob;
+  }
+
   try {
     const { data, error } = await supabase.rpc('opc_get_job_assignments', {
       p_job_id: sourceJob.job_id,
@@ -1715,6 +1725,44 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   const [showAllNotes, setShowAllNotes] = useState(false);
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState('');
+
+  // OPC_ASSIGNMENT_TIME_ADMIN_CONTROLS_20260706_V6
+  // OPC_ASSIGNMENT_TIME_LAYOUT_20260706_V7_1
+  const [
+    assignmentToReplace,
+    setAssignmentToReplace,
+  ] = useState<JsonRecord | null>(null);
+
+  // OPC_DUPLICATE_JOB_MODAL_AND_BANNER_20260706_V5
+  const [
+    duplicateModalOpen,
+    setDuplicateModalOpen,
+  ] = useState(false);
+
+  const [
+    duplicateDate,
+    setDuplicateDate,
+  ] = useState('');
+
+  const [
+    duplicateStartTime,
+    setDuplicateStartTime,
+  ] = useState('');
+
+  const [
+    duplicateEndTime,
+    setDuplicateEndTime,
+  ] = useState('');
+
+  const [
+    duplicateSelectedEmployeeIds,
+    setDuplicateSelectedEmployeeIds,
+  ] = useState<string[]>([]);
+
+  const [
+    duplicateModalError,
+    setDuplicateModalError,
+  ] = useState('');
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [pendingClockIn, setPendingClockIn] = useState(false);
   const [manualTimeFormOpen, setManualTimeFormOpen] = useState(false);
@@ -1729,6 +1777,13 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     setBackTarget(resolveInitialBackTarget());
   }, []);
 
+  // OPC_JOB_SINGLE_INITIAL_LOAD_20260706_V3
+  const initialJobLoadStartedRef =
+    useRef(false);
+
+  const offlineQueueCallbackSeenRef =
+    useRef(false);
+
   const [access, setAccess] = useState<AccessState>({
     loading: true,
     userId: null,
@@ -1742,6 +1797,35 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   });
 
   const assignments = useMemo(() => asArray(job?.assignments), [job]);
+
+  const duplicatedFromJobId = useMemo(() => {
+    const metadata =
+      safeMetadata(job?.metadata);
+
+    const metadataSourceId =
+      String(
+        metadata
+          .duplicated_from_job_id ||
+        '',
+      ).trim();
+
+    if (metadataSourceId) {
+      return metadataSourceId;
+    }
+
+    if (
+      typeof window === 'undefined'
+    ) {
+      return '';
+    }
+
+    return String(
+      new URLSearchParams(
+        window.location.search,
+      ).get('duplicated_from') ||
+      '',
+    ).trim();
+  }, [job?.metadata]);
   const timeLogs = useMemo(() => asArray(job?.time_logs), [job]);
   const media = useMemo(() => asArray(job?.media), [job]);
   const damageReports = useMemo(() => asArray(job?.damage_reports), [job]);
@@ -1995,6 +2079,122 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   }, []);
 
   const getAccessForJob = useCallback(async (sourceJob: JobDetail): Promise<AccessState> => {
+    // OPC_JOB_MANAGER_ACCESS_CACHE_20260706_V3
+    if (typeof window !== 'undefined') {
+      try {
+        const cachedUserData =
+          JSON.parse(
+            window.localStorage.getItem(
+              'mco_user_data',
+            ) || '{}',
+          );
+
+        const cachedSessionProfile =
+          JSON.parse(
+            window.sessionStorage.getItem(
+              '__opc_verified_auth_profile_session_v1__',
+            ) || '{}',
+          );
+
+        const cachedRole =
+          roleKey(
+            window.localStorage.getItem(
+              'mco_user_role',
+            ) ||
+            cachedSessionProfile.role ||
+            cachedUserData.role,
+          );
+
+        if (
+          isManagerRole(cachedRole)
+        ) {
+          const cachedUserId =
+            cachedSessionProfile.id ||
+            cachedSessionProfile.user_id ||
+            cachedUserData.id ||
+            cachedUserData.user_id ||
+            null;
+
+          const cachedStaffId =
+            cachedSessionProfile.staff_id ||
+            cachedSessionProfile.opc_staff_role_id ||
+            cachedUserData.staff_id ||
+            null;
+
+          const cachedEmployeeId =
+            cachedSessionProfile.employee_id ||
+            cachedUserData.employee_id ||
+            null;
+
+          const ownIds = [
+            cachedStaffId,
+            cachedUserId,
+            cachedEmployeeId,
+          ]
+            .filter(Boolean)
+            .map(String);
+
+          const assignedIds =
+            asArray(
+              sourceJob.assignments,
+            )
+              .map((assignment) =>
+                String(
+                  getAssignmentEmployeeId(
+                    assignment,
+                  ) || '',
+                ),
+              )
+              .filter(Boolean);
+
+          return {
+            loading: false,
+            userId:
+              cachedUserId
+                ? String(cachedUserId)
+                : null,
+            staffId:
+              cachedStaffId
+                ? String(cachedStaffId)
+                : null,
+            employeeId:
+              cachedEmployeeId
+                ? String(
+                    cachedEmployeeId,
+                  )
+                : null,
+            email:
+              cachedSessionProfile.email ||
+              cachedUserData.email ||
+              null,
+            displayName:
+              cachedSessionProfile
+                .display_name ||
+              cachedSessionProfile
+                .full_name ||
+              cachedUserData
+                .display_name ||
+              cachedUserData
+                .full_name ||
+              cachedUserData.email ||
+              null,
+            role: cachedRole,
+            canEdit: true,
+            isAssigned:
+              ownIds.some((id) =>
+                assignedIds.includes(id),
+              ),
+          };
+        }
+      } catch {
+        /*
+         * Bei fehlendem Cache wird die
+         * bestehende servergestützte Prüfung
+         * weiterverwendet.
+         */
+      }
+    }
+
     const fallback: AccessState = {
       loading: false,
       userId: null,
@@ -2139,19 +2339,55 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   );
 
   useEffect(() => {
+    if (
+      initialJobLoadStartedRef.current
+    ) {
+      return;
+    }
+
+    initialJobLoadStartedRef.current =
+      true;
+
     void loadJob(true);
   }, [loadJob]);
 
   useEffect(() => {
-    const cleanup = installOpcOfflineQueueAutoSync(supabase, (count) => {
-      setPendingOfflineActions(count);
+    const cleanup =
+      installOpcOfflineQueueAutoSync(
+        supabase,
+        (count) => {
+          setPendingOfflineActions(
+            count,
+          );
 
-      if (count === 0 && !isOfflineNow()) {
-        void loadJob(false);
-      }
-    });
+          /*
+           * Der Offline-Sync meldet seinen
+           * Anfangszustand sofort. Diese erste
+           * Meldung darf keinen zweiten
+           * vollständigen Seitenload auslösen.
+           */
+          if (
+            !offlineQueueCallbackSeenRef
+              .current
+          ) {
+            offlineQueueCallbackSeenRef
+              .current = true;
 
-    setPendingOfflineActions(getOpcOfflineQueueCount());
+            return;
+          }
+
+          if (
+            count === 0 &&
+            !isOfflineNow()
+          ) {
+            void loadJob(false);
+          }
+        },
+      );
+
+    setPendingOfflineActions(
+      getOpcOfflineQueueCount(),
+    );
 
     return cleanup;
   }, [loadJob]);
@@ -2212,10 +2448,19 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   }, [access.canEdit, employeesLoaded]);
 
   useEffect(() => {
-    if (editMode || assignModalOpen) {
+    if (
+      editMode ||
+      assignModalOpen ||
+      duplicateModalOpen
+    ) {
       void loadEmployees();
     }
-  }, [assignModalOpen, editMode, loadEmployees]);
+  }, [
+    assignModalOpen,
+    duplicateModalOpen,
+    editMode,
+    loadEmployees,
+  ]);
 
   const updateDraft = <K extends keyof EditDraft>(field: K, value: EditDraft[K]) => {
     setEditDraft((current) => (current ? { ...current, [field]: value } : current));
@@ -2531,47 +2776,623 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     }
   };
 
-  const handleAddAssignment = async (employeeId = selectedEmployeeId) => {
-    if (!job || !employeeId || !access.canEdit) return;
 
-    const selected = employees.find((employee) => employee.id === employeeId);
-    if (!selected) return;
+  function assignmentIdOf(
+    assignment: JsonRecord,
+  ) {
+    return String(
+      assignment.id ||
+      assignment.assignment_id ||
+      '',
+    ).trim();
+  }
+
+  function assignmentObject(
+    value: unknown,
+  ): JsonRecord {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Array.isArray(value)
+    ) {
+      return {};
+    }
+
+    return value as JsonRecord;
+  }
+
+  function assignmentText(
+    ...values: unknown[]
+  ) {
+    for (const value of values) {
+      const cleaned =
+        String(value ?? '').trim();
+
+      if (cleaned) {
+        return cleaned;
+      }
+    }
+
+    return '';
+  }
+
+  function assignmentMatchedEmployee(
+    assignment: JsonRecord,
+  ) {
+    const nestedEmployee =
+      assignmentObject(
+        assignment.employee,
+      );
+
+    const nestedStaff =
+      assignmentObject(
+        assignment.staff_role,
+      );
+
+    const identityValues =
+      new Set(
+        [
+          assignment.staff_role_id,
+          assignment.staff_id,
+          assignment.employee_id,
+          assignment.user_id,
+          assignment.employee_user_id,
+          assignment.assigned_to,
+          nestedEmployee.id,
+          nestedEmployee.user_id,
+          nestedEmployee.employee_id,
+          nestedStaff.id,
+          nestedStaff.user_id,
+          nestedStaff.employee_id,
+        ]
+          .filter(Boolean)
+          .map(String),
+      );
+
+    return (
+      employees.find(
+        (employee) =>
+          [
+            employee.id,
+            employee.user_id,
+            employee.employee_id,
+          ]
+            .filter(Boolean)
+            .map(String)
+            .some((id) =>
+              identityValues.has(id),
+            ),
+      ) || null
+    );
+  }
+
+  function assignmentNameOf(
+    assignment: JsonRecord,
+  ) {
+    const nestedEmployee =
+      assignmentObject(
+        assignment.employee,
+      );
+
+    const nestedStaff =
+      assignmentObject(
+        assignment.staff_role,
+      );
+
+    const matchedEmployee =
+      assignmentMatchedEmployee(
+        assignment,
+      );
+
+    return assignmentText(
+      assignment.employee_name,
+      assignment.display_name,
+      assignment.employee_full_name,
+      assignment.full_name,
+      nestedEmployee.display_name,
+      nestedEmployee.full_name,
+      nestedEmployee.name,
+      nestedStaff.display_name,
+      nestedStaff.full_name,
+      matchedEmployee?.display_name,
+      assignment.employee_email,
+      assignment.email,
+      nestedEmployee.email,
+      nestedStaff.email,
+      matchedEmployee?.email,
+      'Mitarbeiter',
+    );
+  }
+
+  function assignmentContactOf(
+    assignment: JsonRecord,
+  ) {
+    const nestedEmployee =
+      assignmentObject(
+        assignment.employee,
+      );
+
+    const nestedStaff =
+      assignmentObject(
+        assignment.staff_role,
+      );
+
+    const matchedEmployee =
+      assignmentMatchedEmployee(
+        assignment,
+      );
+
+    return assignmentText(
+      assignment.employee_phone,
+      assignment.phone_e164,
+      assignment.phone_raw,
+      assignment.phone,
+      nestedEmployee.phone_e164,
+      nestedEmployee.phone_raw,
+      nestedEmployee.phone,
+      nestedStaff.phone_e164,
+      nestedStaff.phone_raw,
+      matchedEmployee?.phone_e164,
+      matchedEmployee?.phone_raw,
+      assignment.employee_email,
+      assignment.email,
+      nestedEmployee.email,
+      nestedStaff.email,
+      matchedEmployee?.email,
+      'Kontakt nicht hinterlegt',
+    );
+  }
+
+  function assignmentPersonOf(
+    assignment: JsonRecord,
+  ) {
+    const nestedEmployee =
+      assignmentObject(
+        assignment.employee,
+      );
+
+    const nestedStaff =
+      assignmentObject(
+        assignment.staff_role,
+      );
+
+    const matchedEmployee =
+      assignmentMatchedEmployee(
+        assignment,
+      );
+
+    const name =
+      assignmentNameOf(
+        assignment,
+      );
+
+    const email =
+      assignmentText(
+        assignment.employee_email,
+        assignment.email,
+        nestedEmployee.email,
+        nestedStaff.email,
+        matchedEmployee?.email,
+      );
+
+    const phone =
+      assignmentText(
+        assignment.employee_phone,
+        assignment.phone_e164,
+        assignment.phone_raw,
+        assignment.phone,
+        nestedEmployee.phone_e164,
+        nestedEmployee.phone_raw,
+        nestedStaff.phone_e164,
+        matchedEmployee?.phone_e164,
+        matchedEmployee?.phone_raw,
+      );
+
+    const whatsapp =
+      assignmentText(
+        assignment.whatsapp_wa_id,
+        nestedEmployee.whatsapp_wa_id,
+        nestedStaff.whatsapp_wa_id,
+        matchedEmployee?.whatsapp_wa_id,
+        phone,
+      );
+
+    return {
+      ...assignment,
+
+      employee_name: name,
+      display_name: name,
+
+      email:
+        email || null,
+
+      employee_email:
+        email || null,
+
+      phone_e164:
+        phone || null,
+
+      phone_raw:
+        phone || null,
+
+      employee_phone:
+        phone || null,
+
+      whatsapp_wa_id:
+        whatsapp || null,
+    };
+  }
+
+  async function removeAssignmentRecord(
+    assignment: JsonRecord,
+    options: {
+      skipConfirm?: boolean;
+      suppressReload?: boolean;
+    } = {},
+  ) {
+    if (
+      !job ||
+      !canUseAdminActions
+    ) {
+      return false;
+    }
+
+    const assignmentId =
+      assignmentIdOf(assignment);
+
+    if (!assignmentId) {
+      throw new Error(
+        'Diese Zuweisung besitzt keine gültige ID.',
+      );
+    }
+
+    const employeeName =
+      assignmentNameOf(assignment);
+
+    if (
+      !options.skipConfirm &&
+      !window.confirm(
+        `Mitarbeiter wirklich aus diesem Einsatz entfernen?\n\n${employeeName}`,
+      )
+    ) {
+      return false;
+    }
+
+    let removedByApi = false;
+    let apiErrorMessage = '';
+
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/opc/calendar/sync-job-assignment`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+          body: JSON.stringify({
+            job_id: job.job_id,
+            assignment_id:
+              assignmentId,
+            remove_assignment_id:
+              assignmentId,
+          }),
+        },
+      );
+
+      if (response.ok) {
+        removedByApi = true;
+      } else {
+        const responseText =
+          await response.text();
+
+        apiErrorMessage =
+          responseText ||
+          `HTTP ${response.status}`;
+      }
+    } catch (error) {
+      apiErrorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Kalender-API nicht erreichbar';
+    }
+
+    if (!removedByApi) {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from('opc_job_assignments')
+        .delete()
+        .eq('id', assignmentId)
+        .select('id');
+
+      if (error) {
+        throw new Error(
+          apiErrorMessage
+            ? `${error.message} – ${apiErrorMessage}`
+            : error.message,
+        );
+      }
+
+      if (
+        Array.isArray(data) &&
+        data.length === 0
+      ) {
+        throw new Error(
+          'Die Zuweisung wurde nicht gefunden oder konnte nicht entfernt werden.',
+        );
+      }
+    }
+
+    setJob((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        assignments: asArray(
+          current.assignments,
+        ).filter(
+          (item) =>
+            assignmentIdOf(item) !==
+            assignmentId,
+        ),
+      };
+    });
+
+    if (!options.suppressReload) {
+      await loadJob(false);
+    }
+
+    return true;
+  }
+
+  const handleRemoveAssignment =
+    async (
+      assignment: JsonRecord,
+    ) => {
+      if (
+        !job ||
+        !canUseAdminActions ||
+        Boolean(actionLoading)
+      ) {
+        return;
+      }
+
+      const assignmentId =
+        assignmentIdOf(assignment);
+
+      setActionLoading(
+        `assignment_remove_${assignmentId}`,
+      );
+
+      setActionMessage(null);
+      setActionError(null);
+
+      try {
+        const removed =
+          await removeAssignmentRecord(
+            assignment,
+          );
+
+        if (!removed) {
+          return;
+        }
+
+        setActionMessage(
+          `${assignmentNameOf(assignment)} wurde aus dem Einsatz entfernt.`,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Mitarbeiter konnte nicht entfernt werden.';
+
+        setActionError(
+          `Entfernen fehlgeschlagen: ${message}`,
+        );
+      } finally {
+        setActionLoading(null);
+      }
+    };
+
+  const openReplaceAssignmentModal = (
+    assignment: JsonRecord,
+  ) => {
+    if (
+      !canUseAdminActions ||
+      Boolean(actionLoading)
+    ) {
+      return;
+    }
+
+    setAssignmentToReplace(
+      assignment,
+    );
+
+    setSelectedEmployeeId('');
+    setAssignmentNote('');
+    setEmployeeSearch('');
+    setActionError(null);
+    setActionMessage(null);
+    setAssignModalOpen(true);
+
+    void loadEmployees();
+  };
+
+  const handleAddAssignment = async (
+    employeeId = selectedEmployeeId,
+  ) => {
+    if (
+      !job ||
+      !employeeId ||
+      !canUseAdminActions
+    ) {
+      return;
+    }
+
+    const selected =
+      employees.find(
+        (employee) =>
+          employee.id === employeeId,
+      );
+
+    if (!selected) {
+      return;
+    }
 
     setSaving(true);
     setActionMessage(null);
     setActionError(null);
 
+    let insertedAssignmentId = '';
+
     try {
-      const variants = buildAssignmentPayloadVariants({
-        jobId: job.job_id,
-        employee: selected,
-        note: cleanNullable(assignmentNote),
-        assignedByUserId: access.userId,
-        assignedByStaffId: access.staffId,
-      });
+      const variants =
+        buildAssignmentPayloadVariants({
+          jobId:
+            job.job_id,
 
-      const inserted = await tryInsertOne('opc_job_assignments', variants);
-      const insertedAssignmentId = inserted.data?.id || inserted.data?.assignment_id || null;
+          employee:
+            selected,
 
-      try {
-        await tryUpdateJobById(job.job_id, {
-          status: 'assigned',
+          note:
+            cleanNullable(
+              assignmentNote,
+            ),
+
+          assignedByUserId:
+            access.userId,
+
+          assignedByStaffId:
+            access.staffId,
         });
-      } catch {
-        // Assignment exists. Status fallback must not block the user.
+
+      const inserted =
+        await tryInsertOne(
+          'opc_job_assignments',
+          variants,
+        );
+
+      insertedAssignmentId =
+        String(
+          inserted.data?.id ||
+          inserted.data
+            ?.assignment_id ||
+          '',
+        );
+
+      if (assignmentToReplace) {
+        try {
+          await removeAssignmentRecord(
+            assignmentToReplace,
+            {
+              skipConfirm: true,
+              suppressReload: true,
+            },
+          );
+        } catch (replaceError) {
+          /*
+           * Falls die alte Zuweisung nicht
+           * entfernt werden kann, wird die neue
+           * Zuweisung wieder aufgeräumt.
+           */
+          if (insertedAssignmentId) {
+            try {
+              await fetch(
+                `${baseUrl}/api/opc/calendar/sync-job-assignment`,
+                {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type':
+                      'application/json',
+                  },
+                  body: JSON.stringify({
+                    job_id:
+                      job.job_id,
+                    assignment_id:
+                      insertedAssignmentId,
+                    remove_assignment_id:
+                      insertedAssignmentId,
+                  }),
+                },
+              );
+            } catch {
+              // Cleanup best effort.
+            }
+
+            try {
+              await supabase
+                .from(
+                  'opc_job_assignments',
+                )
+                .delete()
+                .eq(
+                  'id',
+                  insertedAssignmentId,
+                );
+            } catch {
+              // Cleanup best effort.
+            }
+          }
+
+          throw replaceError;
+        }
       }
 
-      void syncAssignmentToCalendar(selected, insertedAssignmentId).catch(() => undefined);
+      try {
+        await tryUpdateJobById(
+          job.job_id,
+          {
+            status: 'assigned',
+          },
+        );
+      } catch {
+        /*
+         * Die Zuweisung wurde gespeichert.
+         * Ein Status-Fallback darf die Aktion
+         * nicht blockieren.
+         */
+      }
+
+      void syncAssignmentToCalendar(
+        selected,
+        insertedAssignmentId || null,
+      ).catch(() => undefined);
+
+      const previousName =
+        assignmentToReplace
+          ? assignmentNameOf(
+              assignmentToReplace,
+            )
+          : '';
 
       setSelectedEmployeeId('');
       setAssignmentNote('');
       setAssignModalOpen(false);
       setEmployeeSearch('');
+      setAssignmentToReplace(null);
+
       await loadJob(false);
-      setActionMessage('Mitarbeiter wurde zugewiesen. Kalender-Sync wurde ausgelöst.');
+
+      setActionMessage(
+        previousName
+          ? `${previousName} wurde durch ${selected.display_name || selected.email || 'den neuen Mitarbeiter'} ersetzt.`
+          : 'Mitarbeiter wurde zugewiesen. Kalender-Sync wurde ausgelöst.',
+      );
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Zuweisung konnte nicht erstellt werden.';
-      setActionError(`Zuweisung fehlgeschlagen: ${message}`);
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Zuweisung konnte nicht gespeichert werden.';
+
+      setActionError(
+        assignmentToReplace
+          ? `Neuzuweisung fehlgeschlagen: ${message}`
+          : `Zuweisung fehlgeschlagen: ${message}`,
+      );
     } finally {
       setSaving(false);
     }
@@ -2656,15 +3477,45 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
 
   const openManualTimeForm = () => {
     setEditingTimeLogId(null);
-    setManualTimeDraft(createEmptyManualTimeDraft(job, assignments));
+    setManualTimeDraft(
+      createEmptyManualTimeDraft(
+        job,
+        assignments,
+      ),
+    );
     setManualTimeFormOpen(true);
+
+    if (!employeesLoaded) {
+      void loadEmployees();
+    }
   };
 
-  const handleEditManualTimeLog = (log: JsonRecord) => {
-    if (!canUseAdminActions) return;
-    setEditingTimeLogId(String(log.id || log.time_log_id || ''));
-    setManualTimeDraft(createManualTimeDraftFromLog(log));
+  const handleEditManualTimeLog = (
+    log: JsonRecord,
+  ) => {
+    if (!canUseAdminActions) {
+      return;
+    }
+
+    setEditingTimeLogId(
+      String(
+        log.id ||
+        log.time_log_id ||
+        '',
+      ),
+    );
+
+    setManualTimeDraft(
+      createManualTimeDraftFromLog(
+        log,
+      ),
+    );
+
     setManualTimeFormOpen(true);
+
+    if (!employeesLoaded) {
+      void loadEmployees();
+    }
   };
 
   const handleCancelManualTime = () => {
@@ -3501,38 +4352,783 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     );
   };
 
+
+
+
+  function getAssignmentIdentityKeys(
+    assignment: JsonRecord,
+  ) {
+    return [
+      assignment.staff_role_id,
+      assignment.staff_id,
+      assignment.employee_id,
+      assignment.user_id,
+      assignment.employee_user_id,
+      assignment.assigned_to,
+    ]
+      .filter(Boolean)
+      .map(String);
+  }
+
+  function getEmployeeIdentityKeys(
+    employee: EmployeeOption,
+  ) {
+    return [
+      employee.id,
+      employee.user_id,
+      employee.employee_id,
+    ]
+      .filter(Boolean)
+      .map(String);
+  }
+
+  function toggleDuplicateEmployee(
+    employeeId: string,
+  ) {
+    setDuplicateSelectedEmployeeIds(
+      (current) =>
+        current.includes(employeeId)
+          ? current.filter(
+              (id) => id !== employeeId,
+            )
+          : [...current, employeeId],
+    );
+
+    setDuplicateModalError('');
+  }
+
+  const openDuplicateJobModal = () => {
+    if (
+      !job ||
+      !canUseAdminActions ||
+      Boolean(actionLoading)
+    ) {
+      return;
+    }
+
+    const startLocal =
+      toDateTimeLocal(
+        job.planned_start,
+      );
+
+    const endLocal =
+      toDateTimeLocal(
+        job.planned_end,
+      );
+
+    const assignmentKeys =
+      Array.from(
+        new Set(
+          assignments.flatMap(
+            getAssignmentIdentityKeys,
+          ),
+        ),
+      );
+
+    /*
+     * Das Datum bleibt bewusst leer.
+     * Die bisherigen Uhrzeiten dienen als
+     * praktische Vorauswahl und können geändert
+     * werden.
+     */
+    setDuplicateDate('');
+
+    setDuplicateStartTime(
+      startLocal.slice(11, 16),
+    );
+
+    setDuplicateEndTime(
+      endLocal.slice(11, 16),
+    );
+
+    setDuplicateSelectedEmployeeIds(
+      assignmentKeys,
+    );
+
+    setDuplicateModalError('');
+    setActionError(null);
+    setActionMessage(null);
+    setDuplicateModalOpen(true);
+
+    if (!employeesLoaded) {
+      void loadEmployees();
+    }
+  };
+
+  useEffect(() => {
+    if (
+      !duplicateModalOpen ||
+      employees.length === 0
+    ) {
+      return;
+    }
+
+    const assignmentKeys =
+      new Set(
+        assignments.flatMap(
+          getAssignmentIdentityKeys,
+        ),
+      );
+
+    setDuplicateSelectedEmployeeIds(
+      (current) => {
+        const currentKeys =
+          new Set(current);
+
+        const resolvedIds =
+          employees
+            .filter((employee) =>
+              getEmployeeIdentityKeys(
+                employee,
+              ).some(
+                (key) =>
+                  currentKeys.has(key) ||
+                  assignmentKeys.has(key),
+              ),
+            )
+            .map(
+              (employee) =>
+                employee.id,
+            );
+
+        return Array.from(
+          new Set(resolvedIds),
+        );
+      },
+    );
+  }, [
+    assignments,
+    duplicateModalOpen,
+    employees,
+  ]);
+
+  const handleDuplicateJob = async () => {
+    if (
+      !job ||
+      !canUseAdminActions ||
+      Boolean(actionLoading)
+    ) {
+      return;
+    }
+
+    setDuplicateModalError('');
+
+    if (!duplicateDate) {
+      setDuplicateModalError(
+        'Bitte wählen Sie das neue Einsatzdatum.',
+      );
+
+      return;
+    }
+
+    if (!duplicateStartTime) {
+      setDuplicateModalError(
+        'Bitte wählen Sie die neue Startzeit.',
+      );
+
+      return;
+    }
+
+    if (!duplicateEndTime) {
+      setDuplicateModalError(
+        'Bitte wählen Sie die neue Endzeit.',
+      );
+
+      return;
+    }
+
+    if (
+      duplicateSelectedEmployeeIds
+        .length === 0
+    ) {
+      setDuplicateModalError(
+        'Bitte wählen Sie mindestens einen Mitarbeiter.',
+      );
+
+      return;
+    }
+
+    const plannedStart =
+      fromDateTimeLocal(
+        `${duplicateDate}T${duplicateStartTime}`,
+      );
+
+    const plannedEnd =
+      fromDateTimeLocal(
+        `${duplicateDate}T${duplicateEndTime}`,
+      );
+
+    if (
+      !plannedStart ||
+      !plannedEnd
+    ) {
+      setDuplicateModalError(
+        'Datum oder Uhrzeit ist ungültig.',
+      );
+
+      return;
+    }
+
+    const plannedStartTimestamp =
+      new Date(
+        plannedStart,
+      ).getTime();
+
+    const plannedEndTimestamp =
+      new Date(
+        plannedEnd,
+      ).getTime();
+
+    if (
+      !Number.isFinite(
+        plannedStartTimestamp,
+      ) ||
+      !Number.isFinite(
+        plannedEndTimestamp,
+      ) ||
+      plannedEndTimestamp <=
+        plannedStartTimestamp
+    ) {
+      setDuplicateModalError(
+        'Die Endzeit muss nach der Startzeit liegen.',
+      );
+
+      return;
+    }
+
+    const selectedEmployees =
+      employees.filter(
+        (employee) =>
+          duplicateSelectedEmployeeIds
+            .includes(employee.id),
+      );
+
+    if (
+      selectedEmployees.length === 0
+    ) {
+      setDuplicateModalError(
+        'Die ausgewählten Mitarbeiter konnten nicht geladen werden. Bitte schliessen Sie das Fenster und versuchen Sie es erneut.',
+      );
+
+      return;
+    }
+
+    const duplicateHours =
+      Math.round(
+        (
+          (
+            plannedEndTimestamp -
+            plannedStartTimestamp
+          ) /
+          3_600_000
+        ) * 100,
+      ) / 100;
+
+    setActionLoading('duplicate_job');
+    setActionError(null);
+    setActionMessage(null);
+
+    let createdJobId = '';
+
+    try {
+      const source =
+        job as JobDetail & JsonRecord;
+
+      const now =
+        new Date().toISOString();
+
+      const duplicateMetadata = {
+        ...safeMetadata(
+          source.metadata,
+        ),
+
+        created_from:
+          'job_duplicate',
+
+        duplicated_from_job_id:
+          job.job_id,
+
+        duplicated_at:
+          now,
+
+        duplicate_schedule_selected_at:
+          now,
+
+        duplicate_selected_employee_count:
+          selectedEmployees.length,
+      };
+
+      [
+        'invoice_id',
+        'invoice_number',
+        'report_id',
+        'report_status',
+        'calendar_event_id',
+        'google_event_id',
+        'google_calendar_event_id',
+        'automation_run_id',
+        'automation_candidate_id',
+        'completed_at',
+        'cancelled_at',
+        'actual_start',
+        'actual_end',
+        'time_log_id',
+        'media_id',
+      ].forEach((key) => {
+        delete duplicateMetadata[key];
+      });
+
+      const copiedRequirements =
+        normalizeChecklistItems(
+          job.service_requirements,
+        ).map((item, index) => ({
+          ...item,
+
+          id:
+            item.id ||
+            `duplicated-${index + 1}`,
+
+          completed: false,
+          completed_at: null,
+          completed_by: null,
+        }));
+
+      const fullPayload = {
+        quote_id: null,
+        order_confirmation_id: null,
+        invoice_id: null,
+        billing_status: 'not_ready',
+
+        client_id:
+          job.client_id || null,
+
+        client_site_id:
+          job.client_site_id || null,
+
+        contact_id:
+          source.contact_id || null,
+
+        title:
+          job.title ||
+          job.service_category ||
+          'Duplizierter Einsatz',
+
+        job_type:
+          source.job_type ||
+          'cleaning',
+
+        status: 'assigned',
+
+        priority:
+          job.priority ||
+          'normal',
+
+        planned_start:
+          plannedStart,
+
+        planned_end:
+          plannedEnd,
+
+        actual_start: null,
+        actual_end: null,
+
+        service_category:
+          job.service_category || null,
+
+        service_description:
+          job.service_description || null,
+
+        estimated_hours:
+          duplicateHours,
+
+        final_hours: null,
+
+        billable_amount:
+          job.billable_amount !==
+            null &&
+          job.billable_amount !==
+            undefined &&
+          String(
+            job.billable_amount,
+          ).trim() !== ''
+            ? Number(
+                String(
+                  job.billable_amount,
+                ).replace(',', '.'),
+              )
+            : null,
+
+        currency:
+          job.currency || 'CHF',
+
+        dispatcher_notes:
+          job.dispatcher_notes || null,
+
+        employee_notes:
+          job.employee_notes || null,
+
+        client_notes:
+          job.client_notes || null,
+
+        internal_notes:
+          job.internal_notes || null,
+
+        service_requirements:
+          copiedRequirements,
+
+        report_required:
+          job.report_required !== false,
+
+        report_approved: false,
+        report_approved_at: null,
+        report_approved_by: null,
+
+        completed_at: null,
+        cancelled_at: null,
+
+        metadata:
+          duplicateMetadata,
+
+        created_at: now,
+        updated_at: now,
+      };
+
+      const minimalPayload = {
+        client_id:
+          job.client_id || null,
+
+        client_site_id:
+          job.client_site_id || null,
+
+        contact_id:
+          source.contact_id || null,
+
+        title:
+          job.title ||
+          job.service_category ||
+          'Duplizierter Einsatz',
+
+        job_type:
+          source.job_type ||
+          'cleaning',
+
+        status: 'assigned',
+
+        priority:
+          job.priority ||
+          'normal',
+
+        planned_start:
+          plannedStart,
+
+        planned_end:
+          plannedEnd,
+
+        service_category:
+          job.service_category || null,
+
+        service_description:
+          job.service_description || null,
+
+        estimated_hours:
+          duplicateHours,
+
+        dispatcher_notes:
+          job.dispatcher_notes || null,
+
+        internal_notes:
+          job.internal_notes || null,
+
+        report_required:
+          job.report_required !== false,
+
+        service_requirements:
+          copiedRequirements,
+
+        metadata:
+          duplicateMetadata,
+
+        created_at: now,
+        updated_at: now,
+      };
+
+      const inserted =
+        await tryInsertOne(
+          'opc_service_jobs',
+          [
+            fullPayload,
+            minimalPayload,
+          ],
+        );
+
+      createdJobId = String(
+        inserted.data?.id ||
+        inserted.data?.job_id ||
+        '',
+      );
+
+      if (!createdJobId) {
+        throw new Error(
+          'Der neue Einsatz wurde ohne Einsatz-ID erstellt.',
+        );
+      }
+
+      let copiedAssignmentCount = 0;
+      let failedAssignmentCount = 0;
+
+      for (
+        const employee
+        of selectedEmployees
+      ) {
+        const employeeKeys =
+          new Set(
+            getEmployeeIdentityKeys(
+              employee,
+            ),
+          );
+
+        const sourceAssignment =
+          assignments.find(
+            (assignment) =>
+              getAssignmentIdentityKeys(
+                assignment,
+              ).some((key) =>
+                employeeKeys.has(key),
+              ),
+          );
+
+        try {
+          const variants =
+            buildAssignmentPayloadVariants({
+              jobId:
+                createdJobId,
+
+              employee,
+
+              note:
+                sourceAssignment?.notes ||
+                sourceAssignment?.note ||
+                null,
+
+              assignedByUserId:
+                access.userId,
+
+              assignedByStaffId:
+                access.staffId,
+            });
+
+          await tryInsertOne(
+            'opc_job_assignments',
+            variants,
+          );
+
+          copiedAssignmentCount += 1;
+        } catch {
+          failedAssignmentCount += 1;
+        }
+      }
+
+      if (
+        copiedAssignmentCount === 0
+      ) {
+        throw new Error(
+          'Der Einsatz wurde angelegt, aber keine Mitarbeiterzuweisung konnte gespeichert werden.',
+        );
+      }
+
+      setDuplicateModalOpen(false);
+
+      const assignmentMessage =
+        failedAssignmentCount > 0
+          ? ` ${copiedAssignmentCount} Mitarbeiter wurden zugewiesen; ${failedAssignmentCount} Zuweisung(en) konnten nicht gespeichert werden.`
+          : ` ${copiedAssignmentCount} Mitarbeiter wurden zugewiesen.`;
+
+      setActionMessage(
+        `Der Einsatz wurde dupliziert.${assignmentMessage}`,
+      );
+
+      window.location.assign(
+        `${baseUrl}/einsatz/${createdJobId}?duplicated_from=${encodeURIComponent(job.job_id)}`,
+      );
+    } catch (error) {
+      if (createdJobId) {
+        try {
+          await supabase
+            .from(
+              'opc_job_assignments',
+            )
+            .delete()
+            .eq(
+              'job_id',
+              createdJobId,
+            );
+        } catch {
+          // Cleanup best effort.
+        }
+
+        try {
+          await supabase
+            .from(
+              'opc_service_jobs',
+            )
+            .delete()
+            .eq(
+              'id',
+              createdJobId,
+            );
+        } catch {
+          // Cleanup best effort.
+        }
+      }
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Der Einsatz konnte nicht dupliziert werden.';
+
+      setDuplicateModalError(message);
+
+      setActionError(
+        `Duplizieren fehlgeschlagen: ${message}`,
+      );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+
   const renderAssignedEmployees = () => (
-    <section className="opc-section-card" style={cardStyle}>
-      <SectionHeader title="Zugewiesene Mitarbeiter" />
+    <section
+      className="opc-section-card"
+      style={cardStyle}
+    >
+      <SectionHeader
+        title="Zugewiesene Mitarbeiter"
+      />
 
       {assignments.length === 0 ? (
-        <div className="opc-empty-box">Keine Mitarbeiter zugewiesen.</div>
+        <div className="opc-empty-box">
+          Keine Mitarbeiter zugewiesen.
+        </div>
       ) : (
         <div className="opc-assignment-list">
-          {assignments.map((assignment, index) => (
-            <div key={assignment.id || assignment.assignment_id || index} className="opc-assignment-card">
-              <div>
-                <strong>{assignment.employee_name || assignment.display_name || assignment.email || 'Mitarbeiter'}</strong>
-                <span>{assignment.phone_e164 || assignment.email || 'Kontakt nicht hinterlegt'}</span>
-              </div>
+          {assignments.map(
+            (assignment, index) => {
+              const assignmentId =
+                assignmentIdOf(
+                  assignment,
+                );
 
-              <div className="opc-assignment-actions">
-                <StatusBadge status={assignment.assignment_status || assignment.status || 'assigned'} />
-                <ContactButtons person={assignment} />
-              </div>
-            </div>
-          ))}
+              const removing =
+                actionLoading ===
+                `assignment_remove_${assignmentId}`;
+
+              return (
+                <div
+                  key={
+                    assignmentId ||
+                    index
+                  }
+                  className="opc-assignment-card opc-assignment-card-admin opc-assignment-card-v7"
+                >
+                  <div className="opc-assignment-person">
+                    <strong>
+                      {assignmentNameOf(
+                        assignment,
+                      )}
+                    </strong>
+
+                    <span>
+                      {assignmentContactOf(
+                        assignment,
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="opc-assignment-actions">
+                    <StatusBadge
+                      status={
+                        assignment
+                          .assignment_status ||
+                        assignment.status ||
+                        'assigned'
+                      }
+                    />
+
+                    <ContactButtons
+                      person={assignmentPersonOf(
+                        assignment,
+                      )}
+                    />
+
+                    {canUseAdminActions ? (
+                      <div className="opc-assignment-admin-actions">
+                        <button
+                          type="button"
+                          className="opc-mini-action"
+                          disabled={
+                            Boolean(
+                              actionLoading,
+                            ) ||
+                            saving
+                          }
+                          onClick={() =>
+                            openReplaceAssignmentModal(
+                              assignment,
+                            )
+                          }
+                        >
+                          Neu zuweisen
+                        </button>
+
+                        <button
+                          type="button"
+                          className="opc-mini-action danger"
+                          disabled={
+                            Boolean(
+                              actionLoading,
+                            ) ||
+                            saving
+                          }
+                          onClick={() =>
+                            void handleRemoveAssignment(
+                              assignment,
+                            )
+                          }
+                        >
+                          {removing
+                            ? 'Entfernt...'
+                            : 'Entfernen'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            },
+          )}
         </div>
       )}
 
-      {access.canEdit ? (
+      {canUseAdminActions ? (
         <div className="opc-admin-box opc-admin-box-compact">
           <button
             type="button"
             className="opc-btn opc-btn-dark opc-full-btn"
-            disabled={saving}
+            disabled={
+              saving ||
+              Boolean(actionLoading)
+            }
             onClick={() => {
+              setAssignmentToReplace(
+                null,
+              );
+
               setAssignModalOpen(true);
+              setEmployeeSearch('');
+              setSelectedEmployeeId('');
+              setAssignmentNote('');
+
               void loadEmployees();
             }}
           >
@@ -3772,16 +5368,28 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     );
   };
 
+
   const renderTimeEntriesCard = () => {
-    if (clientMode) return null;
+    if (clientMode) {
+      return null;
+    }
 
     return (
-      <section className="opc-section-card" style={cardStyle}>
+      <section
+        className="opc-section-card"
+        style={cardStyle}
+      >
         <SectionHeader
           title="Zeiterfassung"
           action={
             canUseAdminActions ? (
-              <button type="button" className="opc-link-button" onClick={openManualTimeForm}>
+              <button
+                type="button"
+                className="opc-link-button"
+                onClick={
+                  openManualTimeForm
+                }
+              >
                 + Zeit manuell erfassen
               </button>
             ) : null
@@ -3789,99 +5397,160 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         />
 
         {visibleTimeLogs.length === 0 ? (
-          <div className="opc-empty-box">Keine sichtbaren Zeiten vorhanden.</div>
+          <div className="opc-empty-box">
+            Keine sichtbaren Zeiten vorhanden.
+          </div>
         ) : (
-          <>
-            <div className="opc-time-table opc-time-table-desktop">
-              {visibleTimeLogs.map((log, index) => {
-                const isActive = isOpenLog(log);
-                const total = isActive ? liveMinutesFromLog(log) : Number(log.duration_minutes || 0);
-                const onBreak = Boolean(getBreakStartedAt(log));
+          <div className="opc-admin-time-list">
+            {visibleTimeLogs.map(
+              (log, index) => {
+                const isActive =
+                  isOpenLog(log);
+
+                const total =
+                  isActive
+                    ? liveMinutesFromLog(
+                        log,
+                      )
+                    : Number(
+                        log.duration_minutes ||
+                        log.total_minutes ||
+                        0,
+                      );
+
+                const onBreak =
+                  Boolean(
+                    getBreakStartedAt(
+                      log,
+                    ),
+                  );
+
+                const logId =
+                  String(
+                    log.id ||
+                    log.time_log_id ||
+                    index,
+                  );
+
+                const deleting =
+                  actionLoading ===
+                  `manual_time_delete_${logId}`;
 
                 return (
-                  <div
-                    key={log.id || index}
-                    className="opc-time-row"
-                    style={{ borderBottom: index < visibleTimeLogs.length - 1 ? '1px solid #F3F4F6' : 'none' }}
+                  <article
+                    key={logId}
+                    className="opc-admin-time-entry"
                   >
-                    <div>
-                      <div className="opc-row-title">{log.employee_name || 'Mitarbeiter'}</div>
-                      <div className="opc-row-sub">{formatShortDate(log.started_at || log.created_at)}</div>
-                    </div>
-
-                    <div className="opc-date-cell">{formatTime(log.started_at)}</div>
-                    <div className="opc-date-cell">{formatTime(log.ended_at)}</div>
-                    <div className="opc-date-cell">{formatMinutes(getBreakMinutes(log))}</div>
-                    <div className="opc-date-cell">{formatMinutes(total)}</div>
-
-                    <div className="opc-time-row-actions">
-                      <StatusBadge status={onBreak ? 'on_break' : isActive ? 'open' : log.status} />
-                      {canUseAdminActions ? (
-                        <>
-                          <button type="button" className="opc-mini-action" onClick={() => handleEditManualTimeLog(log)}>
-                            Bearbeiten
-                          </button>
-                          <button
-                            type="button"
-                            className="opc-mini-action danger"
-                            onClick={() => void handleDeleteManualTimeLog(log)}
-                          >
-                            Löschen
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="opc-time-mobile-cards">
-              {visibleTimeLogs.map((log) => {
-                const isActive = isOpenLog(log);
-                const total = isActive ? liveMinutesFromLog(log) : Number(log.duration_minutes || 0);
-                const onBreak = Boolean(getBreakStartedAt(log));
-
-                return (
-                  <div key={log.id} className="opc-mobile-card">
-                    <div className="opc-mobile-card-top">
+                    <div className="opc-admin-time-entry-head">
                       <div>
-                        <h3>{log.employee_name || 'Mitarbeiter'}</h3>
-                        <p>{formatShortDate(log.started_at || log.created_at)}</p>
+                        <strong>
+                          {log.employee_name ||
+                            'Mitarbeiter'}
+                        </strong>
+
+                        <span>
+                          {formatShortDate(
+                            log.started_at ||
+                            log.created_at,
+                          )}
+                        </span>
                       </div>
 
-                      <StatusBadge status={onBreak ? 'on_break' : isActive ? 'open' : log.status} />
+                      <StatusBadge
+                        status={
+                          onBreak
+                            ? 'on_break'
+                            : isActive
+                              ? 'open'
+                              : log.status
+                        }
+                      />
                     </div>
 
-                    <div className="opc-mobile-card-lines">
-                      <span>{formatTime(log.started_at)} – {formatTime(log.ended_at)}</span>
-                      <span>Total: {formatMinutes(total)}</span>
-                      <span>Pause: {formatMinutes(getBreakMinutes(log))}</span>
+                    <div className="opc-admin-time-metrics">
+                      <div>
+                        <span>Start</span>
+                        <strong>
+                          {formatTime(
+                            log.started_at,
+                          )}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Ende</span>
+                        <strong>
+                          {formatTime(
+                            log.ended_at,
+                          )}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Pause</span>
+                        <strong>
+                          {formatMinutes(
+                            getBreakMinutes(
+                              log,
+                            ),
+                          )}
+                        </strong>
+                      </div>
+
+                      <div>
+                        <span>Total</span>
+                        <strong>
+                          {formatMinutes(
+                            total,
+                          )}
+                        </strong>
+                      </div>
                     </div>
 
                     {canUseAdminActions ? (
-                      <div className="opc-mobile-time-actions">
+                      <div className="opc-admin-time-actions">
                         <button
                           type="button"
-                          className="opc-mini-action opc-mini-action-mobile"
-                          onClick={() => handleEditManualTimeLog(log)}
+                          className="opc-mini-action"
+                          disabled={
+                            Boolean(
+                              actionLoading,
+                            )
+                          }
+                          onClick={() =>
+                            handleEditManualTimeLog(
+                              log,
+                            )
+                          }
                         >
-                          Einzelzeit bearbeiten
+                          Bearbeiten
                         </button>
+
                         <button
                           type="button"
-                          className="opc-mini-action opc-mini-action-mobile danger"
-                          onClick={() => void handleDeleteManualTimeLog(log)}
+                          className="opc-mini-action danger"
+                          disabled={
+                            Boolean(
+                              actionLoading,
+                            )
+                          }
+                          onClick={() =>
+                            void handleDeleteManualTimeLog(
+                              log,
+                            )
+                          }
                         >
-                          Einzelzeit löschen
+                          {deleting
+                            ? 'Wird gelöscht...'
+                            : 'Löschen'}
                         </button>
                       </div>
                     ) : null}
-                  </div>
+                  </article>
                 );
-              })}
-            </div>
-          </>
+              },
+            )}
+          </div>
         )}
 
         {renderManualTimeForm()}
@@ -4180,6 +5849,30 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
             >
               {actionLoading === 'create_report' ? <Loader2 size={16} className="spin" /> : <FileText size={16} />}
               {jobHasReport ? 'Bericht öffnen' : 'Bericht erstellen'}
+            </button>
+          ) : null}
+
+          {mode === 'admin' && canUseAdminActions ? (
+            <button
+              type="button"
+              className="opc-btn opc-btn-light"
+              disabled={Boolean(actionLoading)}
+              onClick={openDuplicateJobModal}
+            >
+              {actionLoading ===
+              'duplicate_job' ? (
+                <Loader2
+                  size={16}
+                  className="spin"
+                />
+              ) : (
+                <Copy size={16} />
+              )}
+
+              {actionLoading ===
+              'duplicate_job'
+                ? 'Wird dupliziert...'
+                : 'Einsatz duplizieren'}
             </button>
           ) : null}
 
@@ -4631,6 +6324,28 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           <>
             {actionError ? <div className="opc-error-card">{actionError}</div> : null}
             {actionMessage ? <div className="opc-action-message">{actionMessage}</div> : null}
+
+            {duplicatedFromJobId ? (
+              <div className="opc-duplicate-banner">
+                <div className="opc-duplicate-banner-copy">
+                  <strong>Duplizierter Einsatz</strong>
+
+                  <span>
+                    Dieser Einsatz wurde aus einem früheren Einsatz kopiert.
+                    Termin und Mitarbeiter gelten nur für diese neue Kopie.
+                  </span>
+                </div>
+
+                {canUseAdminActions ? (
+                  <a
+                    href={`${baseUrl}/einsatz/${duplicatedFromJobId}`}
+                  >
+                    Originaleinsatz öffnen
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+
             {pendingOfflineActions > 0 ? (
               <div className="opc-warning-card">
                 {pendingOfflineActions} Aktion{pendingOfflineActions === 1 ? '' : 'en'} lokal gespeichert. Synchronisation läuft automatisch bei stabiler Verbindung.
@@ -4641,13 +6356,296 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         )}
       </div>
 
+      {duplicateModalOpen ? (
+        <div
+          className="opc-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Einsatz duplizieren"
+        >
+          <div className="opc-assign-modal opc-duplicate-modal">
+            <div className="opc-modal-header">
+              <div>
+                <h2>Einsatz duplizieren</h2>
+
+                <p>
+                  Kunde, Standort, Leistung, Checkliste und Notizen werden kopiert.
+                  Legen Sie den neuen Termin und das zuständige Team fest.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="opc-duplicate-modal-close"
+                aria-label="Schliessen"
+                disabled={
+                  actionLoading ===
+                  'duplicate_job'
+                }
+                onClick={() => {
+                  setDuplicateModalOpen(
+                    false,
+                  );
+
+                  setDuplicateModalError(
+                    '',
+                  );
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="opc-duplicate-modal-body">
+              <div className="opc-duplicate-source-summary">
+                <strong>
+                  {job?.title ||
+                    job?.service_category ||
+                    'Einsatz'}
+                </strong>
+
+                <span>
+                  {job
+                    ? getDisplayName(job)
+                    : 'Kunde'}
+                </span>
+              </div>
+
+              <div className="opc-duplicate-date-grid">
+                <label className="opc-duplicate-field">
+                  <span>Neues Datum</span>
+
+                  <input
+                    type="date"
+                    value={duplicateDate}
+                    disabled={
+                      actionLoading ===
+                      'duplicate_job'
+                    }
+                    onChange={(event) => {
+                      setDuplicateDate(
+                        event.target.value,
+                      );
+
+                      setDuplicateModalError(
+                        '',
+                      );
+                    }}
+                  />
+                </label>
+
+                <label className="opc-duplicate-field">
+                  <span>Startzeit</span>
+
+                  <input
+                    type="time"
+                    value={
+                      duplicateStartTime
+                    }
+                    disabled={
+                      actionLoading ===
+                      'duplicate_job'
+                    }
+                    onChange={(event) => {
+                      setDuplicateStartTime(
+                        event.target.value,
+                      );
+
+                      setDuplicateModalError(
+                        '',
+                      );
+                    }}
+                  />
+                </label>
+
+                <label className="opc-duplicate-field">
+                  <span>Endzeit</span>
+
+                  <input
+                    type="time"
+                    value={
+                      duplicateEndTime
+                    }
+                    disabled={
+                      actionLoading ===
+                      'duplicate_job'
+                    }
+                    onChange={(event) => {
+                      setDuplicateEndTime(
+                        event.target.value,
+                      );
+
+                      setDuplicateModalError(
+                        '',
+                      );
+                    }}
+                  />
+                </label>
+              </div>
+
+              <div className="opc-duplicate-team-heading">
+                <div>
+                  <strong>
+                    Mitarbeiter wählen
+                  </strong>
+
+                  <span>
+                    {
+                      duplicateSelectedEmployeeIds
+                        .length
+                    } ausgewählt
+                  </span>
+                </div>
+              </div>
+
+              {!employeesLoaded ? (
+                <div className="opc-empty-box">
+                  Mitarbeiter werden geladen.
+                </div>
+              ) : employees.length === 0 ? (
+                <div className="opc-empty-box">
+                  Keine aktiven Mitarbeiter gefunden.
+                </div>
+              ) : (
+                <div className="opc-duplicate-worker-grid">
+                  {employees.map(
+                    (employee) => {
+                      const selected =
+                        duplicateSelectedEmployeeIds
+                          .includes(
+                            employee.id,
+                          );
+
+                      return (
+                        <label
+                          key={employee.id}
+                          className={`opc-duplicate-worker-option ${
+                            selected
+                              ? 'is-selected'
+                              : ''
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={
+                              actionLoading ===
+                              'duplicate_job'
+                            }
+                            onChange={() =>
+                              toggleDuplicateEmployee(
+                                employee.id,
+                              )
+                            }
+                          />
+
+                          <span className="opc-employee-avatar">
+                            {(
+                              employee.display_name ||
+                              employee.email ||
+                              '?'
+                            )
+                              .slice(0, 1)
+                              .toUpperCase()}
+                          </span>
+
+                          <span className="opc-duplicate-worker-copy">
+                            <strong>
+                              {employee.display_name ||
+                                employee.email ||
+                                'Mitarbeiter'}
+                            </strong>
+
+                            <span>
+                              {employee.email ||
+                                employee.phone_e164 ||
+                                employee.phone_raw ||
+                                'Keine Kontaktdaten'}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    },
+                  )}
+                </div>
+              )}
+
+              {duplicateModalError ? (
+                <div className="opc-duplicate-modal-error">
+                  {duplicateModalError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="opc-modal-footer">
+              <button
+                type="button"
+                className="opc-btn opc-btn-light"
+                disabled={
+                  actionLoading ===
+                  'duplicate_job'
+                }
+                onClick={() => {
+                  setDuplicateModalOpen(
+                    false,
+                  );
+
+                  setDuplicateModalError(
+                    '',
+                  );
+                }}
+              >
+                Abbrechen
+              </button>
+
+              <button
+                type="button"
+                className="opc-btn opc-btn-primary"
+                disabled={
+                  actionLoading ===
+                    'duplicate_job' ||
+                  !employeesLoaded
+                }
+                onClick={() =>
+                  void handleDuplicateJob()
+                }
+              >
+                {actionLoading ===
+                'duplicate_job' ? (
+                  <Loader2
+                    size={16}
+                    className="spin"
+                  />
+                ) : (
+                  <Copy size={16} />
+                )}
+
+                {actionLoading ===
+                'duplicate_job'
+                  ? 'Einsatz wird erstellt...'
+                  : 'Einsatz duplizieren'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {assignModalOpen ? (
         <div className="opc-modal-backdrop" role="dialog" aria-modal="true" aria-label="Mitarbeiter zuweisen">
           <div className="opc-assign-modal">
             <div className="opc-modal-header">
               <div>
-                <h2>Mitarbeiter zuweisen</h2>
-                <p>Suche Mitarbeiter, wähle eine Person aus und füge sie dem Einsatz hinzu.</p>
+                <h2>
+                  {assignmentToReplace
+                    ? 'Mitarbeiter neu zuweisen'
+                    : 'Mitarbeiter zuweisen'}
+                </h2>
+
+                <p>
+                  {assignmentToReplace
+                    ? `${assignmentNameOf(assignmentToReplace)} wird nach erfolgreicher Auswahl durch den neuen Mitarbeiter ersetzt.`
+                    : 'Suche Mitarbeiter, wähle eine Person aus und füge sie dem Einsatz hinzu.'}
+                </p>
               </div>
               <button
                 type="button"
@@ -4655,6 +6653,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                 onClick={() => {
                   setAssignModalOpen(false);
                   setEmployeeSearch('');
+                  setAssignmentToReplace(null);
                 }}
               >
                 ×
@@ -4714,6 +6713,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
                 onClick={() => {
                   setAssignModalOpen(false);
                   setEmployeeSearch('');
+                  setAssignmentToReplace(null);
                 }}
               >
                 Schliessen
@@ -4731,6 +6731,589 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           padding: 0 0 34px;
           color: ${BRAND.text};
           overflow-x: hidden;
+        }
+
+        .opc-duplicate-banner {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 18px;
+          padding: 16px 18px;
+          margin-bottom: 14px;
+          border: 1px solid #BBF7D0;
+          border-radius: 18px;
+          background: #F0FDF4;
+          color: #166534;
+        }
+
+        .opc-duplicate-banner-copy {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+        }
+
+        .opc-duplicate-banner-copy strong {
+          font-size: 14px;
+          font-weight: 850;
+        }
+
+        .opc-duplicate-banner-copy span {
+          font-size: 13px;
+          font-weight: 650;
+          line-height: 1.45;
+        }
+
+        .opc-duplicate-banner a {
+          flex: 0 0 auto;
+          color: #166534;
+          font-size: 13px;
+          font-weight: 820;
+          text-decoration: underline;
+          text-underline-offset: 3px;
+        }
+
+        .opc-duplicate-modal {
+          width: min(760px, calc(100vw - 28px));
+          max-height: min(88vh, 900px);
+        }
+
+        .opc-duplicate-modal-close {
+          display: grid;
+          place-items: center;
+          flex: 0 0 auto;
+          width: 38px;
+          height: 38px;
+          border: 1px solid #E5E7EB;
+          border-radius: 12px;
+          background: #FFFFFF;
+          color: #111827;
+          font-size: 25px;
+          line-height: 1;
+          cursor: pointer;
+        }
+
+        .opc-duplicate-modal-close:disabled {
+          cursor: not-allowed;
+          opacity: 0.55;
+        }
+
+        .opc-duplicate-modal-body {
+          display: grid;
+          gap: 18px;
+          padding: 20px;
+          overflow-y: auto;
+        }
+
+        .opc-duplicate-source-summary {
+          display: grid;
+          gap: 4px;
+          padding: 14px 16px;
+          border: 1px solid #E5E7EB;
+          border-radius: 15px;
+          background: #F8FAFC;
+        }
+
+        .opc-duplicate-source-summary strong {
+          color: #111827;
+          font-size: 14px;
+          font-weight: 840;
+        }
+
+        .opc-duplicate-source-summary span {
+          color: #6B7280;
+          font-size: 13px;
+          font-weight: 650;
+        }
+
+        .opc-duplicate-date-grid {
+          display: grid;
+          grid-template-columns: 1.2fr 1fr 1fr;
+          gap: 12px;
+        }
+
+        .opc-duplicate-field {
+          display: grid;
+          gap: 7px;
+        }
+
+        .opc-duplicate-field > span {
+          color: #374151;
+          font-size: 12px;
+          font-weight: 800;
+        }
+
+        .opc-duplicate-field input {
+          width: 100%;
+          min-height: 44px;
+          box-sizing: border-box;
+          border: 1px solid #D1D5DB;
+          border-radius: 12px;
+          padding: 0 12px;
+          background: #FFFFFF;
+          color: #111827;
+          font: inherit;
+          font-size: 14px;
+          outline: none;
+        }
+
+        .opc-duplicate-field input:focus {
+          border-color: #111827;
+          box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+        }
+
+        .opc-duplicate-team-heading > div {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+
+        .opc-duplicate-team-heading strong {
+          color: #111827;
+          font-size: 14px;
+          font-weight: 850;
+        }
+
+        .opc-duplicate-team-heading span {
+          color: #6B7280;
+          font-size: 12px;
+          font-weight: 750;
+        }
+
+        .opc-duplicate-worker-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .opc-duplicate-worker-option {
+          display: grid;
+          grid-template-columns: auto auto minmax(0, 1fr);
+          align-items: center;
+          gap: 10px;
+          padding: 12px;
+          border: 1px solid #E5E7EB;
+          border-radius: 14px;
+          background: #FFFFFF;
+          cursor: pointer;
+          transition:
+            border-color 120ms ease,
+            background 120ms ease,
+            box-shadow 120ms ease;
+        }
+
+        .opc-duplicate-worker-option:hover {
+          border-color: #9CA3AF;
+        }
+
+        .opc-duplicate-worker-option.is-selected {
+          border-color: #86EFAC;
+          background: #F0FDF4;
+          box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.08);
+        }
+
+        .opc-duplicate-worker-option input {
+          width: 17px;
+          height: 17px;
+          margin: 0;
+          accent-color: #111827;
+        }
+
+        .opc-duplicate-worker-copy {
+          display: grid;
+          gap: 3px;
+          min-width: 0;
+        }
+
+        .opc-duplicate-worker-copy strong,
+        .opc-duplicate-worker-copy span {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .opc-duplicate-worker-copy strong {
+          color: #111827;
+          font-size: 13px;
+          font-weight: 820;
+        }
+
+        .opc-duplicate-worker-copy span {
+          color: #6B7280;
+          font-size: 11px;
+          font-weight: 650;
+        }
+
+        .opc-duplicate-modal-error {
+          padding: 12px 14px;
+          border: 1px solid #FECACA;
+          border-radius: 13px;
+          background: #FEF2F2;
+          color: #991B1B;
+          font-size: 13px;
+          font-weight: 740;
+          line-height: 1.45;
+        }
+
+        @media (max-width: 680px) {
+          .opc-duplicate-banner {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .opc-duplicate-date-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+
+          .opc-duplicate-date-grid .opc-duplicate-field:first-child {
+            grid-column: 1 / -1;
+          }
+
+          .opc-duplicate-worker-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .opc-duplicate-modal .opc-modal-footer {
+            display: grid;
+            grid-template-columns: 1fr;
+          }
+
+          .opc-duplicate-modal .opc-modal-footer .opc-btn {
+            width: 100%;
+          }
+        }
+
+        .opc-assignment-card-admin {
+          display: grid !important;
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center !important;
+          gap: 14px !important;
+        }
+
+        .opc-assignment-person {
+          min-width: 0;
+        }
+
+        .opc-assignment-person strong,
+        .opc-assignment-person span {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .opc-assignment-admin-actions {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          flex-wrap: wrap;
+          gap: 7px;
+          width: 100%;
+        }
+
+        .opc-admin-time-list {
+          display: grid;
+          gap: 12px;
+        }
+
+        .opc-admin-time-entry {
+          display: grid;
+          gap: 14px;
+          padding: 16px;
+          border: 1px solid ${BRAND.border};
+          border-radius: 17px;
+          background: #FFFFFF;
+        }
+
+        .opc-admin-time-entry-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 14px;
+        }
+
+        .opc-admin-time-entry-head > div {
+          min-width: 0;
+        }
+
+        .opc-admin-time-entry-head strong {
+          display: block;
+          color: ${BRAND.text};
+          font-size: 15px;
+          font-weight: 850;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .opc-admin-time-entry-head span {
+          display: block;
+          margin-top: 4px;
+          color: ${BRAND.muted};
+          font-size: 12px;
+          font-weight: 680;
+        }
+
+        .opc-admin-time-metrics {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .opc-admin-time-metrics > div {
+          display: grid;
+          gap: 4px;
+          min-width: 0;
+          padding: 10px 11px;
+          border-radius: 12px;
+          background: #F8FAFC;
+        }
+
+        .opc-admin-time-metrics span {
+          color: ${BRAND.muted};
+          font-size: 10px;
+          font-weight: 760;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+
+        .opc-admin-time-metrics strong {
+          color: ${BRAND.text};
+          font-size: 14px;
+          font-weight: 850;
+          white-space: nowrap;
+        }
+
+        .opc-admin-time-actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+
+        .opc-admin-time-actions .opc-mini-action {
+          width: 100%;
+          min-height: 38px;
+          justify-content: center;
+          border-radius: 12px;
+        }
+
+        @media (max-width: 740px) {
+          .opc-assignment-card-admin {
+            grid-template-columns: 1fr !important;
+          }
+
+          .opc-assignment-actions {
+            justify-content: flex-start !important;
+          }
+
+          .opc-assignment-admin-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-assignment-admin-actions .opc-mini-action {
+            width: 100%;
+            min-height: 38px;
+          }
+
+          .opc-admin-time-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+
+          .opc-admin-time-actions {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        /* OPC_ASSIGNMENT_TIME_LAYOUT_20260706_V7_1 */
+
+        .opc-assignment-card-v7 {
+          display: grid !important;
+          grid-template-columns: 1fr !important;
+          align-items: stretch !important;
+          gap: 10px !important;
+          min-height: 0 !important;
+          padding: 14px 15px !important;
+          border-radius: 16px !important;
+        }
+
+        .opc-assignment-card-v7 > .opc-assignment-person,
+        .opc-assignment-card-v7 .opc-assignment-person {
+          display: grid !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          position: relative !important;
+          z-index: 1 !important;
+          width: 100% !important;
+          min-width: 0 !important;
+          min-height: 42px !important;
+          gap: 3px !important;
+        }
+
+        .opc-assignment-card-v7 .opc-assignment-person strong {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          color: #111827 !important;
+          font-size: 15px !important;
+          font-weight: 850 !important;
+          line-height: 1.3 !important;
+          white-space: normal !important;
+          overflow: visible !important;
+          text-overflow: clip !important;
+        }
+
+        .opc-assignment-card-v7 .opc-assignment-person span {
+          display: block !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          margin: 0 !important;
+          color: #6B7280 !important;
+          font-size: 12px !important;
+          font-weight: 650 !important;
+          line-height: 1.35 !important;
+          white-space: normal !important;
+          overflow: visible !important;
+          text-overflow: clip !important;
+        }
+
+        .opc-assignment-card-v7 .opc-assignment-actions {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: space-between !important;
+          flex-wrap: wrap !important;
+          gap: 8px !important;
+          width: 100% !important;
+        }
+
+        .opc-assignment-card-v7 .opc-assignment-admin-actions {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: flex-end !important;
+          flex-wrap: wrap !important;
+          gap: 7px !important;
+          margin-left: auto !important;
+        }
+
+        .opc-assignment-card-v7 .opc-mini-action {
+          width: auto !important;
+          min-width: 108px !important;
+          min-height: 35px !important;
+          padding: 7px 12px !important;
+          border-radius: 11px !important;
+          font-size: 12px !important;
+          white-space: nowrap !important;
+        }
+
+        .opc-admin-time-list {
+          gap: 9px !important;
+        }
+
+        .opc-admin-time-entry {
+          gap: 9px !important;
+          min-height: 0 !important;
+          padding: 13px 14px !important;
+          border-radius: 16px !important;
+        }
+
+        .opc-admin-time-entry-head {
+          align-items: center !important;
+        }
+
+        .opc-admin-time-entry-head strong {
+          font-size: 14px !important;
+        }
+
+        .opc-admin-time-entry-head span {
+          margin-top: 2px !important;
+          font-size: 11px !important;
+        }
+
+        .opc-admin-time-metrics {
+          gap: 6px !important;
+        }
+
+        .opc-admin-time-metrics > div {
+          min-height: 54px !important;
+          padding: 8px 10px !important;
+          border-radius: 11px !important;
+        }
+
+        .opc-admin-time-metrics span {
+          font-size: 9px !important;
+        }
+
+        .opc-admin-time-metrics strong {
+          font-size: 13px !important;
+        }
+
+        .opc-admin-time-actions {
+          display: flex !important;
+          align-items: center !important;
+          justify-content: flex-end !important;
+          gap: 7px !important;
+        }
+
+        .opc-admin-time-actions .opc-mini-action {
+          width: auto !important;
+          min-width: 100px !important;
+          min-height: 35px !important;
+          padding: 7px 14px !important;
+          border-radius: 11px !important;
+          font-size: 12px !important;
+          white-space: nowrap !important;
+        }
+
+        @media (max-width: 740px) {
+          .opc-assignment-card-v7 .opc-assignment-actions {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+          }
+
+          .opc-assignment-card-v7 .opc-assignment-admin-actions {
+            display: grid !important;
+            grid-template-columns:
+              repeat(
+                2,
+                minmax(0, 1fr)
+              ) !important;
+            margin-left: 0 !important;
+          }
+
+          .opc-assignment-card-v7 .opc-mini-action {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+
+          .opc-admin-time-metrics {
+            grid-template-columns:
+              repeat(
+                2,
+                minmax(0, 1fr)
+              ) !important;
+          }
+
+          .opc-admin-time-actions {
+            display: grid !important;
+            grid-template-columns:
+              repeat(
+                2,
+                minmax(0, 1fr)
+              ) !important;
+          }
+
+          .opc-admin-time-actions .opc-mini-action {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
+        }
+
+        @media (max-width: 430px) {
+          .opc-assignment-card-v7
+            .opc-assignment-admin-actions,
+          .opc-admin-time-actions {
+            grid-template-columns:
+              1fr !important;
+          }
         }
 
         .opc-back-link {

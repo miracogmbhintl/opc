@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <title>
+    Internes Besichtigungsprotokoll - Orange Pro Clean GmbH
+  </title>
+
+  <style>
+    :root {
+      --ink: #111111;
+      --muted: #5f6368;
+      --faint: #8a8d91;
+      --link: #214f79;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: #dfe2e5;
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 11pt;
+      font-weight: 400;
+      line-height: 1.32;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    body {
+      padding: 18px 0 36px;
+    }
+
+    .document {
+      display: grid;
+      justify-content: center;
+      gap: 18px;
+    }
+
+    .page {
+      position: relative;
+      width: 210mm;
+      height: 297mm;
+      min-height: 297mm;
+      padding: 14mm 22mm 16mm;
+      overflow: hidden;
+      background: #ffffff;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.14);
+      page-break-after: always;
+      break-after: page;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    .page-number {
+      display: none;
+    }
+
+    .logo-wrap {
+      margin: 0 0 10mm;
+      text-align: center;
+    }
+
+    .logo {
+      display: inline-block;
+      width: 42mm;
+      height: auto;
+      object-fit: contain;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8mm;
+      margin: 0 0 6mm;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 17pt;
+      font-weight: 700;
+      line-height: 1.08;
+      letter-spacing: -0.015em;
+      white-space: nowrap;
+    }
+
+    .internal-badge {
+      flex: 0 0 auto;
+      padding-top: 1mm;
+      color: var(--muted);
+      font-size: 9pt;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .lead {
+      max-width: none;
+      margin: 0 0 8mm;
+      color: var(--muted);
+      font-size: 10.5pt;
+      line-height: 1.4;
+    }
+
+    .section {
+      margin-top: 7mm;
+    }
+
+    .section h2,
+    .page-title {
+      margin: 0 0 4.5mm;
+      font-size: 12pt;
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 8mm;
+      row-gap: 3.4mm;
+    }
+
+    .detail {
+      display: grid;
+      grid-template-columns: 37mm minmax(0, 1fr);
+      gap: 3mm;
+      align-items: baseline;
+      min-height: 5mm;
+      font-size: 10pt;
+      line-height: 1.28;
+    }
+
+    .label {
+      color: var(--ink);
+      font-size: 9.5pt;
+      font-weight: 700;
+    }
+
+    .value {
+      color: var(--ink);
+      font-weight: 400;
+      overflow-wrap: anywhere;
+    }
+
+    .document-meta {
+      margin-top: 8mm;
+      color: var(--faint);
+      font-size: 8pt;
+      line-height: 1.35;
+    }
+
+    .continuation-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10mm;
+      margin: 0 0 10mm;
+    }
+
+    .continuation-header img {
+      width: 35mm;
+      height: auto;
+      object-fit: contain;
+    }
+
+    .continuation-meta {
+      padding-top: 0.5mm;
+      color: var(--muted);
+      font-size: 8.5pt;
+      line-height: 1.35;
+      text-align: right;
+    }
+
+    .continuation-meta strong {
+      display: block;
+      margin-bottom: 1mm;
+      color: var(--ink);
+      font-size: 10pt;
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .notes {
+      display: grid;
+      gap: 6mm;
+    }
+
+    .note {
+      padding: 0;
+      break-inside: avoid;
+    }
+
+    .note h3 {
+      margin: 0 0 1.5mm;
+      font-size: 10.5pt;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .note p {
+      margin: 0;
+      font-size: 10pt;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .attachment-list {
+      display: grid;
+      gap: 2.8mm;
+      margin-top: 2mm;
+    }
+
+    .attachment-link {
+      display: block;
+      color: var(--link);
+      font-size: 9.5pt;
+      line-height: 1.35;
+      text-decoration: underline;
+      text-underline-offset: 1.5px;
+      overflow-wrap: anywhere;
+    }
+
+    .photo-page {
+      padding-bottom: 14mm;
+    }
+
+    .photo-list {
+      display: grid;
+      grid-template-rows: 1fr 1fr;
+      gap: 7mm;
+      height: 225mm;
+    }
+
+    .photo-item {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      margin: 0;
+      break-inside: avoid;
+    }
+
+    .photo-link {
+      display: flex;
+      flex: 1;
+      align-items: center;
+      justify-content: center;
+      min-height: 0;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .photo-image {
+      display: block;
+      width: auto;
+      height: auto;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      object-position: center;
+    }
+
+    .photo-caption {
+      min-height: 5mm;
+      margin-top: 2.2mm;
+      font-size: 9pt;
+      line-height: 1.3;
+    }
+
+    .photo-name {
+      color: var(--link);
+      font-weight: 400;
+      text-decoration: underline;
+      text-underline-offset: 1.5px;
+      overflow-wrap: anywhere;
+    }
+
+    .photo-name-static {
+      color: var(--ink);
+      font-weight: 400;
+      overflow-wrap: anywhere;
+    }
+
+    .policy-intro {
+      max-width: none;
+      margin: 0 0 7mm;
+      color: var(--muted);
+      font-size: 9.5pt;
+      line-height: 1.4;
+    }
+
+    .policy-list {
+      display: grid;
+      gap: 4.4mm;
+    }
+
+    .policy-item {
+      break-inside: avoid;
+    }
+
+    .policy-item h3 {
+      margin: 0 0 1.2mm;
+      font-size: 10pt;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .policy-item p {
+      margin: 0;
+      color: var(--ink);
+      font-size: 9pt;
+      line-height: 1.35;
+    }
+
+    .policy-ack {
+      margin-top: 7mm;
+      color: var(--muted);
+      font-size: 8.5pt;
+      line-height: 1.4;
+    }
+
+    .empty-value {
+      color: var(--faint);
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    @media print {
+      html,
+      body {
+        background: #ffffff;
+      }
+
+      body {
+        padding: 0;
+      }
+
+      .document {
+        display: block;
+      }
+
+      .page {
+        width: 210mm;
+        height: 297mm;
+        min-height: 297mm;
+        margin: 0;
+        box-shadow: none;
+      }
+    }
+
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <main id="opc-inspection-document" class="document"></main>
+
+  <script>
+    window.OPC_SITE_INSPECTION_DATA = null;
+  </script>
+
+  <script>
+    (() => {
+      const data = window.OPC_SITE_INSPECTION_DATA || {};
+      const root = document.getElementById(
+        'opc-inspection-document'
+      );
+
+      const fallbackLogo =
+        '/icons/orange-pro-clean-webicon.png';
+
+      const logoUrl =
+        data.logoUrl ||
+        'https://cdn.prod.website-files.com/6944470386300e196e5fc347/69495340f6a0fe99fed87217_WHITE%20ORANGE%20PRO%20CLEAN%20LOGO%20ORIGINAL.png';
+
+      function clean(value) {
+        return String(value ?? '').trim();
+      }
+
+      function escapeHtml(value) {
+        return clean(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      function escapeAttribute(value) {
+        return escapeHtml(value)
+          .replace(/`/g, '&#096;');
+      }
+
+      function isSafeLink(value) {
+        return /^https?:\/\//i.test(clean(value));
+      }
+
+      function logo(className = 'logo') {
+        return `
+          <img
+            class="${escapeAttribute(className)}"
+            src="${escapeAttribute(logoUrl)}"
+            alt="Orange Pro Clean GmbH"
+            crossorigin="anonymous"
+            onerror="this.onerror=null;this.src='${fallbackLogo}'"
+          >
+        `;
+      }
+
+      function visibleRows(rows) {
+        return (Array.isArray(rows) ? rows : [])
+          .filter((row) => clean(row?.value));
+      }
+
+      function detailSection(section) {
+        const rows = visibleRows(section?.rows);
+
+        if (!rows.length) {
+          return '';
+        }
+
+        return `
+          <section class="section">
+            <h2>${escapeHtml(section.title)}</h2>
+            <div class="detail-grid">
+              ${rows.map((row) => `
+                <div class="detail">
+                  <div class="label">
+                    ${escapeHtml(row.label)}
+                  </div>
+                  <div class="value">
+                    ${escapeHtml(row.value)}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </section>
+        `;
+      }
+
+      function continuationHeader(title) {
+        return `
+          <header class="continuation-header">
+            ${logo()}
+            <div class="continuation-meta">
+              <strong>${escapeHtml(title)}</strong>
+              ${escapeHtml(data.inspectionNumber)}
+              ${clean(data.clientLabel)
+                ? ` · ${escapeHtml(data.clientLabel)}`
+                : ''}
+              <br>
+              Download: ${escapeHtml(data.downloadedAt)}
+            </div>
+          </header>
+        `;
+      }
+
+      function noteWeight(note) {
+        const length =
+          clean(note?.title).length +
+          clean(note?.text).length;
+
+        if (length > 1300) return 4;
+        if (length > 850) return 3;
+        if (length > 450) return 2;
+        return 1;
+      }
+
+      function paginateNotes(notes) {
+        const pages = [];
+        let current = [];
+        let weight = 0;
+        const maxWeight = 7;
+
+        for (const note of notes) {
+          const nextWeight = noteWeight(note);
+
+          if (
+            current.length > 0 &&
+            weight + nextWeight > maxWeight
+          ) {
+            pages.push(current);
+            current = [];
+            weight = 0;
+          }
+
+          current.push(note);
+          weight += nextWeight;
+        }
+
+        if (current.length) {
+          pages.push(current);
+        }
+
+        return pages.length ? pages : [[]];
+      }
+
+      const pages = [];
+
+      const sections = Array.isArray(data.sections)
+        ? data.sections
+        : [];
+
+      pages.push(`
+        <section class="page">
+          <div class="page-number">Seite 1</div>
+
+          <div class="logo-wrap">
+            ${logo()}
+          </div>
+
+          <div class="title-row">
+            <h1>Internes Besichtigungsprotokoll</h1>
+            <div class="internal-badge">
+              Internes Dokument
+            </div>
+          </div>
+
+          <p class="lead">
+            Dieses Protokoll dokumentiert die Besichtigung und
+            dient als interne Grundlage für Kalkulation,
+            Offertenerstellung, Einsatzplanung,
+            Qualitätssicherung und spätere Auftragsdokumente.
+          </p>
+
+          ${sections.map(detailSection).join('')}
+
+          <p class="document-meta">
+            Vertraulich - ausschliesslich für die interne
+            Verwendung durch Orange Pro Clean GmbH.
+            Die verbindliche interne Richtlinie befindet sich
+            auf der letzten Seite.
+          </p>
+        </section>
+      `);
+
+      const notes = (Array.isArray(data.notes) ? data.notes : [])
+        .filter((note) => clean(note?.text));
+
+      const notePages = paginateNotes(notes);
+
+      notePages.forEach((pageNotes, index) => {
+        const attachmentHtml =
+          index === notePages.length - 1 &&
+          Array.isArray(data.attachments) &&
+          data.attachments.length
+            ? `
+              <section class="section">
+                <h2>Weitere Dateien</h2>
+                <div class="attachment-list">
+                  ${data.attachments.map((attachment) => {
+                    const name =
+                      clean(attachment?.name) ||
+                      'Datei öffnen';
+
+                    if (!isSafeLink(attachment?.href)) {
+                      return `
+                        <span class="attachment-link">
+                          ${escapeHtml(name)}
+                        </span>
+                      `;
+                    }
+
+                    return `
+                      <a
+                        class="attachment-link"
+                        href="${escapeAttribute(attachment.href)}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        ${escapeHtml(name)}
+                      </a>
+                    `;
+                  }).join('')}
+                </div>
+              </section>
+            `
+            : '';
+
+        pages.push(`
+          <section class="page">
+            <div class="page-number">
+              Seite ${pages.length + 1}
+            </div>
+
+            ${continuationHeader(
+              'Internes Besichtigungsprotokoll'
+            )}
+
+            <h2 class="page-title">
+              ${index === 0
+                ? 'Notizen & Feststellungen'
+                : 'Notizen & Feststellungen - Fortsetzung'}
+            </h2>
+
+            <div class="notes">
+              ${
+                pageNotes.length
+                  ? pageNotes.map((note) => `
+                    <article class="note">
+                      <h3>${escapeHtml(note.title)}</h3>
+                      <p>${escapeHtml(note.text)}</p>
+                    </article>
+                  `).join('')
+                  : `
+                    <article class="note">
+                      <p class="empty-value">
+                        Keine zusätzlichen Notizen erfasst.
+                      </p>
+                    </article>
+                  `
+              }
+            </div>
+
+            ${attachmentHtml}
+          </section>
+        `);
+      });
+
+      const images = Array.isArray(data.images)
+        ? data.images
+        : [];
+
+      for (
+        let pairStart = 0;
+        pairStart < images.length;
+        pairStart += 2
+      ) {
+        const pair = images.slice(
+          pairStart,
+          pairStart + 2
+        );
+
+        pages.push(`
+          <section class="page photo-page">
+            <div class="page-number">
+              Seite ${pages.length + 1}
+            </div>
+
+            ${continuationHeader('Fotodokumentation')}
+
+            <h2 class="page-title">
+              Fotodokumentation
+            </h2>
+
+            <div class="photo-list">
+              ${pair.map((image) => {
+                const name =
+                  clean(image?.name) ||
+                  'Besichtigungsbild';
+
+                const imageElement = `
+                  <img
+                    class="photo-image"
+                    src="${escapeAttribute(image.src)}"
+                    alt="${escapeAttribute(name)}"
+                  >
+                `;
+
+                const imageHtml = isSafeLink(image?.href)
+                  ? `
+                    <a
+                      class="photo-link"
+                      href="${escapeAttribute(image.href)}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ${imageElement}
+                    </a>
+                  `
+                  : `
+                    <div class="photo-link">
+                      ${imageElement}
+                    </div>
+                  `;
+
+                const captionHtml = isSafeLink(image?.href)
+                  ? `
+                    <a
+                      class="photo-name"
+                      href="${escapeAttribute(image.href)}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      ${escapeHtml(name)}
+                    </a>
+                  `
+                  : `
+                    <span class="photo-name-static">
+                      ${escapeHtml(name)}
+                    </span>
+                  `;
+
+                return `
+                  <figure class="photo-item">
+                    ${imageHtml}
+                    <figcaption class="photo-caption">
+                      ${captionHtml}
+                    </figcaption>
+                  </figure>
+                `;
+              }).join('')}
+            </div>
+          </section>
+        `);
+      }
+
+      pages.push(`
+        <section class="page policy-page">
+          <div class="page-number">
+            Seite ${pages.length + 1}
+          </div>
+
+          ${continuationHeader('Interne Richtlinie')}
+
+          <h2 class="page-title">
+            Vertraulichkeit und Umgang mit Kundendaten
+          </h2>
+
+          <p class="policy-intro">
+            Die folgenden Bestimmungen gelten für dieses
+            Besichtigungsprotokoll, alle darin enthaltenen
+            Kundendaten und Notizen sowie sämtliche
+            eingebetteten oder verlinkten Bilddateien.
+          </p>
+
+          <div class="policy-list">
+            <section class="policy-item">
+              <h3>1. Vertraulichkeit und Zweck</h3>
+              <p>
+                Dieses Besichtigungsprotokoll ist ein internes
+                Arbeitsdokument der Orange Pro Clean GmbH.
+                Es darf ausschliesslich zur internen Beurteilung,
+                Kalkulation, Offertenerstellung, Einsatzplanung,
+                Qualitätssicherung und Auftragsabwicklung
+                verwendet werden.
+              </p>
+            </section>
+
+            <section class="policy-item">
+              <h3>2. Kundendaten und Bildmaterial</h3>
+              <p>
+                Kundendaten, Objektangaben, Notizen, Bilder und
+                verknüpfte Originaldateien sind vertraulich zu
+                behandeln. Sie dürfen nur von Mitarbeitenden
+                eingesehen werden, die diese Informationen für
+                ihre konkrete Aufgabe benötigen.
+              </p>
+            </section>
+
+            <section class="policy-item">
+              <h3>3. Keine externe Weitergabe</h3>
+              <p>
+                Das Dokument und seine Inhalte dürfen nicht an
+                externe Personen, andere Kunden, private
+                Kontakte oder nicht freigegebene Dienstleister
+                versendet, weitergeleitet, veröffentlicht,
+                ausgedruckt oder anderweitig zugänglich gemacht
+                werden. Eine externe Verwendung ist nur nach
+                ausdrücklicher Freigabe der Geschäftsleitung
+                zulässig.
+              </p>
+            </section>
+
+            <section class="policy-item">
+              <h3>4. Zulässige Systeme und Geräte</h3>
+              <p>
+                Die Verarbeitung und Speicherung darf nur in
+                den von Orange Pro Clean GmbH freigegebenen
+                Systemen, Konten und Geräten erfolgen.
+                Das Speichern auf privaten Geräten, privaten
+                Cloud-Diensten oder privaten Messenger-Konten
+                ist untersagt.
+              </p>
+            </section>
+
+            <section class="policy-item">
+              <h3>5. Sorgfalt und Zugriffsschutz</h3>
+              <p>
+                Zugangsdaten dürfen nicht geteilt werden.
+                Dokumente und Bilder sind vor unbefugtem Zugriff
+                zu schützen. Geräte müssen gesperrt werden,
+                sobald sie unbeaufsichtigt sind.
+                Heruntergeladene Originaldateien sind nach
+                Abschluss der erforderlichen Prüfung aus lokalen
+                Download-Ordnern zu entfernen.
+              </p>
+            </section>
+
+            <section class="policy-item">
+              <h3>6. Meldung von Vorfällen</h3>
+              <p>
+                Fehlversand, Verlust, unberechtigter Zugriff oder
+                eine sonstige mögliche Verletzung der
+                Vertraulichkeit ist unverzüglich der
+                Geschäftsleitung zu melden. Eigene Lösch- oder
+                Vertuschungsversuche sind zu unterlassen, damit
+                der Vorfall korrekt geprüft und dokumentiert
+                werden kann.
+              </p>
+            </section>
+
+            <section class="policy-item">
+              <h3>7. Folgen bei Verstössen</h3>
+              <p>
+                Verstösse gegen diese interne Richtlinie können
+                je nach Schwere arbeitsrechtliche Massnahmen
+                sowie zivil- oder strafrechtliche Folgen nach
+                sich ziehen. Massgebend sind die internen
+                Weisungen, die vertraglichen Pflichten und das
+                jeweils anwendbare Recht.
+              </p>
+            </section>
+          </div>
+
+          <p class="policy-ack">
+            <strong>Interner Hinweis:</strong>
+            Mit dem Zugriff auf dieses Dokument bestätigt die
+            zugreifende Person, die internen Vorgaben zur
+            Vertraulichkeit, zum Datenschutz und zur
+            Informationssicherheit einzuhalten.
+          </p>
+        </section>
+      `);
+
+      root.innerHTML = pages.join('');
+    })();
+  </script>
+</body>
+</html>

@@ -1695,6 +1695,32 @@ function PlanField({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
+const OPC_JOB_DUPLICATE_PREFILL_KEY =
+  'opc_job_duplicate_prefill_v1';
+
+function buildServiceRequirementsFromText(
+  value: string,
+) {
+  return String(value || '')
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/^\s*[•*-]\s*/, '')
+        .trim(),
+    )
+    .filter(Boolean)
+    .map((label, index) => ({
+      id:
+        `duplicated-requirement-${index + 1}`,
+      label,
+      completed: false,
+      completed_at: null,
+      completed_by: null,
+    }));
+}
+
+// OPC_JOB_DUPLICATE_PLANNING_PREFILL_20260706
+
 function EinsatzPlanningView() {
   const today = useMemo(() => toInputDate(new Date()), []);
 
@@ -1730,6 +1756,33 @@ function EinsatzPlanningView() {
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [internalNotes, setInternalNotes] = useState('');
 
+  const [
+    serviceRequirementsText,
+    setServiceRequirementsText,
+  ] = useState('');
+
+  const [
+    reportRequired,
+    setReportRequired,
+  ] = useState(true);
+
+  const [
+    duplicateSourceJobId,
+    setDuplicateSourceJobId,
+  ] = useState('');
+
+  const [
+    duplicatePrefill,
+    setDuplicatePrefill,
+  ] = useState<JsonRecord | null>(
+    null,
+  );
+
+  const [
+    duplicateStaffKeys,
+    setDuplicateStaffKeys,
+  ] = useState<string[]>([]);
+
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -1750,6 +1803,540 @@ function EinsatzPlanningView() {
     if (!autoEndTime) return;
     setEndTime(addHoursToTime(startTime, estimatedHours || '2'));
   }, [autoEndTime, estimatedHours, startTime]);
+
+  useEffect(() => {
+    try {
+      const raw =
+        window.sessionStorage.getItem(
+          OPC_JOB_DUPLICATE_PREFILL_KEY,
+        );
+
+      if (!raw) return;
+
+      window.sessionStorage.removeItem(
+        OPC_JOB_DUPLICATE_PREFILL_KEY,
+      );
+
+      const prefill = JSON.parse(raw);
+
+      if (
+        !prefill ||
+        prefill.source !==
+          'job_duplicate'
+      ) {
+        return;
+      }
+
+      setDuplicateSourceJobId(
+        String(
+          prefill.source_job_id || '',
+        ),
+      );
+
+      setTitle(
+        String(prefill.title || ''),
+      );
+
+      setServiceCategory(
+        String(
+          prefill.service_category ||
+          'Unterhaltsreinigung',
+        ),
+      );
+
+      setServiceDescription(
+        String(
+          prefill.service_description ||
+          '',
+        ),
+      );
+
+      setPriority(
+        String(
+          prefill.priority || 'normal',
+        ),
+      );
+
+      setStatus('scheduled');
+
+      setClientId(
+        String(prefill.client_id || ''),
+      );
+
+      setClientName(
+        String(prefill.client_name || ''),
+      );
+
+      setSiteId(
+        String(
+          prefill.client_site_id || '',
+        ),
+      );
+
+      setSiteName(
+        String(prefill.site_name || ''),
+      );
+
+      setAddressText(
+        String(
+          prefill.address_text || '',
+        ),
+      );
+
+      setPostalCode(
+        String(prefill.postal_code || ''),
+      );
+
+      setCity(
+        String(prefill.city || ''),
+      );
+
+      setEstimatedHours(
+        String(
+          prefill.estimated_hours || '',
+        ),
+      );
+
+      setInternalNotes(
+        String(
+          prefill.internal_notes || '',
+        ),
+      );
+
+      setServiceRequirementsText(
+        String(
+          prefill.service_requirements_text ||
+          '',
+        ),
+      );
+
+      setReportRequired(
+        prefill.report_required !== false,
+      );
+
+      setDuplicateStaffKeys(
+        Array.isArray(
+          prefill.assigned_staff_keys,
+        )
+          ? prefill.assigned_staff_keys
+              .filter(Boolean)
+              .map(String)
+          : [],
+      );
+
+      setRecurrenceMode('none');
+      setAutoEndTime(false);
+
+      /*
+       * Datum und Uhrzeiten werden bewusst
+       * nicht vom alten Einsatz kopiert.
+       */
+      setStartDate('');
+      setStartTime('');
+      setEndTime('');
+
+      setMessage(
+        'Einsatzdaten wurden übernommen. Bitte Datum und Uhrzeit für den neuen Einsatz festlegen.',
+      );
+    } catch {
+      setErrorMessage(
+        'Die kopierten Einsatzdaten konnten nicht vollständig geladen werden.',
+      );
+    }
+  }, []);
+
+
+  // OPC_JOB_DUPLICATE_ROBUST_PREFILL_20260706_V3
+  useEffect(() => {
+    try {
+      const params =
+        new URLSearchParams(
+          window.location.search,
+        );
+
+      const sourceJobId =
+        params.get(
+          'duplicate_from_job',
+        ) || '';
+
+      if (!sourceJobId) {
+        return;
+      }
+
+      const durableKey =
+        `opc_job_duplicate_prefill_v3:${sourceJobId}`;
+
+      const raw =
+        window.localStorage.getItem(
+          durableKey,
+        ) ||
+        window.localStorage.getItem(
+          OPC_JOB_DUPLICATE_PREFILL_KEY,
+        ) ||
+        window.sessionStorage.getItem(
+          OPC_JOB_DUPLICATE_PREFILL_KEY,
+        );
+
+      if (!raw) {
+        setErrorMessage(
+          'Der ursprüngliche Einsatz wurde erkannt, aber die kopierten Formulardaten fehlen.',
+        );
+
+        return;
+      }
+
+      const prefill =
+        JSON.parse(raw) as JsonRecord;
+
+      if (
+        !prefill ||
+        prefill.source !==
+          'job_duplicate'
+      ) {
+        return;
+      }
+
+      if (
+        Number(prefill.expires_at) > 0 &&
+        Date.now() >
+          Number(prefill.expires_at)
+      ) {
+        setErrorMessage(
+          'Die vorbereiteten Duplikatdaten sind abgelaufen. Bitte den Einsatz erneut duplizieren.',
+        );
+
+        return;
+      }
+
+      setDuplicatePrefill(prefill);
+
+      setDuplicateSourceJobId(
+        String(
+          prefill.source_job_id ||
+          sourceJobId,
+        ),
+      );
+
+      setTitle(
+        String(prefill.title || ''),
+      );
+
+      setServiceCategory(
+        String(
+          prefill.service_category ||
+          'Unterhaltsreinigung',
+        ),
+      );
+
+      setServiceDescription(
+        String(
+          prefill.service_description ||
+          '',
+        ),
+      );
+
+      setPriority(
+        String(
+          prefill.priority ||
+          'normal',
+        ),
+      );
+
+      setStatus('scheduled');
+
+      setClientId(
+        String(
+          prefill.client_id || '',
+        ),
+      );
+
+      setClientName(
+        String(
+          prefill.client_name || '',
+        ),
+      );
+
+      setSiteId(
+        String(
+          prefill.client_site_id ||
+          '',
+        ),
+      );
+
+      setSiteName(
+        String(
+          prefill.site_name || '',
+        ),
+      );
+
+      setAddressText(
+        String(
+          prefill.address_text || '',
+        ),
+      );
+
+      setPostalCode(
+        String(
+          prefill.postal_code || '',
+        ),
+      );
+
+      setCity(
+        String(prefill.city || ''),
+      );
+
+      setEstimatedHours(
+        String(
+          prefill.estimated_hours ||
+          '',
+        ),
+      );
+
+      setInternalNotes(
+        String(
+          prefill.internal_notes ||
+          prefill.dispatcher_notes ||
+          '',
+        ),
+      );
+
+      setServiceRequirementsText(
+        String(
+          prefill
+            .service_requirements_text ||
+          '',
+        ),
+      );
+
+      setReportRequired(
+        prefill.report_required !==
+          false,
+      );
+
+      setDuplicateStaffKeys(
+        Array.isArray(
+          prefill.assigned_staff_keys,
+        )
+          ? prefill
+              .assigned_staff_keys
+              .filter(Boolean)
+              .map(String)
+          : [],
+      );
+
+      setRecurrenceMode('none');
+      setAutoEndTime(false);
+
+      setStartDate('');
+      setStartTime('');
+      setEndTime('');
+
+      setMessage(
+        'Einsatz wurde vollständig kopiert. Bitte nur noch das neue Datum und die Uhrzeit festlegen.',
+      );
+    } catch {
+      setErrorMessage(
+        'Die kopierten Einsatzdaten konnten nicht gelesen werden.',
+      );
+    }
+  }, []);
+
+  /*
+   * Kunden-, Standort- und Mitarbeiterlisten
+   * werden asynchron geladen. Sobald sie
+   * verfügbar sind, werden die kopierten IDs
+   * erneut gesetzt, damit spätere Ladeeffekte
+   * das Prefill nicht überschreiben.
+   */
+  useEffect(() => {
+    if (!duplicatePrefill) {
+      return;
+    }
+
+    const copiedClientId =
+      String(
+        duplicatePrefill.client_id ||
+        '',
+      );
+
+    if (
+      copiedClientId &&
+      clientOptions.length > 0
+    ) {
+      const clientExists =
+        clientOptions.some(
+          (client) => {
+            const row =
+              client as any;
+
+            return (
+              String(
+                row.client_id ||
+                row.id ||
+                '',
+              ) === copiedClientId
+            );
+          },
+        );
+
+      if (clientExists) {
+        setClientId(
+          copiedClientId,
+        );
+
+        setClientName(
+          String(
+            duplicatePrefill
+              .client_name || '',
+          ),
+        );
+      }
+    }
+
+    const copiedSiteId =
+      String(
+        duplicatePrefill
+          .client_site_id || '',
+      );
+
+    if (
+      copiedSiteId &&
+      siteOptions.length > 0
+    ) {
+      const siteExists =
+        siteOptions.some(
+          (site) => {
+            const row =
+              site as any;
+
+            return (
+              String(
+                row.id ||
+                row.site_id ||
+                '',
+              ) === copiedSiteId
+            );
+          },
+        );
+
+      if (siteExists) {
+        setSiteId(copiedSiteId);
+
+        setSiteName(
+          String(
+            duplicatePrefill
+              .site_name || '',
+          ),
+        );
+
+        setAddressText(
+          String(
+            duplicatePrefill
+              .address_text || '',
+          ),
+        );
+
+        setPostalCode(
+          String(
+            duplicatePrefill
+              .postal_code || '',
+          ),
+        );
+
+        setCity(
+          String(
+            duplicatePrefill.city ||
+            '',
+          ),
+        );
+      }
+    }
+
+    const copiedStaffKeys =
+      Array.isArray(
+        duplicatePrefill
+          .assigned_staff_keys,
+      )
+        ? duplicatePrefill
+            .assigned_staff_keys
+            .filter(Boolean)
+            .map(String)
+        : [];
+
+    if (
+      copiedStaffKeys.length > 0 &&
+      staffOptions.length > 0
+    ) {
+      const keySet =
+        new Set(copiedStaffKeys);
+
+      const matchedIds =
+        staffOptions
+          .filter((staff) => {
+            const row =
+              staff as any;
+
+            return [
+              row.id,
+              row.user_id,
+              row.employee_id,
+            ]
+              .filter(Boolean)
+              .map(String)
+              .some((id) =>
+                keySet.has(id),
+              );
+          })
+          .map((staff) =>
+            String(
+              (staff as any).id,
+            ),
+          )
+          .filter(Boolean);
+
+      setSelectedStaffIds(
+        matchedIds,
+      );
+    }
+  }, [
+    duplicatePrefill,
+    clientOptions,
+    siteOptions,
+    staffOptions,
+  ]);
+
+  useEffect(() => {
+    if (
+      duplicateStaffKeys.length === 0 ||
+      staffOptions.length === 0
+    ) {
+      return;
+    }
+
+    const keySet =
+      new Set(duplicateStaffKeys);
+
+    const matchedIds =
+      staffOptions
+        .filter((staff) =>
+          [
+            staff.id,
+            staff.user_id,
+            staff.employee_id,
+          ]
+            .filter(Boolean)
+            .map(String)
+            .some((id) =>
+              keySet.has(id),
+            ),
+        )
+        .map((staff) => staff.id);
+
+    setSelectedStaffIds(matchedIds);
+  }, [
+    duplicateStaffKeys,
+    staffOptions,
+  ]);
 
   useEffect(() => {
     if (periodPreset === '3m') setSeriesEndDate(addMonthsToInputDate(startDate, 3));
@@ -1907,6 +2494,27 @@ function EinsatzPlanningView() {
       site_city: cleanNullable(city),
       internal_notes: cleanNullable(internalNotes),
       dispatcher_notes: cleanNullable(internalNotes),
+
+      service_requirements:
+        buildServiceRequirementsFromText(
+          serviceRequirementsText,
+        ),
+
+      report_required:
+        reportRequired,
+
+      metadata:
+        duplicateSourceJobId
+          ? {
+              created_from:
+                'job_duplicate',
+              duplicated_from_job_id:
+                duplicateSourceJobId,
+              duplicated_at:
+                new Date().toISOString(),
+            }
+          : undefined,
+
       recurrence_type: recurrenceMode !== 'none' ? recurrenceMode : null,
       recurring_series_id: recurringSeriesId,
       occurrence_date: date,
@@ -1932,6 +2540,12 @@ function EinsatzPlanningView() {
       client_site_id: full.client_site_id,
       internal_notes: full.internal_notes,
       dispatcher_notes: full.dispatcher_notes,
+      service_requirements:
+        full.service_requirements,
+      report_required:
+        full.report_required,
+      metadata:
+        full.metadata,
       created_at: full.created_at,
       updated_at: full.updated_at,
     };
@@ -2291,6 +2905,44 @@ function EinsatzPlanningView() {
               <PlanField label="Beschreibung">
                 <textarea value={serviceDescription} onChange={(event) => setServiceDescription(event.target.value)} placeholder="Beschreiben Sie kurz, was vor Ort erledigt werden soll." />
               </PlanField>
+
+              <div className="opc-plan-two-row">
+                <PlanField label="Leistungsanforderungen / Checkliste">
+                  <textarea
+                    value={serviceRequirementsText}
+                    onChange={(event) =>
+                      setServiceRequirementsText(
+                        event.target.value,
+                      )
+                    }
+                    placeholder="Eine Anforderung pro Zeile"
+                  />
+                </PlanField>
+
+                <PlanField label="Bericht">
+                  <select
+                    value={
+                      reportRequired
+                        ? 'required'
+                        : 'optional'
+                    }
+                    onChange={(event) =>
+                      setReportRequired(
+                        event.target.value ===
+                          'required',
+                      )
+                    }
+                  >
+                    <option value="required">
+                      Bericht erforderlich
+                    </option>
+
+                    <option value="optional">
+                      Bericht optional
+                    </option>
+                  </select>
+                </PlanField>
+              </div>
 
               <button type="button" className="opc-soft-button" onClick={() => { setAutoEndTime(true); setEndTime(addHoursToTime(startTime, estimatedHours || '2')); }}>
                 <Clock3 size={15} />

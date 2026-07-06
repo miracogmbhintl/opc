@@ -71,6 +71,34 @@ function installOpcSingleNavigationGuard() {
 
     const currentRoute = `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
+    // OPC_SMART_BACK_NAVIGATION_20260706_V2
+    const linkLabel = String(
+      link.textContent || '',
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const linkClassName =
+      String(link.className || '');
+
+    const isBackLink =
+      link.dataset.opcBack === 'true' ||
+      /back/i.test(linkClassName) ||
+      /^(←\s*)?Zurück\b/i.test(linkLabel);
+
+    if (isBackLink) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        safeNavigate(targetRoute);
+      }
+
+      return;
+    }
+
     if (targetRoute === currentRoute) {
       event.preventDefault();
       event.stopPropagation();
@@ -107,6 +135,281 @@ function installOpcSingleNavigationGuard() {
   };
 }
 
+
+// OPC_JOB_REQUEST_DEDUPER_20260706_V3
+function installOpcJobRequestDeduper() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const runtimeWindow =
+    window as typeof window & {
+      __opcJobRequestDeduperInstalled?: boolean;
+    };
+
+  if (
+    runtimeWindow
+      .__opcJobRequestDeduperInstalled
+  ) {
+    return;
+  }
+
+  runtimeWindow
+    .__opcJobRequestDeduperInstalled = true;
+
+  const originalFetch =
+    window.fetch.bind(window);
+
+  const inFlight =
+    new Map<string, Promise<Response>>();
+
+  const recentManagerReads =
+    new Map<
+      string,
+      {
+        at: number;
+        status: number;
+        statusText: string;
+        headers: Record<string, string>;
+        body: string;
+      }
+    >();
+
+  const accessCacheKey =
+    '__opc_jobs_access_response_session_v3__';
+
+  const responseFromSnapshot = (
+    snapshot: {
+      status: number;
+      statusText: string;
+      headers: Record<string, string>;
+      body: string;
+    },
+  ) =>
+    new Response(snapshot.body, {
+      status: snapshot.status,
+      statusText: snapshot.statusText,
+      headers: snapshot.headers,
+    });
+
+  const snapshotResponse = async (
+    response: Response,
+  ) => {
+    const headers:
+      Record<string, string> = {};
+
+    response.headers.forEach(
+      (value, key) => {
+        headers[key] = value;
+      },
+    );
+
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+      body:
+        await response.clone().text(),
+    };
+  };
+
+  window.fetch = async (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+  ) => {
+    let request: Request;
+
+    try {
+      if (input instanceof Request) {
+        request =
+          new Request(input, init);
+      } else {
+        request = new Request(
+          new URL(
+            String(input),
+            window.location.href,
+          ).toString(),
+          init,
+        );
+      }
+    } catch {
+      return originalFetch(
+        input,
+        init,
+      );
+    }
+
+    const url =
+      new URL(request.url);
+
+    if (
+      url.origin !==
+      window.location.origin
+    ) {
+      return originalFetch(request);
+    }
+
+    const isAccessRequest =
+      request.method === 'GET' &&
+      url.pathname ===
+        '/api/opc/jobs/access';
+
+    const isManagerProxy =
+      url.pathname ===
+        '/api/opc/jobs/manager-proxy';
+
+    if (
+      !isAccessRequest &&
+      !isManagerProxy
+    ) {
+      return originalFetch(request);
+    }
+
+    let requestBody = '';
+
+    if (
+      request.method !== 'GET' &&
+      request.method !== 'HEAD'
+    ) {
+      try {
+        requestBody =
+          await request
+            .clone()
+            .text();
+      } catch {
+        requestBody = '';
+      }
+    }
+
+    const requestKey = [
+      request.method,
+      url.pathname,
+      url.search,
+      requestBody,
+    ].join('::');
+
+    if (isAccessRequest) {
+      try {
+        const cachedRaw =
+          window.sessionStorage
+            .getItem(accessCacheKey);
+
+        if (cachedRaw) {
+          const cached =
+            JSON.parse(cachedRaw);
+
+          if (
+            cached &&
+            Number(cached.at) > 0 &&
+            Date.now() -
+              Number(cached.at) <
+              15 * 60 * 1000
+          ) {
+            return responseFromSnapshot(
+              cached.response,
+            );
+          }
+        }
+      } catch {
+        // Netzwerkzugriff bleibt verfügbar.
+      }
+    }
+
+    if (
+      isManagerProxy &&
+      request.method === 'GET'
+    ) {
+      const cached =
+        recentManagerReads.get(
+          requestKey,
+        );
+
+      if (
+        cached &&
+        Date.now() - cached.at < 2000
+      ) {
+        return responseFromSnapshot(
+          cached,
+        );
+      }
+    }
+
+    const existing =
+      inFlight.get(requestKey);
+
+    if (existing) {
+      const response =
+        await existing;
+
+      return response.clone();
+    }
+
+    const requestPromise =
+      originalFetch(request);
+
+    inFlight.set(
+      requestKey,
+      requestPromise,
+    );
+
+    try {
+      const response =
+        await requestPromise;
+
+      if (
+        isAccessRequest &&
+        response.ok
+      ) {
+        try {
+          const snapshot =
+            await snapshotResponse(
+              response,
+            );
+
+          window.sessionStorage
+            .setItem(
+              accessCacheKey,
+              JSON.stringify({
+                at: Date.now(),
+                response: snapshot,
+              }),
+            );
+        } catch {
+          // Antwort bleibt trotzdem gültig.
+        }
+      }
+
+      if (
+        isManagerProxy &&
+        request.method === 'GET' &&
+        response.ok
+      ) {
+        try {
+          const snapshot =
+            await snapshotResponse(
+              response,
+            );
+
+          recentManagerReads.set(
+            requestKey,
+            {
+              at: Date.now(),
+              ...snapshot,
+            },
+          );
+        } catch {
+          // Kein Kurzzeitcache.
+        }
+      }
+
+      return response.clone();
+    } finally {
+      inFlight.delete(requestKey);
+    }
+  };
+}
+
+installOpcJobRequestDeduper();
 
 export default function MirakaDashboardShell({
   children,

@@ -1,63 +1,27 @@
 (() => {
-  if (window.__OPC_OWNER_FINANCE_GUARD__) return;
-  window.__OPC_OWNER_FINANCE_GUARD__ = true;
+  /*
+   * OPC_OWNER_FINANCE_GUARD_CACHE_ONLY_20260706_V2
+   *
+   * Kein Fetch und keine Datenbankabfrage.
+   *
+   * Das Rollenprofil wird durch opc-auth-cache und
+   * MirakaDashboardShell verwaltet. Die sensiblen APIs
+   * prüfen Berechtigungen weiterhin serverseitig.
+   */
 
-  const root = document.documentElement;
-  const previousVisibility = root.style.visibility;
-  root.style.visibility = 'hidden';
+  try {
+    const role =
+      window.localStorage.getItem(
+        'mco_user_role',
+      ) || '';
 
-  const readAccessToken = () => {
-    try {
-      for (const key of Object.keys(window.localStorage)) {
-        if (!key.startsWith('sb-') || !key.endsWith('-auth-token')) continue;
-
-        const raw = window.localStorage.getItem(key);
-        if (!raw) continue;
-
-        const parsed = JSON.parse(raw);
-        const token =
-          parsed?.access_token ||
-          parsed?.currentSession?.access_token ||
-          parsed?.session?.access_token ||
-          null;
-
-        if (token) return token;
-      }
-    } catch {
-      return null;
+    if (role) {
+      document.documentElement.dataset
+        .opcCachedRole = String(role)
+        .trim()
+        .toLowerCase();
     }
-
-    return null;
-  };
-
-  const redirect = (path) => {
-    window.location.replace(path);
-  };
-
-  const token = readAccessToken();
-
-  if (!token) {
-    redirect('/');
-    return;
+  } catch {
+    // Keine Aktion erforderlich.
   }
-
-  fetch('/api/opc/access/owner', {
-    method: 'GET',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      'Cache-Control': 'no-cache',
-    },
-  })
-    .then((response) => {
-      if (!response.ok) {
-        redirect('/dashboard');
-        return;
-      }
-
-      root.style.visibility = previousVisibility;
-    })
-    .catch(() => redirect('/dashboard'));
 })();

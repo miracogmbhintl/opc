@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { deriveOpcDocumentNumber } from '../lib/opc-document-numbering';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { sendDocumentEmail } from '../lib/opc-document-email';
@@ -20,6 +21,7 @@ import {
   CalendarClock,
   Check,
   ClipboardCheck,
+  Copy,
   Download,
   FileText,
   Mail,
@@ -52,10 +54,26 @@ const statusLabels: Record<string, string> = {
   invoiced: 'Verrechnet',
 };
 
-const DOCUMENT_CORRECTION_MODE = String(import.meta.env.PUBLIC_OPC_DOCUMENT_CORRECTION_MODE || '').toLowerCase() === 'true';
+const DOCUMENT_CORRECTION_MODE = false; // Dokumentnummern werden ausschliesslich automatisch vergeben.
 
 function clean(value: unknown) {
   return String(value || '').trim();
+}
+
+function normalizeServiceTitle(value: unknown) {
+  let title = clean(value);
+
+  for (let index = 0; index < 4; index += 1) {
+    const stripped = title
+      .replace(/^(Offerte|Angebot|Auftragsbestätigung|Rechnung)\s+(zur|zum|für|zu)\s+/i, '')
+      .replace(/^(Offerte|Angebot|Auftragsbestätigung|Rechnung)\s+/i, '')
+      .trim();
+
+    if (stripped === title) break;
+    title = stripped;
+  }
+
+  return title;
 }
 
 function parseSwissMoney(value: unknown) {
@@ -109,6 +127,150 @@ function getMetadata(row?: QuoteRow | QuoteItem | null) {
   return row.metadata as Record<string, any>;
 }
 
+function snapshotObject(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, any>
+    : {};
+}
+
+function pickSnapshot(record: Record<string, any>, keys: string[]) {
+  for (const key of keys) {
+    const value = clean(record[key]);
+    if (value) return value;
+  }
+  return '';
+}
+
+function getOfferRecipientFields(quote?: QuoteRow | null) {
+  const metadata = getMetadata(quote);
+  const client = snapshotObject(quote?.client_snapshot);
+  const site = snapshotObject(quote?.site_snapshot);
+
+  const explicitName = pickSnapshot(client, ['contact_name', 'full_name', 'billing_name', 'name']);
+  const nameParts = explicitName.split(/\s+/).filter(Boolean);
+  const rawAddress =
+    pickSnapshot(client, ['billing_address', 'address_text', 'address_line_1', 'street', 'address']) ||
+    pickSnapshot(site, ['address_text', 'address', 'address_line_1', 'street']);
+  const addressParts = rawAddress.split(/\r?\n|,/).map((part) => part.trim()).filter(Boolean);
+  const locationPart = addressParts.find((part) => /^\d{4}\s/.test(part)) || '';
+  const locationMatch = locationPart.match(/^(\d{4})\s+(.+)$/);
+
+  const fallbackStreet =
+    pickSnapshot(client, ['billing_street', 'street', 'address_line_1']) ||
+    pickSnapshot(site, ['street', 'address_line_1']) ||
+    addressParts.find((part) => !/^\d{4}\s/.test(part)) || '';
+  const fallbackCity = (
+    pickSnapshot(client, ['billing_city', 'city']) ||
+    pickSnapshot(site, ['city', 'billing_city']) ||
+    locationMatch?.[2] || ''
+  ).split(',')[0].trim();
+
+  return {
+    formOfAddress: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_form_of_address')
+      ? clean(metadata.offer_recipient_form_of_address)
+      : pickSnapshot(client, ['salutation', 'anrede', 'form_of_address']),
+    firstName: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_first_name')
+      ? clean(metadata.offer_recipient_first_name)
+      : pickSnapshot(client, ['first_name', 'firstname']) || (nameParts.length > 1 ? nameParts[0] : ''),
+    lastName: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_last_name')
+      ? clean(metadata.offer_recipient_last_name)
+      : pickSnapshot(client, ['last_name', 'lastname']) || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : explicitName),
+    companyName: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_company_name')
+      ? clean(metadata.offer_recipient_company_name)
+      : pickSnapshot(client, ['company_name', 'business_name']),
+    street: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_street')
+      ? clean(metadata.offer_recipient_street)
+      : fallbackStreet,
+    postalCode: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_postal_code')
+      ? clean(metadata.offer_recipient_postal_code)
+      : pickSnapshot(client, ['billing_postal_code', 'postal_code', 'postcode', 'zip']) ||
+        pickSnapshot(site, ['postal_code', 'postcode', 'zip']) ||
+        locationMatch?.[1] || '',
+    city: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_city')
+      ? clean(metadata.offer_recipient_city)
+      : fallbackCity,
+    country: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_country')
+      ? clean(metadata.offer_recipient_country)
+      : (pickSnapshot(client, ['country']) || pickSnapshot(site, ['country']) || 'Schweiz').split(',')[0].trim(),
+    email: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_email')
+      ? String(metadata.offer_recipient_email ?? '')
+      : pickSnapshot(client, [
+          'billing_email',
+          'email',
+          'primary_email',
+          'contact_email',
+        ]),
+    phone: Object.prototype.hasOwnProperty.call(metadata, 'offer_recipient_phone')
+      ? String(metadata.offer_recipient_phone ?? '')
+      : pickSnapshot(client, [
+          'billing_phone_e164',
+          'phone_e164',
+          'phone_raw',
+          'phone',
+          'mobile',
+          'telephone',
+        ]),
+  };
+}
+
+function getQuoteClientDisplayName(
+  quote?: QuoteRow | null,
+) {
+  const client = snapshotObject(
+    quote?.client_snapshot,
+  );
+
+  const recipient =
+    getOfferRecipientFields(quote);
+
+  return (
+    pickSnapshot(client, [
+      'billing_name',
+      'company_name',
+      'business_name',
+      'full_name',
+      'contact_name',
+      'name',
+    ]) ||
+    recipient.companyName ||
+    [recipient.firstName, recipient.lastName]
+      .filter(Boolean)
+      .join(' ') ||
+    'Kundendetails'
+  );
+}
+
+function buildOfferSalutation(fields: ReturnType<typeof getOfferRecipientFields>) {
+  const form = clean(fields.formOfAddress).toLocaleLowerCase('de-CH');
+  if (form.includes('herr')) return `Sehr geehrter Herr ${fields.lastName || fields.firstName}`.trim();
+  if (form.includes('frau')) return `Sehr geehrte Frau ${fields.lastName || fields.firstName}`.trim();
+  return 'Sehr geehrte Damen und Herren';
+}
+
+function introHasSalutation(value: unknown) {
+  return /^(sehr geehrte|sehr geehrter|guten tag|liebe|lieber|grüezi|grüezi mitenand)/i.test(clean(value));
+}
+
+function ensureEditableIntroText(quote?: QuoteRow | null) {
+  const current = clean(quote?.intro_text);
+  const salutation = buildOfferSalutation(getOfferRecipientFields(quote));
+  const body = current || 'Vielen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen unsere Offerte für die gewünschten Reinigungsleistungen.';
+  return introHasSalutation(body) ? body : `${salutation}\n\n${body}`;
+}
+
+function replaceIntroSalutation(value: string, salutation: string) {
+  const source = String(value || '').trim();
+  if (!source) return `${salutation}\n\n`;
+
+  const paragraphs = source.split(/\n\s*\n/);
+  if (introHasSalutation(paragraphs[0])) {
+    paragraphs[0] = salutation;
+    return paragraphs.join('\n\n');
+  }
+
+  return `${salutation}\n\n${source}`;
+}
+
 function getPriceInputMode(quote?: QuoteRow | null): PriceInputMode {
   const metadata = getMetadata(quote);
   return metadata.price_input_mode === 'incl' ? 'incl' : 'excl';
@@ -118,22 +280,59 @@ function getDefaultGreeting(quote?: QuoteRow | null) {
   return clean(quote?.customer_notes) || OPC_DEFAULT_CLOSING;
 }
 
+function migrateLegacyServiceDescription(scopeValue: unknown, descriptionValue: unknown) {
+  const scope = clean(scopeValue);
+  const description = clean(descriptionValue);
+  const looksLikeLegacyDescription =
+    !description &&
+    Boolean(scope) &&
+    (scope.includes('\n') || scope.startsWith('•') || scope.length > 180);
+
+  if (!looksLikeLegacyDescription) {
+    return { scopeText: scopeValue || '', descriptionText: descriptionValue || '' };
+  }
+
+  const cleanedDescription = scope
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^Leistungsumfang$/i.test(line))
+    .filter((line) => !/^(Leistung|Objektart|Objekttyp|Zimmer|Fläche|Flaeche)\s*:/i.test(line))
+    .join('\n');
+
+  return {
+    scopeText: '',
+    descriptionText: cleanedDescription,
+  };
+}
+
 function normalizeQuoteAfterLoad(row: QuoteRow | null) {
   if (!row) return row;
 
   const issueDate = isoDate(row.issue_date) || new Date().toISOString().slice(0, 10);
   const validUntil = isoDate(row.valid_until);
   const metadata = getMetadata(row);
+  const migratedDescription = migrateLegacyServiceDescription(
+    row.scope_text,
+    row.service_description_text,
+  );
 
-  return {
+  const normalized = {
     ...row,
     issue_date: issueDate,
     valid_until: validUntil && validUntil !== issueDate ? validUntil : addDays(issueDate, 14),
+    scope_text: migratedDescription.scopeText,
+    service_description_text: migratedDescription.descriptionText,
     customer_notes: getDefaultGreeting(row),
     metadata: {
       ...metadata,
       price_input_mode: metadata.price_input_mode === 'incl' ? 'incl' : 'excl',
     },
+  };
+
+  return {
+    ...normalized,
+    intro_text: ensureEditableIntroText(normalized),
   };
 }
 
@@ -167,7 +366,7 @@ function buildQuoteFileName(quote: QuoteRow, suffix = 'Offerte') {
     ? metadata.order_confirmation_filename
     : metadata.offer_filename;
   const documentNumber = isOrderConfirmation
-    ? clean(metadata.order_confirmation_number) || number
+    ? clean(metadata.order_confirmation_number) || deriveOpcDocumentNumber(quote.quote_number, 'AB') || number
     : number;
   return normalizePdfFileName(override, `${documentNumber}_${suffix}.pdf`);
 }
@@ -188,6 +387,9 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   }, [quoteId]);
 
   const priceInputMode = getPriceInputMode(quote);
+  const offerRecipient = getOfferRecipientFields(quote);
+  const generatedSalutation = buildOfferSalutation(offerRecipient);
+  const linkedClientName = getQuoteClientDisplayName(quote);
 
   const totals = useMemo(() => {
     const subtotal = items.reduce((sum, item) => sum + Number(item.subtotal_chf || 0), 0);
@@ -384,7 +586,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
       const quotePayload = {
         ...(DOCUMENT_CORRECTION_MODE ? { quote_number: correctedQuoteNumber } : {}),
         status,
-        title: clean(quote.title) || 'Offerte',
+        title: normalizeServiceTitle(quote.title) || 'Reinigungsleistung',
         quote_type: quote.quote_type || 'standard',
         issue_date: issueDate,
         valid_until: validUntil,
@@ -473,7 +675,10 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
     if (!quote) return null;
 
     return {
-      quote,
+      quote: {
+        ...quote,
+        title: normalizeServiceTitle(quote.title) || 'Reinigungsleistung',
+      },
       items,
       totals: {
         subtotal: roundMoney(totals.subtotal),
@@ -502,6 +707,406 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
 
     const fallbackDoc = await generateQuotePdfDocument(input);
     return pdfToBase64(fallbackDoc);
+  }
+
+  // OPC_QUOTE_DUPLICATION_20260706
+  async function handleDuplicateQuote() {
+    if (
+      !quote ||
+      !supabase ||
+      saving ||
+      creatingAction !== ''
+    ) {
+      return;
+    }
+
+    setCreatingAction('duplicate_quote');
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    let createdQuoteId = '';
+
+    try {
+      const saved = await saveQuote(
+        undefined,
+        { silent: true },
+      );
+
+      if (!saved) {
+        throw new Error(
+          'Die Offerte konnte vor dem Duplizieren nicht gespeichert werden.',
+        );
+      }
+
+      const today =
+        new Date().toISOString().slice(0, 10);
+
+      const originalIssueDate =
+        isoDate(quote.issue_date);
+
+      const originalValidUntil =
+        isoDate(quote.valid_until);
+
+      let validityDays = 14;
+
+      if (
+        originalIssueDate &&
+        originalValidUntil
+      ) {
+        const issueTimestamp = new Date(
+          `${originalIssueDate}T12:00:00`,
+        ).getTime();
+
+        const validTimestamp = new Date(
+          `${originalValidUntil}T12:00:00`,
+        ).getTime();
+
+        const difference = Math.round(
+          (
+            validTimestamp -
+            issueTimestamp
+          ) / 86_400_000,
+        );
+
+        if (
+          Number.isFinite(difference) &&
+          difference >= 0
+        ) {
+          validityDays = difference;
+        }
+      }
+
+      const originalNumber =
+        clean(quote.quote_number);
+
+      const originalTitle =
+        normalizeServiceTitle(quote.title) ||
+        'Reinigungsleistung';
+
+      const duplicateMetadata:
+        Record<string, any> = {
+          ...getMetadata(quote),
+          created_from: 'quote_duplicate',
+          duplicated_from_quote_id:
+            quote.id,
+          duplicated_from_quote_number:
+            quote.quote_number || null,
+          duplicated_at:
+            new Date().toISOString(),
+        };
+
+      [
+        'offer_filename',
+        'order_confirmation_number',
+        'order_confirmation_title',
+        'order_confirmation_filename',
+        'invoice_id',
+        'invoice_number',
+        'job_id',
+        'service_job_id',
+        'automation_run_id',
+        'automation_candidate_id',
+        'archive_enriched_at',
+        'archive_document_key',
+        'archive_document_number',
+        'archive_document_type',
+        'download_strategy',
+        'converted_at',
+        'invoiced_at',
+        'accepted_document_id',
+        'created_from_archive_import',
+      ].forEach((key) => {
+        delete duplicateMetadata[key];
+      });
+
+      const quotePayload = {
+        client_id:
+          quote.client_id,
+        contact_id:
+          quote.contact_id || null,
+        client_site_id:
+          quote.client_site_id || null,
+
+        status: 'draft',
+        quote_type:
+          quote.quote_type || 'standard',
+
+        title: originalTitle,
+
+        language:
+          quote.language || 'de',
+        currency:
+          quote.currency || 'CHF',
+
+        issue_date: today,
+        valid_until:
+          addDays(today, validityDays),
+
+        client_snapshot:
+          quote.client_snapshot || {},
+        site_snapshot:
+          quote.site_snapshot || {},
+
+        intro_text:
+          quote.intro_text || null,
+        scope_text:
+          quote.scope_text || null,
+
+        service_description_mode:
+          quote.service_description_mode ||
+          'embedded',
+
+        service_description_template_id:
+          quote.service_description_template_id ||
+          null,
+
+        service_description_text:
+          quote.service_description_text ||
+          null,
+
+        terms_text:
+          quote.terms_text || null,
+        payment_terms:
+          quote.payment_terms || null,
+        acceptance_terms:
+          quote.acceptance_terms || null,
+
+        internal_notes:
+          quote.internal_notes || null,
+        customer_notes:
+          quote.customer_notes || null,
+
+        estimated_hours:
+          quote.estimated_hours || null,
+
+        estimated_staff_count:
+          quote.estimated_staff_count || null,
+
+        subtotal_chf:
+          roundMoney(totals.subtotal),
+        discount_chf:
+          roundMoney(totals.discount),
+        tax_rate:
+          roundMoney(totals.taxRate),
+        tax_chf:
+          roundMoney(totals.tax),
+        total_chf:
+          roundMoney(totals.total),
+
+        sent_at: null,
+        accepted_at: null,
+
+        metadata: duplicateMetadata,
+      };
+
+      const {
+        data: createdQuote,
+        error: quoteError,
+      } = await supabase
+        .from('opc_quotes')
+        .insert(quotePayload)
+        .select('id, quote_number')
+        .single();
+
+      if (quoteError) {
+        throw quoteError;
+      }
+
+      if (!createdQuote?.id) {
+        throw new Error(
+          'Die neue Offerte wurde ohne ID angelegt.',
+        );
+      }
+
+      createdQuoteId =
+        createdQuote.id;
+
+      const newNumber =
+        clean(createdQuote.quote_number);
+
+      const replaceOldNumber = (
+        value: unknown,
+      ) => {
+        const source = clean(value);
+
+        if (
+          !source ||
+          !originalNumber ||
+          !newNumber
+        ) {
+          return source;
+        }
+
+        return source
+          .split(originalNumber)
+          .join(newNumber);
+      };
+
+      const finalizedMetadata = {
+        ...duplicateMetadata,
+      };
+
+      [
+        'offer_document_title',
+        'offer_print_title',
+      ].forEach((key) => {
+        if (finalizedMetadata[key]) {
+          finalizedMetadata[key] =
+            replaceOldNumber(
+              finalizedMetadata[key],
+            );
+        }
+      });
+
+      const finalizedTitle =
+        replaceOldNumber(originalTitle) ||
+        originalTitle;
+
+      const {
+        error: finalizeError,
+      } = await supabase
+        .from('opc_quotes')
+        .update({
+          title: finalizedTitle,
+          metadata: finalizedMetadata,
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq('id', createdQuote.id);
+
+      if (finalizeError) {
+        throw finalizeError;
+      }
+
+      if (items.length > 0) {
+        const duplicateItems =
+          items.map((item, index) => ({
+            quote_id:
+              createdQuote.id,
+
+            sort_order:
+              index + 1,
+
+            item_type:
+              item.item_type || 'service',
+
+            title:
+              clean(item.title) ||
+              'Position',
+
+            description:
+              item.description || null,
+
+            quantity:
+              toNumber(
+                item.quantity || 1,
+              ) || 1,
+
+            unit:
+              item.unit || 'pauschal',
+
+            unit_price_chf:
+              roundMoney(
+                toNumber(
+                  item.unit_price_chf,
+                ),
+              ),
+
+            discount_chf:
+              roundMoney(
+                toNumber(
+                  item.discount_chf,
+                ),
+              ),
+
+            tax_rate:
+              roundMoney(
+                toNumber(
+                  item.tax_rate ||
+                  totals.taxRate,
+                ) || 8.1,
+              ),
+
+            subtotal_chf:
+              roundMoney(
+                toNumber(
+                  item.subtotal_chf,
+                ),
+              ),
+
+            tax_chf:
+              roundMoney(
+                toNumber(
+                  item.tax_chf,
+                ),
+              ),
+
+            total_chf:
+              roundMoney(
+                toNumber(
+                  item.total_chf,
+                ),
+              ),
+
+            metadata: {
+              ...getMetadata(item),
+
+              duplicated_from_quote_item_id:
+                String(item.id).startsWith(
+                  'local-',
+                )
+                  ? null
+                  : item.id,
+            },
+          }));
+
+        const {
+          error: itemError,
+        } = await supabase
+          .from('opc_quote_items')
+          .insert(duplicateItems);
+
+        if (itemError) {
+          throw itemError;
+        }
+      }
+
+      setSuccessMessage(
+        `Neue Offerte ${newNumber || ''} wurde als Entwurf erstellt.`,
+      );
+
+      window.location.assign(
+        `${baseUrl}/offerte/${createdQuote.id}`,
+      );
+    } catch (error: any) {
+      if (
+        createdQuoteId &&
+        supabase
+      ) {
+        await supabase
+          .from('opc_quote_items')
+          .delete()
+          .eq(
+            'quote_id',
+            createdQuoteId,
+          );
+
+        await supabase
+          .from('opc_quotes')
+          .delete()
+          .eq(
+            'id',
+            createdQuoteId,
+          );
+      }
+
+      setErrorMessage(
+        error?.message ||
+        'Die Offerte konnte nicht dupliziert werden.',
+      );
+    } finally {
+      setCreatingAction('');
+    }
   }
 
   async function handleDownloadQuotePdf() {
@@ -693,6 +1298,13 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   }
 
   async function resolveQuoteRecipientEmail() {
+    const editedRecipientEmail =
+      clean(offerRecipient.email);
+
+    if (editedRecipientEmail) {
+      return editedRecipientEmail;
+    }
+
     const snapshotEmail = getClientEmail(quote?.client_snapshot);
     if (snapshotEmail) return snapshotEmail;
 
@@ -782,7 +1394,12 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
     <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath={`/offerte/${quoteId}`} fullWidth hideTopBar>
       <OPCPageShell>
         <div style={detailTopBarStyle} className="opc-quote-topbar">
-          <a href={`${baseUrl}/offerten`} className="opc-quote-back" style={detailBackPillStyle}>
+          <a
+            href={`${baseUrl}/offerten`}
+            data-opc-back="true"
+            className="opc-quote-back"
+            style={detailBackPillStyle}
+          >
             <ArrowLeft size={16} />
             Zurück
           </a>
@@ -791,6 +1408,27 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
             <button type="button" disabled={saving} onClick={() => saveQuote()} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
               <Save size={16} />
               {saving ? 'Speichert...' : 'Speichern'}
+            </button>
+            <button
+              type="button"
+              disabled={
+                saving ||
+                creatingAction !== ''
+              }
+              onClick={() =>
+                void handleDuplicateQuote()
+              }
+              style={{
+                ...opcSecondaryButtonStyle,
+                width: 'auto',
+              }}
+            >
+              <Copy size={16} />
+
+              {creatingAction ===
+              'duplicate_quote'
+                ? 'Dupliziert...'
+                : 'Offerte duplizieren'}
             </button>
             <button type="button" disabled={saving} onClick={() => saveQuote('ready')} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
               Als bereit markieren
@@ -805,6 +1443,20 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           <div style={detailHeroMainStyle}>
             <p style={eyebrowStyle}>Offerte</p>
             <h1 style={titleStyle} className="opc-quote-title">{quote.quote_number}</h1>
+
+            {quote.client_id ? (
+              <a
+                href={`${baseUrl}/kunde/${quote.client_id}`}
+                style={clientHeroLinkStyle}
+              >
+                {linkedClientName}
+              </a>
+            ) : (
+              <span style={clientHeroTextStyle}>
+                {linkedClientName}
+              </span>
+            )}
+
             <p style={subtitleStyle}>{quote.title}</p>
             {lastSavedAt && <p style={savedHintStyle}>Zuletzt gespeichert um {lastSavedAt}</p>}
           </div>
@@ -865,11 +1517,11 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
               </p>
               <div style={fieldGridStyle} className="opc-quote-field-grid">
                 <Field label="Offertennummer"><input value={quote.quote_number || ''} onChange={(e) => updateQuoteField('quote_number', e.target.value)} style={inputStyle} /></Field>
-                <Field label="Offerten-PDF-Titel"><input value={getMetadata(quote).offer_document_title || ''} onChange={(e) => updateQuoteMetadata('offer_document_title', e.target.value)} style={inputStyle} placeholder={`Offerte zur ${quote.title || 'Reinigungsleistung'}`} /></Field>
+                <Field label="Offerten-PDF-Titel"><input value={getMetadata(quote).offer_document_title || ''} onChange={(e) => updateQuoteMetadata('offer_document_title', e.target.value)} style={inputStyle} placeholder={`Offerte ${normalizeServiceTitle(quote.title) || 'Reinigungsleistung'}`} /></Field>
                 <Field label="Offerten-Dateiname"><input value={getMetadata(quote).offer_filename || ''} onChange={(e) => updateQuoteMetadata('offer_filename', e.target.value)} style={inputStyle} placeholder={`${quote.quote_number || 'AN-00000'}_Offerte.pdf`} /></Field>
-                <Field label="Auftragsbestätigungsnummer"><input value={getMetadata(quote).order_confirmation_number || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_number', e.target.value)} style={inputStyle} placeholder={quote.quote_number || 'AN-00000'} /></Field>
-                <Field label="Auftragsbestätigungs-PDF-Titel"><input value={getMetadata(quote).order_confirmation_title || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_title', e.target.value)} style={inputStyle} placeholder={`Auftragsbestätigung zur ${quote.title || 'Reinigungsleistung'}`} /></Field>
-                <Field label="Auftragsbestätigungs-Dateiname"><input value={getMetadata(quote).order_confirmation_filename || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_filename', e.target.value)} style={inputStyle} placeholder={`${quote.quote_number || 'AN-00000'}_Auftragsbestaetigung.pdf`} /></Field>
+                <Field label="Auftragsbestätigungsnummer"><input value={getMetadata(quote).order_confirmation_number || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_number', e.target.value)} style={inputStyle} placeholder={deriveOpcDocumentNumber(quote.quote_number, 'AB') || 'AB-00000'} /></Field>
+                <Field label="Auftragsbestätigungs-PDF-Titel"><input value={getMetadata(quote).order_confirmation_title || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_title', e.target.value)} style={inputStyle} placeholder={`Auftragsbestätigung zur ${normalizeServiceTitle(quote.title) || 'Reinigungsleistung'}`} /></Field>
+                <Field label="Auftragsbestätigungs-Dateiname"><input value={getMetadata(quote).order_confirmation_filename || ''} onChange={(e) => updateQuoteMetadata('order_confirmation_filename', e.target.value)} style={inputStyle} placeholder={`${deriveOpcDocumentNumber(quote.quote_number, 'AB') || 'AB-00000'}_Auftragsbestaetigung.pdf`} /></Field>
               </div>
             </OPCListCard>
           </section>
@@ -943,10 +1595,103 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
 
         <section style={{ marginTop: 22 }}>
           <OPCListCard>
+            <CardHeader title="Empfänger im PDF" />
+            <div style={fieldGridStyle} className="opc-quote-field-grid">
+              <Field label="Anrede">
+                <input
+                  list="opc-offer-recipient-salutations"
+                  value={offerRecipient.formOfAddress}
+                  onChange={(event) => updateQuoteMetadata('offer_recipient_form_of_address', event.target.value)}
+                  style={inputStyle}
+                  placeholder="Herr, Frau oder Firma"
+                />
+                <datalist id="opc-offer-recipient-salutations">
+                  <option value="Herr" />
+                  <option value="Frau" />
+                  <option value="Firma" />
+                </datalist>
+              </Field>
+              <Field label="Vorname"><input value={offerRecipient.firstName} onChange={(event) => updateQuoteMetadata('offer_recipient_first_name', event.target.value)} style={inputStyle} /></Field>
+              <Field label="Nachname"><input value={offerRecipient.lastName} onChange={(event) => updateQuoteMetadata('offer_recipient_last_name', event.target.value)} style={inputStyle} /></Field>
+              <Field label="Firma (optional)"><input value={offerRecipient.companyName} onChange={(event) => updateQuoteMetadata('offer_recipient_company_name', event.target.value)} style={inputStyle} /></Field>
+              <Field label="Strasse und Hausnummer"><input value={offerRecipient.street} onChange={(event) => updateQuoteMetadata('offer_recipient_street', event.target.value)} style={inputStyle} /></Field>
+              <Field label="PLZ"><input value={offerRecipient.postalCode} onChange={(event) => updateQuoteMetadata('offer_recipient_postal_code', event.target.value)} style={inputStyle} /></Field>
+              <Field label="Ort"><input value={offerRecipient.city} onChange={(event) => updateQuoteMetadata('offer_recipient_city', event.target.value)} style={inputStyle} /></Field>
+              <Field label="Land">
+                <input
+                  value={offerRecipient.country}
+                  onChange={(event) =>
+                    updateQuoteMetadata(
+                      'offer_recipient_country',
+                      event.target.value,
+                    )
+                  }
+                  style={inputStyle}
+                />
+              </Field>
+
+              <Field label="E-Mail">
+                <input
+                  type="email"
+                  value={offerRecipient.email}
+                  onChange={(event) =>
+                    updateQuoteMetadata(
+                      'offer_recipient_email',
+                      event.target.value,
+                    )
+                  }
+                  style={inputStyle}
+                />
+              </Field>
+
+              <Field label="Telefon">
+                <input
+                  type="tel"
+                  value={offerRecipient.phone}
+                  onChange={(event) =>
+                    updateQuoteMetadata(
+                      'offer_recipient_phone',
+                      event.target.value,
+                    )
+                  }
+                  style={inputStyle}
+                />
+              </Field>
+            </div>
+
+            <p style={recipientHintStyle}>
+              Diese Angaben steuern den Empfängerblock
+              und den Versand dieser Offerte.
+              Änderungen gelten für dieses Dokument.
+
+              {quote.client_id ? (
+                <>
+                  {' '}Die dauerhaften Stammdaten können im{' '}
+                  <a
+                    href={`${baseUrl}/kunde/${quote.client_id}`}
+                    style={recipientProfileLinkStyle}
+                  >
+                    Kundenprofil
+                  </a>
+                  {' '}bearbeitet werden.
+                </>
+              ) : null}
+            </p>
+          </OPCListCard>
+        </section>
+
+        <section style={{ marginTop: 22 }}>
+          <OPCListCard>
             <CardHeader title="Texte & Leistungsbeschreibung" />
             <div style={textGridStyle} className="opc-quote-text-grid">
-              <TextArea label="Einleitung" value={quote.intro_text || ''} onChange={(value) => updateQuoteField('intro_text', value)} />
-              <TextArea label="Leistungsumfang" value={quote.scope_text || ''} onChange={(value) => updateQuoteField('scope_text', value)} />
+              <EditableTextArea
+                label="Einleitung inklusive Anrede"
+                value={quote.intro_text || ''}
+                onChange={(value) => updateQuoteField('intro_text', value)}
+                actionLabel="Anrede aus Empfänger übernehmen"
+                onAction={() => updateQuoteField('intro_text', replaceIntroSalutation(quote.intro_text || '', generatedSalutation))}
+              />
+              <EditableTextArea label="Leistungsumfang (optional)" value={quote.scope_text || ''} onChange={(value) => updateQuoteField('scope_text', value)} />
               <Field label="Leistungsbeschreibung Modus">
                 <select value={quote.service_description_mode || 'embedded'} onChange={(e) => updateQuoteField('service_description_mode', e.target.value)} style={opcSelectStyle}>
                   <option value="embedded">In Offerte enthalten</option>
@@ -961,11 +1706,11 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
                   {templates.map((template) => <option key={template.id} value={template.id}>{template.title}</option>)}
                 </select>
               </Field>
-              <TextArea label="Leistungsbeschreibung" value={quote.service_description_text || ''} onChange={(value) => updateQuoteField('service_description_text', value)} wide />
-              <TextArea label="Bedingungen" value={quote.terms_text || ''} onChange={(value) => updateQuoteField('terms_text', value)} />
-              <TextArea label="Zahlungsbedingungen" value={quote.payment_terms || ''} onChange={(value) => updateQuoteField('payment_terms', value)} />
-              <TextArea label="Grusszeile unten" value={quote.customer_notes || ''} onChange={(value) => updateQuoteField('customer_notes', value)} wide />
-              <TextArea label="Interne Notizen" value={quote.internal_notes || ''} onChange={(value) => updateQuoteField('internal_notes', value)} wide />
+              <EditableTextArea label="Leistungsbeschreibung" value={quote.service_description_text || ''} onChange={(value) => updateQuoteField('service_description_text', value)} wide />
+              <EditableTextArea label="Bedingungen (optional)" value={quote.terms_text || ''} onChange={(value) => updateQuoteField('terms_text', value)} />
+              <EditableTextArea label="Zahlungsbedingungen (optional)" value={quote.payment_terms || ''} onChange={(value) => updateQuoteField('payment_terms', value)} />
+              <EditableTextArea label="Grusszeile unten" value={quote.customer_notes || ''} onChange={(value) => updateQuoteField('customer_notes', value)} wide />
+              <EditableTextArea label="Interne Notizen" value={quote.internal_notes || ''} onChange={(value) => updateQuoteField('internal_notes', value)} wide />
             </div>
           </OPCListCard>
         </section>
@@ -999,6 +1744,20 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
                   </div>
                   <div style={itemHintStyle}>
                     Intern gespeichert: {formatMoney(item.unit_price_chf)} exkl. MWST · Total: {formatMoney(item.total_chf)} inkl. MWST
+                  </div>
+                  <div style={{ marginTop: 14 }}>
+                    <EditableTextArea
+                      label="Beschreibung / Zusatztext im Offerten-PDF"
+                      value={item.description || ''}
+                      onChange={(value) =>
+                        updateItem(
+                          index,
+                          'description',
+                          value,
+                        )
+                      }
+                      wide
+                    />
                   </div>
                 </div>
               ))}
@@ -1156,13 +1915,116 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label><span style={labelStyle}>{label}</span>{children}</label>;
 }
 
-function TextArea({ label, value, onChange, wide = false }: { label: string; value: string; onChange: (value: string) => void; wide?: boolean }) {
-  return <label style={wide ? { gridColumn: '1 / -1' } : undefined}><span style={labelStyle}>{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} rows={5} style={textareaStyle} /></label>;
+function EditableTextArea({
+  label,
+  value,
+  onChange,
+  wide = false,
+  actionLabel,
+  onAction,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  wide?: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  function formatSelectedLines(mode: 'bullet' | 'plain') {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const lineStart = value.lastIndexOf('\n', Math.max(0, selectionStart - 1)) + 1;
+    const nextBreak = value.indexOf('\n', selectionEnd);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    const selectedBlock = value.slice(lineStart, lineEnd);
+    const sourceLines = selectedBlock ? selectedBlock.split('\n') : [''];
+
+    const formattedLines = sourceLines.map((line) => {
+      const plainLine = line.replace(/^\s*[•*-]\s*/, '');
+      return mode === 'bullet' ? `• ${plainLine}` : plainLine;
+    });
+    const replacement = formattedLines.join('\n');
+    const nextValue = `${value.slice(0, lineStart)}${replacement}${value.slice(lineEnd)}`;
+
+    onChange(nextValue);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(lineStart, lineStart + replacement.length);
+    });
+  }
+
+  return (
+    <label style={wide ? { gridColumn: '1 / -1' } : undefined}>
+      <span style={labelStyle}>{label}</span>
+      <div style={editorToolbarStyle}>
+        <button type="button" onClick={() => formatSelectedLines('bullet')} style={editorToolButtonStyle}>• Aufzählung</button>
+        <button type="button" onClick={() => formatSelectedLines('plain')} style={editorToolButtonStyle}>Text</button>
+        {onAction && actionLabel ? <button type="button" onClick={onAction} style={editorToolButtonStyle}>{actionLabel}</button> : null}
+      </div>
+      <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} rows={5} style={textareaStyle} />
+    </label>
+  );
 }
 
 function SummaryRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return <div style={summaryRowStyle}><span>{label}</span><strong style={{ fontSize: strong ? 18 : 14 }}>{value}</strong></div>;
 }
+
+const recipientHintStyle: CSSProperties = {
+  margin: '12px 0 0',
+  color: OPC_BRAND.muted,
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
+const clientHeroLinkStyle: CSSProperties = {
+  display: 'inline-block',
+  marginTop: 8,
+  color: OPC_BRAND.text,
+  fontSize: 15,
+  fontWeight: 820,
+  textDecoration: 'underline',
+  textUnderlineOffset: 4,
+};
+
+const clientHeroTextStyle: CSSProperties = {
+  display: 'inline-block',
+  marginTop: 8,
+  color: OPC_BRAND.text,
+  fontSize: 15,
+  fontWeight: 820,
+};
+
+const recipientProfileLinkStyle: CSSProperties = {
+  color: OPC_BRAND.text,
+  fontWeight: 820,
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+};
+
+const editorToolbarStyle: CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 6,
+  marginBottom: 7,
+};
+
+const editorToolButtonStyle: CSSProperties = {
+  minHeight: 30,
+  padding: '0 10px',
+  border: `1px solid ${OPC_BRAND.border}`,
+  borderRadius: 9,
+  background: '#FFFFFF',
+  color: OPC_BRAND.text,
+  fontSize: 11,
+  fontWeight: 750,
+  cursor: 'pointer',
+};
 
 const detailTopBarStyle: CSSProperties = {
   display: 'flex',

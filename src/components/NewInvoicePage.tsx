@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { ArrowLeft, Building2, CalendarDays, Check, FileText, Receipt, Save, UserRound, WalletCards } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
@@ -160,6 +160,154 @@ function Section({ title, icon, children }: { title: string; icon?: ReactNode; c
       </div>
       {children}
     </section>
+  );
+}
+
+function AdvancedTextArea({
+  label,
+  value,
+  onChange,
+  wide = false,
+  rows = 5,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  wide?: boolean;
+  rows?: number;
+}) {
+  const textareaRef =
+    useRef<HTMLTextAreaElement | null>(null);
+
+  function formatSelectedLines(
+    mode: 'bullet' | 'plain',
+  ) {
+    const textarea = textareaRef.current;
+
+    if (!textarea) return;
+
+    const start =
+      textarea.selectionStart ?? 0;
+
+    const end =
+      textarea.selectionEnd ?? start;
+
+    const lineStart =
+      value.lastIndexOf(
+        '\n',
+        Math.max(0, start - 1),
+      ) + 1;
+
+    const nextBreak =
+      value.indexOf('\n', end);
+
+    const lineEnd =
+      nextBreak === -1
+        ? value.length
+        : nextBreak;
+
+    const selected =
+      value.slice(lineStart, lineEnd);
+
+    const lines =
+      selected
+        ? selected.split('\n')
+        : [''];
+
+    const replacement = lines
+      .map((line) => {
+        const plain = line.replace(
+          /^\s*[•*-]\s*/,
+          '',
+        );
+
+        return mode === 'bullet'
+          ? `• ${plain}`
+          : plain;
+      })
+      .join('\n');
+
+    onChange(
+      `${value.slice(0, lineStart)}` +
+      `${replacement}` +
+      `${value.slice(lineEnd)}`,
+    );
+
+    requestAnimationFrame(() => {
+      textarea.focus();
+
+      textarea.setSelectionRange(
+        lineStart,
+        lineStart + replacement.length,
+      );
+    });
+  }
+
+  return (
+    <div
+      className={
+        wide ? 'opc-wide' : undefined
+      }
+    >
+      <Label>{label}</Label>
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 6,
+          marginBottom: 7,
+        }}
+      >
+        <button
+          type="button"
+          onClick={() =>
+            formatSelectedLines('bullet')
+          }
+          style={{
+            border: `1px solid ${BRAND.border}`,
+            background: '#FFFFFF',
+            color: BRAND.text,
+            borderRadius: 9,
+            padding: '6px 9px',
+            fontSize: 12,
+            fontWeight: 760,
+            cursor: 'pointer',
+          }}
+        >
+          • Aufzählung
+        </button>
+
+        <button
+          type="button"
+          onClick={() =>
+            formatSelectedLines('plain')
+          }
+          style={{
+            border: `1px solid ${BRAND.border}`,
+            background: '#FFFFFF',
+            color: BRAND.text,
+            borderRadius: 9,
+            padding: '6px 9px',
+            fontSize: 12,
+            fontWeight: 760,
+            cursor: 'pointer',
+          }}
+        >
+          Text
+        </button>
+      </div>
+
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(event) =>
+          onChange(event.target.value)
+        }
+        rows={rows}
+        style={textareaStyle}
+      />
+    </div>
   );
 }
 
@@ -467,14 +615,42 @@ export default function NewInvoicePage() {
               <div><Label>MWST %</Label><input value={form.taxRate} onChange={(event) => update('taxRate', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
             </div>
             <div className="opc-grid two"><div><Label>Bezahlt CHF</Label><input value={form.paid} onChange={(event) => update('paid', event.target.value)} inputMode="decimal" style={inputStyle} /></div></div>
-            <div className="opc-full-field"><Label>Leistungsumfang / Rechnungstext</Label><textarea value={form.description} onChange={(event) => update('description', event.target.value)} style={textareaStyle} /></div>
+            <AdvancedTextArea
+              label="Leistungsumfang / Rechnungstext"
+              value={form.description}
+              onChange={(value) =>
+                update('description', value)
+              }
+              wide
+            />
           </Section>
 
           <Section title="Texte" icon={<FileText size={17} />}>
             <div className="opc-grid two">
-              <div><Label>Einleitung</Label><textarea value={form.introText} onChange={(event) => update('introText', event.target.value)} style={textareaStyle} /></div>
-              <div><Label>Zahlungsbedingungen</Label><textarea value={form.paymentTerms} onChange={(event) => update('paymentTerms', event.target.value)} style={textareaStyle} /></div>
-              <div className="opc-wide"><Label>Interne Notizen</Label><textarea value={form.internalNotes} onChange={(event) => update('internalNotes', event.target.value)} style={textareaStyle} /></div>
+              <AdvancedTextArea
+                label="Einleitung"
+                value={form.introText}
+                onChange={(value) =>
+                  update('introText', value)
+                }
+              />
+
+              <AdvancedTextArea
+                label="Zahlungsbedingungen"
+                value={form.paymentTerms}
+                onChange={(value) =>
+                  update('paymentTerms', value)
+                }
+              />
+
+              <AdvancedTextArea
+                label="Interne Notizen"
+                value={form.internalNotes}
+                onChange={(value) =>
+                  update('internalNotes', value)
+                }
+                wide
+              />
             </div>
           </Section>
 

@@ -91,13 +91,63 @@
       top: 113mm;
       left: 20mm;
       right: 20mm;
-      bottom: 40mm;
+      bottom: 28mm;
       font-size: 11pt;
       line-height: 1.22;
       overflow: hidden;
     }
 
     .continuation .invoice-body { top: 38mm; }
+
+    /* OPC_INVOICE_COMPACT_FINAL_PAGE_20260702 */
+    .invoice-final-block {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    /*
+     * Die kompakte Variante wird ausschliesslich beim Versuch verwendet,
+     * alle Positionen, Summen und den Abschlusstext auf derselben Seite
+     * unterzubringen. Der normale Mehrseitenfall bleibt unverändert.
+     */
+    .compact-final-page .invoice-overview-title {
+      margin-top: 4mm;
+    }
+
+    .compact-final-page .invoice-table th,
+    .compact-final-page .invoice-table td {
+      padding-top: 1.35mm;
+      padding-bottom: 1.35mm;
+    }
+
+    .compact-final-page .summary {
+      margin-top: 1mm;
+    }
+
+    .compact-final-page .summary-row {
+      min-height: 4.8mm;
+    }
+
+    .compact-final-page .summary-row.total {
+      margin-top: .8mm;
+      padding-top: .8mm;
+    }
+
+    .compact-final-page .after-table {
+      margin-top: 3mm;
+    }
+
+    .compact-final-page .after-table p {
+      margin-bottom: 2mm;
+    }
+
+    .compact-final-page .closing {
+      margin-top: 3mm;
+    }
+
+    .compact-final-page .closing-greeting {
+      margin-bottom: 3mm !important;
+    }
 
     .date-line { margin: 0 0 7mm; }
 
@@ -451,7 +501,21 @@
     @media screen {
       .page { box-shadow: 0 2mm 8mm rgba(0,0,0,.12); }
     }
-  </style>
+      /* OPC_INVOICE_ITEM_DETAILS_20260702 */
+    .invoice-item-title {
+      font-weight: 650;
+      line-height: 1.35;
+    }
+
+    .invoice-item-detail {
+      margin-top: 1.2mm;
+      font-size: 8.6pt;
+      line-height: 1.38;
+      white-space: pre-line;
+      color: #374151;
+    }
+
+</style>
 </head>
 <body>
   <main id="document-root"></main>
@@ -972,24 +1036,63 @@
       headers[3].textContent = columns.amount || "Preis in CHF";
 
       const tbody = table.querySelector("tbody");
+
       items.forEach((item, index) => {
         const row = document.createElement("tr");
-        const position = hasValue(item.position) ? item.position : String(index + 1);
+        const position = hasValue(item.position)
+          ? item.position
+          : String(index + 1);
+
         let amount = item.amount;
+
         if (!hasValue(amount)) {
           const quantity = toNumber(item.quantity);
           const unitPrice = toNumber(item.unitPrice);
-          if (Number.isFinite(quantity) && Number.isFinite(unitPrice)) amount = quantity * unitPrice;
+
+          if (
+            Number.isFinite(quantity) &&
+            Number.isFinite(unitPrice)
+          ) {
+            amount = quantity * unitPrice;
+          }
         }
+
         row.innerHTML = `
           <td></td>
           <td></td>
           <td class="quantity"></td>
           <td class="amount"></td>
         `;
+
         row.children[0].textContent = position;
-        row.children[1].textContent = hasValue(item.description) ? item.description : "";
-        row.children[2].textContent = hasValue(item.quantity) ? item.quantity : "";
+
+        const descriptionCell = row.children[1];
+        const title = hasValue(item.description)
+          ? String(item.description)
+          : "";
+
+        if (title) {
+          const titleElement = document.createElement("div");
+          titleElement.className = "invoice-item-title";
+          titleElement.textContent = title;
+          descriptionCell.appendChild(titleElement);
+        }
+
+        const details = Array.isArray(item.details)
+          ? item.details.filter(hasValue)
+          : [];
+
+        details.forEach((detail) => {
+          const detailElement = document.createElement("div");
+          detailElement.className = "invoice-item-detail";
+          detailElement.textContent = String(detail);
+          descriptionCell.appendChild(detailElement);
+        });
+
+        row.children[2].textContent = hasValue(item.quantity)
+          ? item.quantity
+          : "";
+
         row.children[3].textContent = formatMoney(amount);
         tbody.appendChild(row);
       });
@@ -1054,10 +1157,11 @@
     }
 
     function createFinalContent(data) {
-      const fragment = document.createDocumentFragment();
-      fragment.appendChild(createSummary(data));
-      fragment.appendChild(createAfterTableContent(data));
-      return fragment;
+      const block = document.createElement("section");
+      block.className = "invoice-final-block";
+      block.appendChild(createSummary(data));
+      block.appendChild(createAfterTableContent(data));
+      return block;
     }
 
     function attachFooter(page, data) {
@@ -1082,20 +1186,51 @@
     }
 
     function createFirstPage(data, items = [], isFinalInvoicePage = false) {
-      const page = document.getElementById("first-page-template").content.firstElementChild.cloneNode(true);
+      const page = document
+        .getElementById("first-page-template")
+        .content.firstElementChild.cloneNode(true);
+
       renderFields(page, data);
       renderRecipient(page, data.recipient || {});
 
-      const titleParts = [buildInvoiceTitle(data), data.document?.invoiceNumber].filter(hasValue);
-      page.querySelector("[data-invoice-title]").textContent = titleParts.join(" ");
+      const titleParts = [
+        buildInvoiceTitle(data),
+        data.document?.invoiceNumber,
+      ].filter(hasValue);
+
+      page.querySelector("[data-invoice-title]").textContent =
+        titleParts.join(" ");
+
       const separateNumber = page.querySelector(".invoice-number");
       if (separateNumber) separateNumber.hidden = true;
 
-      page.querySelector("[data-salutation]").textContent = buildSalutation(data);
-      renderParagraphs(page.querySelector("[data-intro-paragraphs]"), data.letter?.introParagraphs, data);
+      page.querySelector("[data-salutation]").textContent =
+        buildSalutation(data);
+
+      renderParagraphs(
+        page.querySelector("[data-intro-paragraphs]"),
+        data.letter?.introParagraphs,
+        data,
+      );
 
       const tableHost = page.querySelector("[data-table-host]");
       const finalHost = page.querySelector("[data-final-content]");
+
+      const serviceParagraphs = Array.isArray(
+        data.letter?.serviceDescriptionParagraphs,
+      )
+        ? data.letter.serviceDescriptionParagraphs.filter(hasValue)
+        : [];
+
+      if (serviceParagraphs.length) {
+        tableHost.appendChild(
+          createServiceDescription(
+            data,
+            serviceParagraphs,
+            false,
+          ),
+        );
+      }
 
       if (items.length || isFinalInvoicePage) {
         tableHost.appendChild(createOverviewTitle(data));
@@ -2647,64 +2782,149 @@ const EmbeddedQRErrorCorrectLevel = qrRequire('QRErrorCorrectLevel.js');
     function pageBodyFits(page) {
       const body = page.querySelector(".invoice-body");
       if (!body) return true;
-      return body.scrollHeight <= body.clientHeight + 2;
+
+      /*
+       * scrollHeight lieferte in Chromium bei den absolut positionierten
+       * A4-Seiten teilweise ein zu konservatives Ergebnis. Entscheidend
+       * ist die tatsächlich gerenderte Unterkante des letzten sichtbaren
+       * Inhalts relativ zur Unterkante des Rechnungsbereichs.
+       */
+      const visibleChildren = Array.from(body.children).filter((child) => {
+        const style = window.getComputedStyle(child);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+
+      const lastChild = visibleChildren[visibleChildren.length - 1];
+      if (!lastChild) return true;
+
+      const bodyRect = body.getBoundingClientRect();
+      const contentRect = lastChild.getBoundingClientRect();
+
+      return contentRect.bottom <= bodyRect.bottom + 1;
     }
 
     function appendFirstPageWithBestFit(root, data, items) {
-      const configuredLimit = Number(data.pagination?.firstPageItems);
-      const fallbackLimit = Number(data.pagination?.continuationPageItems) || 11;
-      const maximumCandidate = Math.min(
-        items.length,
-        Math.max(
-          1,
-          Number.isFinite(configuredLimit) && configuredLimit > 0
-            ? configuredLimit
-            : fallbackLimit,
-        ),
+      // OPC_INVOICE_DYNAMIC_PAGINATION_20260702
+      if (items.length === 0) {
+        const emptyFinalPage = createFirstPage(data, [], true);
+        root.appendChild(emptyFinalPage);
+
+        return {
+          count: 0,
+          finalized: true,
+        };
+      }
+
+      const completePage = createFirstPage(
+        data,
+        items,
+        true,
       );
 
-      for (let count = maximumCandidate; count >= 0; count -= 1) {
-        const isFinal = count === items.length;
-        const page = createFirstPage(data, items.slice(0, count), isFinal);
+      root.appendChild(completePage);
+      completePage.classList.add("compact-final-page");
+
+      if (pageBodyFits(completePage)) {
+        return {
+          count: items.length,
+          finalized: true,
+        };
+      }
+
+      completePage.remove();
+
+      for (
+        let count = items.length;
+        count >= 0;
+        count -= 1
+      ) {
+        const page = createFirstPage(
+          data,
+          items.slice(0, count),
+          false,
+        );
+
         root.appendChild(page);
 
         if (pageBodyFits(page)) {
-          return count;
+          return {
+            count,
+            finalized: false,
+          };
         }
 
         page.remove();
       }
 
-      const fallbackPage = createFirstPage(data, [], items.length === 0);
+      const fallbackPage = createFirstPage(data, [], false);
       root.appendChild(fallbackPage);
-      return 0;
+
+      return {
+        count: 0,
+        finalized: false,
+      };
     }
 
     function renderInvoice(inputData) {
-      const data = deepMerge(defaultInvoiceData, inputData || {});
+      const data = deepMerge(
+        defaultInvoiceData,
+        inputData || {},
+      );
+
       const root = document.getElementById("document-root");
       root.replaceChildren();
 
-      const items = Array.isArray(data.invoice?.items) ? data.invoice.items : [];
+      const items = Array.isArray(data.invoice?.items)
+        ? data.invoice.items
+        : [];
+
       const continuationLimit = Math.max(
         1,
         Number(data.pagination?.continuationPageItems) || 11,
       );
 
-      const firstPageItemCount = appendFirstPageWithBestFit(root, data, items);
-      const remainingItems = items.slice(firstPageItemCount);
+      const firstPageResult =
+        appendFirstPageWithBestFit(root, data, items);
+
+      const remainingItems = items.slice(
+        firstPageResult.count,
+      );
 
       for (
         let index = 0;
         index < remainingItems.length;
         index += continuationLimit
       ) {
-        const chunk = remainingItems.slice(index, index + continuationLimit);
-        const isFinal = index + continuationLimit >= remainingItems.length;
-        root.appendChild(createContinuationPage(data, chunk, isFinal));
+        const chunk = remainingItems.slice(
+          index,
+          index + continuationLimit,
+        );
+
+        const isFinal =
+          index + continuationLimit >= remainingItems.length;
+
+        root.appendChild(
+          createContinuationPage(data, chunk, isFinal),
+        );
       }
 
-      if (data.qrBill?.enabled !== false) root.appendChild(renderQrPage(data));
+      /*
+       * Alle Positionen können auf Seite 1 passen, während Summen und
+       * Abschlusstext dort nicht mehr passen. In diesem Fall wird eine
+       * saubere Abschlussseite ohne künstlich verschobene Position erzeugt.
+       */
+      if (
+        !firstPageResult.finalized &&
+        remainingItems.length === 0
+      ) {
+        root.appendChild(
+          createContinuationPage(data, [], true),
+        );
+      }
+
+      if (data.qrBill?.enabled !== false) {
+        root.appendChild(renderQrPage(data));
+      }
     }
 
     window.createScorReference = createScorReference;

@@ -1,3 +1,4 @@
+import { deriveOpcDocumentNumber } from './opc-document-numbering';
 import generalLetterTemplate from './opc-document-templates/general-letter.html?raw';
 import offerTemplate from './opc-document-templates/offer.html?raw';
 import orderConfirmationTemplate from './opc-document-templates/order-confirmation.html?raw';
@@ -171,6 +172,35 @@ function paragraphs(value: unknown) {
   return text.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
 }
 
+function documentLines(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => documentLines(entry));
+  }
+
+  const text = clean(value);
+  if (!text) return [];
+
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function editableIntroParagraphs(value: unknown, salutation: string) {
+  const intro = paragraphs(value);
+  if (!intro.length) {
+    return [
+      salutation,
+      'Vielen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen unsere Offerte für die gewünschten Reinigungsleistungen.',
+    ];
+  }
+
+  const firstParagraph = clean(intro[0]).toLocaleLowerCase('de-CH');
+  const containsSalutation = /^(sehr geehrte|sehr geehrter|guten tag|liebe|lieber|grüezi|grüezi mitenand)/i.test(firstParagraph);
+
+  return containsSalutation ? intro : [salutation, ...intro];
+}
+
 function getMetadata(record: any) {
   return asObject(record?.metadata);
 }
@@ -179,45 +209,113 @@ function getQuoteSnapshot(invoice: any) {
   return asObject(invoice?.quote_snapshot);
 }
 
-function buildRecipient(client?: OPCDocumentParty, site?: OPCDocumentParty) {
+function buildRecipient(
+  client?: OPCDocumentParty,
+  site?: OPCDocumentParty,
+  overrides?: Record<string, unknown>,
+  fallbackText?: unknown,
+) {
   const clientRecord = asObject(client);
   const siteRecord = asObject(site);
+  const overrideRecord = asObject(overrides);
 
-  const companyName = pick(clientRecord, ['company_name', 'business_name']);
-  const firstName = pick(clientRecord, ['first_name', 'firstname']);
-  const lastName = pick(clientRecord, ['last_name', 'lastname']);
+  const hasOverride = (key: string) =>
+    Object.prototype.hasOwnProperty.call(overrideRecord, key);
+  const overrideValue = (key: string, fallback: string) =>
+    hasOverride(key) ? clean(overrideRecord[key]) : fallback;
+
+  const snapshotCompanyName = pick(clientRecord, ['company_name', 'business_name']);
+  const snapshotFirstName = pick(clientRecord, ['first_name', 'firstname']);
+  const snapshotLastName = pick(clientRecord, ['last_name', 'lastname']);
   const explicitName = pick(clientRecord, ['contact_name', 'full_name', 'billing_name', 'name']);
-  const personName = [firstName, lastName].filter(Boolean).join(' ') || explicitName;
-  const salutation = pick(clientRecord, ['salutation', 'anrede', 'form_of_address']);
+  const explicitNameParts = explicitName.split(/\s+/).filter(Boolean);
+
+  const companyName = overrideValue('offer_recipient_company_name', snapshotCompanyName);
+  const firstName = overrideValue(
+    'offer_recipient_first_name',
+    snapshotFirstName || (explicitNameParts.length > 1 ? explicitNameParts[0] : ''),
+  );
+  const lastName = overrideValue(
+    'offer_recipient_last_name',
+    snapshotLastName || (explicitNameParts.length > 1 ? explicitNameParts.slice(1).join(' ') : explicitName),
+  );
+  const personName = [firstName, lastName].filter(Boolean).join(' ');
+
+  const snapshotFormOfAddress = pick(clientRecord, ['salutation', 'anrede', 'form_of_address']);
+  const formOfAddress = overrideValue(
+    'offer_recipient_form_of_address',
+    snapshotFormOfAddress,
+  );
 
   const rawAddress =
     pick(clientRecord, ['billing_address', 'address_text', 'address_line_1', 'street', 'address']) ||
     pick(siteRecord, ['address_text', 'address', 'address_line_1', 'street']);
   const rawAddressLines = splitLines(rawAddress);
-  const streetLine = rawAddressLines[0] || rawAddress;
+  const rawStreetLine = rawAddressLines.find((line) => !/^\d{4}\s/.test(line)) || rawAddressLines[0] || '';
+
+  const snapshotStreetLine =
+    pick(clientRecord, ['billing_street', 'street', 'address_line_1']) ||
+    pick(siteRecord, ['street', 'address_line_1']) ||
+    rawStreetLine;
+  const streetLine = overrideValue('offer_recipient_street', snapshotStreetLine);
   const { street, streetNumber } = splitStreet(streetLine);
 
-  const postalCode =
+  const postalCodeFromText = [
+    rawAddress,
+    pick(clientRecord, [
+      'billing_address',
+      'address_text',
+      'formatted_address',
+      'full_address',
+      'address',
+    ]),
+    pick(siteRecord, [
+      'address_text',
+      'formatted_address',
+      'full_address',
+      'address',
+    ]),
+    fallbackText,
+  ]
+    .map(clean)
+    .filter(Boolean)
+    .map((value) => value.match(/(?:^|[\s,])(\d{4})(?=\s+[A-Za-zÀ-ÿ])/))
+    .find(Boolean)?.[1] || '';
+
+  const snapshotPostalCode =
     pick(clientRecord, ['billing_postal_code', 'postal_code', 'postcode', 'zip']) ||
-    pick(siteRecord, ['postal_code', 'postcode', 'zip']);
-  const city =
+    pick(siteRecord, ['postal_code', 'postcode', 'zip']) ||
+    postalCodeFromText;
+
+  // An empty metadata override must not erase a valid ZIP code from the
+  // client/site snapshot or from the editable introduction text.
+  const postalCode =
+    clean(overrideRecord.offer_recipient_postal_code) ||
+    snapshotPostalCode;
+
+  const snapshotCity =
     pick(clientRecord, ['billing_city', 'city']) ||
-    pick(siteRecord, ['city', 'billing_city']);
-  const country = pick(clientRecord, ['country']) || pick(siteRecord, ['country']) || 'Schweiz';
+    pick(siteRecord, ['city', 'billing_city']) ||
+    clean(rawAddressLines.find((line) => /^\d{4}\s/.test(line))).replace(/^\d{4}\s*/, '');
+  const city = overrideValue('offer_recipient_city', snapshotCity).split(',')[0].trim();
+
+  const snapshotCountry =
+    pick(clientRecord, ['country']) || pick(siteRecord, ['country']) || 'Schweiz';
+  const country = overrideValue('offer_recipient_country', snapshotCountry).split(',')[0].trim() || 'Schweiz';
   const countryCode =
     pick(clientRecord, ['country_code']) || pick(siteRecord, ['country_code']) || normalizeCountryCode(country);
 
-  const personLine = personName && personName !== companyName ? personName : '';
+  const personLine = [formOfAddress, personName].filter(Boolean).join(' ').trim();
   const cityLine = [postalCode, city].filter(Boolean).join(' ');
   const addressLines = unique([
     companyName,
-    personLine,
-    ...rawAddressLines,
+    personLine && personLine !== companyName ? personLine : '',
+    streetLine,
     cityLine,
     country,
   ]);
 
-  const salutationLower = salutation.toLocaleLowerCase('de-CH');
+  const salutationLower = formOfAddress.toLocaleLowerCase('de-CH');
   let salutationLine = 'Sehr geehrte Damen und Herren';
   if (salutationLower.includes('herr')) {
     salutationLine = `Sehr geehrter Herr ${lastName || personName}`.trim();
@@ -227,7 +325,7 @@ function buildRecipient(client?: OPCDocumentParty, site?: OPCDocumentParty) {
 
   return {
     companyName,
-    formOfAddress: '',
+    formOfAddress,
     firstName,
     lastName,
     street,
@@ -251,10 +349,51 @@ function buildSiteAddress(site?: OPCDocumentParty) {
 }
 
 function stripDocumentPrefix(value: unknown) {
-  return clean(value)
-    .replace(/^(Offerte|Angebot|Auftragsbestätigung|Rechnung)\s+(zur|zum|für|zu)\s+/i, '')
-    .replace(/^(Offerte|Angebot|Auftragsbestätigung|Rechnung)\s+/i, '')
-    .trim();
+  let title = clean(value);
+
+  for (let index = 0; index < 4; index += 1) {
+    const stripped = title
+      .replace(/^(Offerte|Angebot|Auftragsbestätigung|Rechnung)\s+(zur|zum|für|zu)\s+/i, '')
+      .replace(/^(Offerte|Angebot|Auftragsbestätigung|Rechnung)\s+/i, '')
+      .trim();
+
+    if (stripped === title) break;
+    title = stripped;
+  }
+
+  return title;
+}
+
+function offerDocumentTitle(rawTitle: unknown, fallbackServiceName: unknown) {
+  const serviceName =
+    stripDocumentPrefix(rawTitle) || stripDocumentPrefix(fallbackServiceName);
+  return serviceName ? `Offerte ${serviceName}` : 'Offerte';
+}
+
+function offerCustomerNoteParagraphs(value: unknown) {
+  const standardClosingLines = new Set([
+    'bei fragen stehen wir ihnen gerne zur verfügung',
+    'freundliche grüsse',
+    'freundliche grüße',
+    'orange pro clean gmbh',
+  ]);
+
+  return paragraphs(value)
+    .map((paragraph) =>
+      clean(paragraph)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => {
+          const normalized = line
+            .toLocaleLowerCase('de-CH')
+            .replace(/[.!,:;]+$/g, '')
+            .trim();
+          return !standardClosingLines.has(normalized);
+        })
+        .join('\n'),
+    )
+    .filter(Boolean);
 }
 
 function documentTitle(prefix: 'Offerte' | 'Rechnung', rawTitle: unknown) {
@@ -318,23 +457,31 @@ function itemDescriptionParagraphs(items: OPCDocumentItem[]) {
 }
 
 function mapItems(items: OPCDocumentItem[]) {
-  return items.map((item, index) => ({
-    position: String(index + 1),
-    description: itemPositionTitle(item),
-    details: [],
-    bullets: [],
-    quantity: quantityText(item),
-    unitPrice: toNumber(item.unit_price_chf),
-    amount: toNumber(item.subtotal_chf ?? item.unit_price_chf ?? item.total_chf),
-  }));
+  return items.map((item, index) => {
+    const positionTitle = itemPositionTitle(item);
+
+    const details = documentLines(item.description).filter(
+      (description) => clean(description) !== clean(positionTitle),
+    );
+
+    return {
+      position: String(index + 1),
+      description: positionTitle,
+      details,
+      bullets: [],
+      quantity: quantityText(item),
+      unitPrice: toNumber(item.unit_price_chf),
+      amount: toNumber(
+        item.subtotal_chf ?? item.unit_price_chf ?? item.total_chf,
+      ),
+    };
+  });
 }
 
-function quoteServiceDescriptionParagraphs(quote: any, items: OPCDocumentItem[]) {
-  return unique([
-    ...paragraphs(quote.scope_text),
-    ...paragraphs(quote.service_description_text),
-    ...itemDescriptionParagraphs(items),
-  ]);
+function quoteServiceDescriptionParagraphs(quote: any) {
+  const mode = clean(quote.service_description_mode || 'embedded');
+  const embedded = mode === 'embedded' || mode === 'embedded_and_separate';
+  return embedded ? documentLines(quote.service_description_text) : [];
 }
 
 
@@ -349,7 +496,7 @@ function pricing(totals: OPCDocumentTotals) {
     taxRate: toNumber(totals.taxRate),
     taxAmount: toNumber(totals.tax),
     roundingLabel: 'Rundungsdifferenz',
-    rounding: '',
+    rounding: toNumber(totals.rounding),
     totalLabel: 'Gesamtbetrag inkl. MWST',
     total: toNumber(totals.total),
   };
@@ -532,17 +679,50 @@ function injectWindowData(template: string, variableName: string, data: unknown)
 function buildOfferData(input: OPCQuotePdfInput) {
   const quote: any = input.quote || {};
   const metadata = getMetadata(quote);
-  const recipient = buildRecipient(quote.client_snapshot, quote.site_snapshot);
-  const signer = signatory(quote);
+  const recipient = buildRecipient(
+    quote.client_snapshot,
+    quote.site_snapshot,
+    metadata,
+    quote.intro_text,
+  );
+  const serviceName =
+    stripDocumentPrefix(quote.title) ||
+    stripDocumentPrefix(quote.service_type) ||
+    (input.items.length ? itemPositionTitle(input.items[0]) : '') ||
+    'Reinigungsleistung';
 
-  const terms = [
-    quote.valid_until ? `Die Offerte ist bis ${formatDate(quote.valid_until)} gültig.` : '',
-    ...paragraphs(quote.terms_text),
-    ...paragraphs(quote.payment_terms),
-    ...paragraphs(quote.acceptance_terms),
-    ...paragraphs(quote.customer_notes),
-    'Bei Fragen stehen wir Ihnen gerne zur Verfügung.',
-  ].filter(Boolean);
+  const positionTitle =
+    (input.items.length ? itemPositionTitle(input.items[0]) : '') ||
+    serviceName;
+
+  const contentSections = [
+    {
+      key: 'service-description',
+      // Die Leistungsbeschreibung steht direkt unter dem Einleitungstext.
+      // Als sichtbare Überschrift wird der Positionstitel verwendet.
+      title: positionTitle,
+      paragraphs: quoteServiceDescriptionParagraphs(quote),
+    },
+    {
+      key: 'scope',
+      // Optionaler zusätzlicher Leistungsumfang folgt erst danach.
+      title: 'Leistungsumfang',
+      paragraphs: documentLines(quote.scope_text),
+    },
+  ].filter((section) => section.paragraphs.length > 0);
+
+  const termsSections = [
+    {
+      key: 'conditions',
+      title: 'Bedingungen',
+      paragraphs: documentLines(quote.terms_text),
+    },
+    {
+      key: 'payment-conditions',
+      title: 'Zahlungsbedingungen',
+      paragraphs: documentLines(quote.payment_terms),
+    },
+  ].filter((section) => section.paragraphs.length > 0);
 
   return {
     company: TEMPLATE_COMPANY,
@@ -550,23 +730,26 @@ function buildOfferData(input: OPCQuotePdfInput) {
     document: {
       city: 'Basel',
       date: formatDate(quote.issue_date),
-      title: clean(metadata.offer_document_title) || documentTitle('Offerte', quote.title || quote.service_type || 'Reinigungsleistung'),
+      title: offerDocumentTitle(metadata.offer_document_title, serviceName),
       numberLabel: 'Offerten Nr.',
       offerNumber: clean(quote.quote_number),
       continuationTitle: 'Fortsetzung Offerte',
     },
     letter: {
-      salutation: recipient.salutationLine,
-      introParagraphs: paragraphs(quote.intro_text).length
-        ? paragraphs(quote.intro_text)
-        : ['Vielen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen unsere Offerte für die gewünschten Reinigungsleistungen.'],
-      serviceDescriptionTitle: 'Leistungsbeschreibung',
-      serviceDescriptionParagraphs: quoteServiceDescriptionParagraphs(quote, input.items),
-      termsParagraphs: terms,
-      closing: 'Freundliche Grüsse',
-      signatoryName: signer.name,
+      introParagraphs: editableIntroParagraphs(quote.intro_text, recipient.salutationLine),
+      contentSections,
+      termsSections,
+      validityParagraphs: quote.valid_until
+        ? [`Die Offerte ist bis ${formatDate(quote.valid_until)} gültig.`]
+        : [],
+      closingParagraphs: paragraphs(quote.customer_notes),
+      serviceDescriptionTitle: positionTitle,
+      serviceDescriptionParagraphs: quoteServiceDescriptionParagraphs(quote),
+      termsParagraphs: [],
+      closing: '',
+      signatoryName: '',
       signatoryRole: '',
-      signatoryCompany: TEMPLATE_COMPANY.name,
+      signatoryCompany: '',
     },
     offer: {
       columns: {
@@ -611,7 +794,7 @@ function buildOrderConfirmationData(input: OPCQuotePdfInput) {
       city: 'Basel',
       date: formatDate(quote.accepted_at || quote.issue_date),
       title: clean(metadata.order_confirmation_title),
-      number: clean(metadata.order_confirmation_number || quote.quote_number),
+      number: clean(metadata.order_confirmation_number || deriveOpcDocumentNumber(quote.quote_number, 'AB')),
     },
     linkedOffer: {
       number: clean(quote.quote_number),
@@ -648,18 +831,138 @@ function buildOrderConfirmationData(input: OPCQuotePdfInput) {
 }
 
 function buildInvoiceData(input: OPCInvoicePdfInput) {
+  // OPC_INVOICE_PRINT_MAPPING_20260702
   const invoice: any = input.invoice || {};
   const metadata = getMetadata(invoice);
-  const recipient = buildRecipient(invoice.client_snapshot, invoice.site_snapshot);
+
+  const recipientOverrides: Record<string, unknown> = {
+    ...metadata,
+  };
+
+  const recipientKeyPairs = [
+    ['invoice_recipient_company_name', 'offer_recipient_company_name'],
+    ['invoice_recipient_first_name', 'offer_recipient_first_name'],
+    ['invoice_recipient_last_name', 'offer_recipient_last_name'],
+    ['invoice_recipient_form_of_address', 'offer_recipient_form_of_address'],
+    ['invoice_recipient_street', 'offer_recipient_street'],
+    ['invoice_recipient_postal_code', 'offer_recipient_postal_code'],
+    ['invoice_recipient_city', 'offer_recipient_city'],
+    ['invoice_recipient_country', 'offer_recipient_country'],
+  ];
+
+  recipientKeyPairs.forEach(([invoiceKey, recipientKey]) => {
+    if (Object.prototype.hasOwnProperty.call(metadata, invoiceKey)) {
+      recipientOverrides[recipientKey] = metadata[invoiceKey];
+    }
+  });
+
+  const recipient = buildRecipient(
+    invoice.client_snapshot,
+    invoice.site_snapshot,
+    recipientOverrides,
+    invoice.intro_text,
+  );
+
   const signer = signatory(invoice);
   const serviceTitle = invoiceServiceTitle(invoice, input.items);
   const serviceAddress = invoiceServiceAddress(invoice);
   const objectPhrase = invoiceObjectPhrase(invoice);
 
-  const addressFragment = serviceAddress ? ` an der ${serviceAddress}` : '';
+  const addressFragment = serviceAddress
+    ? ` an der ${serviceAddress}`
+    : '';
+
   const executionParagraph =
-    `Vielen Dank für Ihren Auftrag. Nachfolgend stellen wir Ihnen hiermit die Ausführung der ` +
-    `${serviceTitle} ${objectPhrase}${addressFragment}, in Rechnung.`;
+    `Vielen Dank für Ihren Auftrag. Nachfolgend stellen wir Ihnen hiermit ` +
+    `die Ausführung der ${serviceTitle} ${objectPhrase}${addressFragment}, ` +
+    `in Rechnung.`;
+
+  const configuredIntro = paragraphs(invoice.intro_text);
+  const invoiceTypeParagraphs = documentLines(metadata.invoice_type_text);
+
+  const serviceDescriptionParagraphs = documentLines(
+    metadata.invoice_scope_text ||
+      metadata.source_quote_scope_text ||
+      metadata.source_quote_service_description_text,
+  );
+
+  const paymentParagraphs = paragraphs(invoice.payment_terms);
+
+  const defaultPaymentParagraph =
+    'Bitte begleichen Sie den Rechnungsbetrag innerhalb von 10 Tagen ' +
+    'ab Rechnungsdatum. Der dazugehörige QR-Zahlteil befindet sich auf ' +
+    'der letzten Seite. Die Verrechnung erfolgt auf Grundlage des ' +
+    'bestätigten Auftrags und des vereinbarten Leistungsumfangs.';
+
+  // OPC_INVOICE_COMBINED_CLOSING_20260702
+  const legacyClosingText = [
+    clean(metadata.invoice_closing_paragraph) ||
+      'Bei Fragen stehen wir Ihnen gerne zur Verfügung.',
+    '',
+    clean(metadata.invoice_closing) ||
+      'Freundliche Grüsse',
+    clean(metadata.invoice_signatory_company) ||
+      TEMPLATE_COMPANY.name,
+  ].join('\n');
+
+  const combinedClosingText =
+    clean(metadata.invoice_closing_text) ||
+    legacyClosingText;
+
+  const closingBlocks =
+    combinedClosingText
+      .split(/\n\s*\n/)
+      .map((block) => block.trim())
+      .filter(Boolean);
+
+  let closingParagraphs: string[] = [];
+  let closingSignatureLines: string[] = [];
+
+  if (closingBlocks.length >= 2) {
+    closingParagraphs =
+      closingBlocks.slice(0, -1);
+
+    closingSignatureLines =
+      closingBlocks[
+        closingBlocks.length - 1
+      ]
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+  } else {
+    const allClosingLines =
+      combinedClosingText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    if (allClosingLines.length >= 3) {
+      closingParagraphs =
+        allClosingLines.slice(0, -2);
+
+      closingSignatureLines =
+        allClosingLines.slice(-2);
+    } else {
+      closingParagraphs =
+        allClosingLines;
+
+      closingSignatureLines = [
+        'Freundliche Grüsse',
+        TEMPLATE_COMPANY.name,
+      ];
+    }
+  }
+
+  const closingGreeting =
+    closingSignatureLines[0] ||
+    'Freundliche Grüsse';
+
+  const closingCompany =
+    closingSignatureLines
+      .slice(1)
+      .join(' ') ||
+    TEMPLATE_COMPANY.name;
+
 
   return {
     company: TEMPLATE_COMPANY,
@@ -668,30 +971,56 @@ function buildInvoiceData(input: OPCInvoicePdfInput) {
       city: 'Basel',
       date: formatDate(invoice.issue_date),
       dueDate: formatDate(invoice.due_date),
-      title: documentTitle('Rechnung', serviceTitle),
+      title:
+        clean(
+          metadata.invoice_document_title ||
+            metadata.invoice_print_title,
+        ) || documentTitle('Rechnung', serviceTitle),
       numberLabel: '',
       invoiceNumber: clean(invoice.invoice_number),
-      customerNumber: pick(invoice.client_snapshot, ['customer_number', 'client_number', 'number']),
-      offerNumber: clean(metadata.source_quote_number || getQuoteSnapshot(invoice).quote_number),
-      orderConfirmationNumber: clean(metadata.order_confirmation_number),
+      customerNumber: pick(invoice.client_snapshot, [
+        'customer_number',
+        'client_number',
+        'number',
+      ]),
+      offerNumber: clean(
+        metadata.source_quote_number ||
+          getQuoteSnapshot(invoice).quote_number,
+      ),
+      orderConfirmationNumber: clean(
+        metadata.order_confirmation_number,
+      ),
       serviceName: serviceTitle,
       serviceAddress,
-      continuationTitle: 'Detaillierte Rechnungsübersicht zur Rechnung',
+      continuationTitle:
+        'Detaillierte Rechnungsübersicht zur Rechnung',
     },
     letter: {
-      salutation: recipient.salutationLine,
-      introParagraphs: [executionParagraph],
+      salutation:
+        clean(metadata.invoice_salutation) ||
+        recipient.salutationLine,
+      introParagraphs:
+        configuredIntro.length
+          ? configuredIntro
+          : [executionParagraph],
       afterTableParagraphs: [
-        'Bitte begleichen Sie den Rechnungsbetrag innerhalb von 10 Tagen ab Rechnungsdatum. Der dazugehörige QR-Zahlteil befindet sich auf der letzten Seite. Die Verrechnung erfolgt auf Grundlage des bestätigten Auftrags und des vereinbarten Leistungsumfangs.',
-        'Bei Fragen stehen wir Ihnen gerne zur Verfügung.',
+        ...(paymentParagraphs.length
+          ? paymentParagraphs
+          : [defaultPaymentParagraph]),
+        ...closingParagraphs,
       ],
-      serviceDescriptionTitle: '',
-      serviceDescriptionParagraphs: [],
+      serviceDescriptionTitle:
+        'Leistungsbeschreibung',
+      serviceDescriptionParagraphs,
       termsParagraphs: [],
-      closing: 'Freundliche Grüsse',
-      signatoryName: '',
-      signatoryRole: signer.role,
-      signatoryCompany: TEMPLATE_COMPANY.name,
+      closing:
+        closingGreeting,
+      signatoryName: clean(metadata.invoice_signatory_name),
+      signatoryRole:
+        clean(metadata.invoice_signatory_role) ||
+        signer.role,
+      signatoryCompany:
+        closingCompany,
     },
     invoice: {
       columns: {
@@ -925,6 +1254,7 @@ export function buildFirstReminderHtml(
   return injectWindowData(firstReminderTemplate, 'FIRST_REMINDER_DATA', data);
 }
 
+
 function byteArrayToBase64(bytes: Uint8Array) {
   let binary = '';
   const chunkSize = 0x8000;
@@ -1029,6 +1359,65 @@ async function renderHtmlInBrowserToPdfBase64(
 
       const pageImage = canvas.toDataURL('image/png');
       pdf.addImage(pageImage, 'PNG', 0, 0, 210, 297, `opc-page-${index + 1}`, 'FAST');
+
+      const pageLinks = Array.from(
+        page.querySelectorAll<HTMLAnchorElement>(
+          'a[href]'
+        )
+      );
+
+      for (const link of pageLinks) {
+        const href = String(link.href || '').trim();
+
+        if (!/^https?:\/\//i.test(href)) {
+          continue;
+        }
+
+        const linkRect = link.getBoundingClientRect();
+
+        if (
+          linkRect.width <= 0 ||
+          linkRect.height <= 0 ||
+          rect.width <= 0 ||
+          rect.height <= 0
+        ) {
+          continue;
+        }
+
+        const x = Math.max(
+          0,
+          ((linkRect.left - rect.left) / rect.width) * 210
+        );
+
+        const y = Math.max(
+          0,
+          ((linkRect.top - rect.top) / rect.height) * 297
+        );
+
+        const width = Math.min(
+          210 - x,
+          (linkRect.width / rect.width) * 210
+        );
+
+        const height = Math.min(
+          297 - y,
+          (linkRect.height / rect.height) * 297
+        );
+
+        if (width <= 0 || height <= 0) {
+          continue;
+        }
+
+        pdf.link(
+          x,
+          y,
+          width,
+          height,
+          {
+            url: href,
+          }
+        );
+      }
     }
 
     const bytes = new Uint8Array(pdf.output('arraybuffer'));
