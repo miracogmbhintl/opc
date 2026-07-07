@@ -15,12 +15,12 @@ import {
   X,
 } from 'lucide-react';
 
-const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v11-einsaetze-aligned';
+const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v12-all-inquiries';
 
-type ActiveTab = 'inquiries' | 'damages';
+type ActiveTab = 'all' | 'inquiries' | 'applications';
 type ItemType = 'inquiry' | 'damage' | 'job_damage';
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'done';
-type TypeFilter = 'all' | ItemType;
+type TypeFilter = 'all' | 'inquiry' | 'application';
 type ConversionMode = 'private' | 'corporate';
 
 interface RawRow {
@@ -426,17 +426,89 @@ function getInquiryCategory(row: RawRow) {
 }
 
 function isApplicationInquiry(row: RawRow) {
-  const explicit = getInquiryCategory(row);
-  if (explicit === 'bewerbung' || explicit === 'job_application') return true;
+  const explicitCategory = getInquiryCategory(row);
+  const sourceForm = getFirstValue(row, ['source_form_name', 'onboarding_data.source_form_name']).toLowerCase();
+  const inquiryType = getFirstValue(row, ['inquiry_type', 'client_type', 'metadata.inquiry_type']).toLowerCase();
+  const message = getFirstValue(
+    row,
+    ['message', 'original_message', 'notes', 'summary', 'description', 'request_summary', 'raw_message'],
+  ).toLowerCase();
+  const title = getFirstValue(row, ['title', 'case_title', 'inquiry_title', 'subject']).toLowerCase();
+  const haystack = [sourceForm, inquiryType, title, message].join(' ');
 
-  const haystack = [
-    getFirstValue(row, ['source_form_name']),
-    getFirstValue(row, ['inquiry_type']),
-    getFirstValue(row, ['message', 'original_message', 'notes', 'summary', 'description', 'request_summary']),
-    getFirstValue(row, ['title', 'case_title', 'inquiry_title', 'subject']),
-  ].join(' ').toLowerCase();
+  // Customer intent wins over a stale or incorrect AI/database classification.
+  // This prevents normal quote and cleaning requests from being shown as applications.
+  const strongCustomerSignals = [
+    'offerte',
+    'angebot',
+    'kostenvoranschlag',
+    'preis',
+    'kosten',
+    'auszugsreinigung',
+    'umzugsreinigung',
+    'endreinigung',
+    'unterhaltsreinigung',
+    'fensterreinigung',
+    'baureinigung',
+    'wohnungsreinigung',
+    'reinigung buchen',
+    'freie kapazität',
+    'freie kapazitaet',
+    'termin vereinbaren',
+  ];
+  const customerSignalCount = strongCustomerSignals.filter((signal) => haystack.includes(signal)).length;
+  const customerTypeSignal = [
+    'privatkunde',
+    'geschäftskunde',
+    'geschaeftskunde',
+    'customer_inquiry',
+    'quote_request',
+    'offer_request',
+  ].some((signal) => inquiryType.includes(signal) || explicitCategory === signal);
 
-  return ['bewerb', 'reinigungskraft', 'arbeit', 'job', 'stelle', 'mitarbeiter', 'lavoro'].some((keyword) => haystack.includes(keyword));
+  const explicitApplicationForm = [
+    'bewerbung',
+    'karriere',
+    'career',
+    'job_application',
+    'stellenbewerbung',
+  ].some((signal) => sourceForm.includes(signal));
+
+  const strongApplicationSignals = [
+    'ich bewerbe mich',
+    'meine bewerbung',
+    'bewerbung als',
+    'lebenslauf',
+    'curriculum vitae',
+    ' cv ',
+    'arbeitsstelle',
+    'stelle als',
+    'reinigungskraft',
+    'arbeitserfahrung',
+    'erfahrung in der reinigung',
+    'habe gearbeitet',
+    'gearbeitet bei',
+    'zertifiziert',
+    'zertifikat',
+    'arbeitsbewilligung',
+    'vollzeit',
+    'teilzeit',
+    'pensum',
+    'stundenlohn',
+    'lavoro',
+  ];
+  const applicationSignalCount = strongApplicationSignals.filter((signal) => ` ${haystack} `.includes(signal)).length;
+  const explicitApplicationCategory = ['bewerbung', 'job_application', 'application', 'candidate'].includes(explicitCategory);
+
+  if (customerSignalCount >= 1 || customerTypeSignal) {
+    return explicitApplicationForm && applicationSignalCount >= 1 && customerSignalCount === 0;
+  }
+
+  if (explicitApplicationForm) return true;
+  if (explicitApplicationCategory && applicationSignalCount >= 1) return true;
+
+  // Text-only fallback requires at least two independent application signals.
+  return applicationSignalCount >= 2;
 }
 
 function getPersonName(row: RawRow): string {
@@ -778,11 +850,13 @@ function StatusBadge({ item }: { item: PortalItem }) {
   );
 }
 
-function TypeBadge({ type }: { type: ItemType }) {
+function TypeBadge({ item }: { item: PortalItem }) {
+  const isApplication = item.isApplication === true;
+
   return (
     <span className="opc-ticket-type">
-      {type === 'damage' || type === 'job_damage' ? <ShieldAlert size={13} /> : <MessageSquare size={13} />}
-      {typeLabels[type]}
+      {isApplication ? <UserPlus size={13} /> : <MessageSquare size={13} />}
+      {isApplication ? 'Bewerbung' : 'Anfrage'}
     </span>
   );
 }
@@ -802,16 +876,21 @@ function MetricCard({ label, value, icon, tone = 'neutral' }: { label: string; v
 }
 
 function EmptyState({ activeTab, hasFilters }: { activeTab: ActiveTab; hasFilters: boolean }) {
+  const title =
+    activeTab === 'applications'
+      ? 'Keine Bewerbungen gefunden.'
+      : activeTab === 'inquiries'
+        ? 'Keine Kundenanfragen gefunden.'
+        : 'Keine Anfragen gefunden.';
+
   return (
     <div className="opc-ticket-empty">
       <FolderOpen size={44} strokeWidth={1.5} color="#D1D5DB" />
-      <h3>{activeTab === 'inquiries' ? 'Keine Einträge vorhanden.' : 'Keine Schäden gefunden.'}</h3>
+      <h3>{title}</h3>
       <p>
         {hasFilters
           ? 'Passen Sie die Suche oder Filter an.'
-          : activeTab === 'inquiries'
-            ? 'Neue Tickets und QR-Code Meldungen erscheinen hier.'
-            : 'Sobald Schäden gemeldet werden, erscheinen sie hier.'}
+          : 'Neue Anfragen und Bewerbungen erscheinen hier.'}
       </p>
     </div>
   );
@@ -838,6 +917,7 @@ function buildInitialConversionForm(item: PortalItem): ConversionForm {
 
 function InquiryPreviewModal({ item, onClose, onConvert }: { item: PortalItem; onClose: () => void; onConvert: () => void }) {
   const isConverted = normalizeStatus(item.status) === 'converted';
+  const canConvert = !isConverted && item.isApplication !== true;
 
   return (
     <div className="opc-modal-backdrop" role="dialog" aria-modal="true">
@@ -869,7 +949,7 @@ function InquiryPreviewModal({ item, onClose, onConvert }: { item: PortalItem; o
 
         <div className="opc-modal-actions">
           <button type="button" className="opc-btn-light" onClick={onClose}>Schliessen</button>
-          {!isConverted ? <button type="button" className="opc-btn-dark" onClick={onConvert}>Als Kunde übernehmen</button> : null}
+          {canConvert ? <button type="button" className="opc-btn-dark" onClick={onConvert}>Als Kunde übernehmen</button> : null}
         </div>
       </div>
     </div>
@@ -946,7 +1026,7 @@ function ConversionModal({ item, form, setForm, submitting, errorMessage, confli
 }
 
 export default function TicketsPageTranslated() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('inquiries');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
   const [items, setItems] = useState<PortalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -985,22 +1065,10 @@ export default function TicketsPageTranslated() {
     setErrorMessage('');
 
     try {
-      const [inquiriesData, damageData, jobData] = await Promise.all([
-        readList<RawRow>('opc_portal_onboarding_cards', 300),
-        readList<RawRow>('opc_job_damage_reports', 300),
-        readList<JobFeedRow>('opc_my_portal_job_feed', 300),
-      ]);
-
-      const jobMap = buildJobMap(jobData);
+      const inquiriesData = await readList<RawRow>('opc_portal_onboarding_cards', 5000);
       const inquiryItems = inquiriesData.map(mapInquiry).filter(Boolean) as PortalItem[];
-      const damageItems = damageData.map((row) => mapDamage(row, jobMap)).filter(Boolean) as PortalItem[];
-      const damageJobIds = new Set(damageItems.map((item) => item.jobId).filter(Boolean) as string[]);
-      const jobDamageItems = jobData
-        .filter((job) => job.job_id && !damageJobIds.has(job.job_id))
-        .map(mapJobDamageSummary)
-        .filter(Boolean) as PortalItem[];
 
-      const merged = [...inquiryItems, ...damageItems, ...jobDamageItems].sort((a, b) => {
+      const merged = inquiryItems.sort((a, b) => {
         const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
         const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
         return bTime - aTime;
@@ -1009,8 +1077,8 @@ export default function TicketsPageTranslated() {
       setItems(merged);
       writeOpcPageCache<PortalItem[]>(REQUESTS_PAGE_CACHE_KEY, merged);
     } catch (error: any) {
-      console.error('Tickets & Schäden konnten nicht geladen werden:', error);
-      setErrorMessage(error?.message || 'Tickets & Schäden konnten nicht geladen werden.');
+      console.error('Anfragen konnten nicht geladen werden:', error);
+      setErrorMessage(error?.message || 'Anfragen konnten nicht geladen werden.');
     } finally {
       if (!isBackground) setLoading(false);
     }
@@ -1018,22 +1086,23 @@ export default function TicketsPageTranslated() {
 
   const metrics = useMemo(() => {
     const inquiries = items.filter((item) => item.type === 'inquiry');
-    const damages = items.filter((item) => item.type === 'damage' || item.type === 'job_damage');
     const customerInquiries = inquiries.filter((item) => !item.isApplication);
     const applications = inquiries.filter((item) => item.isApplication);
 
     return {
+      allOpen: inquiries.filter((item) => item.statusGroup !== 'done').length,
       inquiriesOpen: customerInquiries.filter((item) => item.statusGroup !== 'done').length,
       applicationsOpen: applications.filter((item) => item.statusGroup !== 'done').length,
-      damagesOpen: damages.filter((item) => item.statusGroup !== 'done').length,
-      done: items.filter((item) => item.statusGroup === 'done').length,
+      done: inquiries.filter((item) => item.statusGroup === 'done').length,
     };
   }, [items]);
 
   const tabItems = useMemo(() => {
     return items.filter((item) => {
-      if (activeTab === 'inquiries') return item.type === 'inquiry' && !item.isApplication;
-      return item.type === 'damage' || item.type === 'job_damage';
+      if (item.type !== 'inquiry') return false;
+      if (activeTab === 'applications') return item.isApplication === true;
+      if (activeTab === 'inquiries') return item.isApplication !== true;
+      return true;
     });
   }, [activeTab, items]);
 
@@ -1042,7 +1111,9 @@ export default function TicketsPageTranslated() {
 
     return tabItems.filter((item) => {
       const matchesStatus = statusFilter === 'all' || item.statusGroup === statusFilter;
-      const matchesType = typeFilter === 'all' || item.type === typeFilter;
+      const matchesType =
+        typeFilter === 'all' ||
+        (typeFilter === 'application' ? item.isApplication === true : item.isApplication !== true);
       if (!matchesStatus || !matchesType) return false;
       if (!query) return true;
 
@@ -1062,6 +1133,7 @@ export default function TicketsPageTranslated() {
         item.locationLine,
         getStatusLabel(item.status),
         typeLabels[item.type],
+        item.isApplication ? 'Bewerbung' : 'Kundenanfrage',
       ].join(' ').toLowerCase().includes(query);
     });
   }, [tabItems, searchQuery, statusFilter, typeFilter]);
@@ -1172,30 +1244,40 @@ export default function TicketsPageTranslated() {
       <div className="opc-requests-tabs">
         <button
           type="button"
-          className={activeTab === 'inquiries' ? 'active' : ''}
+          className={activeTab === 'all' ? 'active' : ''}
           onClick={() => {
-            setActiveTab('inquiries');
+            setActiveTab('all');
             setTypeFilter('all');
           }}
         >
-          Tickets
+          Alle Anfragen
         </button>
         <button
           type="button"
-          className={activeTab === 'damages' ? 'active' : ''}
+          className={activeTab === 'inquiries' ? 'active' : ''}
           onClick={() => {
-            setActiveTab('damages');
-            setTypeFilter('all');
+            setActiveTab('inquiries');
+            setTypeFilter('inquiry');
           }}
         >
-          Schäden
+          Kundenanfragen
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'applications' ? 'active' : ''}
+          onClick={() => {
+            setActiveTab('applications');
+            setTypeFilter('application');
+          }}
+        >
+          Bewerbungen
         </button>
       </div>
 
       <div className="opc-requests-metrics">
-        <MetricCard value={metrics.inquiriesOpen} label="Offene Tickets" icon={<MessageSquare size={18} />} />
+        <MetricCard value={metrics.allOpen} label="Offene Anfragen" icon={<MessageSquare size={18} />} />
+        <MetricCard value={metrics.inquiriesOpen} label="Kundenanfragen" icon={<MessageSquare size={18} />} />
         <MetricCard value={metrics.applicationsOpen} label="Bewerbungen" icon={<UserPlus size={18} />} tone={metrics.applicationsOpen > 0 ? 'warning' : 'neutral'} />
-        <MetricCard value={metrics.damagesOpen} label="Schäden offen" icon={<ShieldAlert size={18} />} tone={metrics.damagesOpen > 0 ? 'danger' : 'neutral'} />
         <MetricCard value={metrics.done} label="Erledigt" icon={<CheckCircle2 size={18} />} tone="success" />
       </div>
 
@@ -1207,7 +1289,7 @@ export default function TicketsPageTranslated() {
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={activeTab === 'inquiries' ? 'Suche nach Kunde, Standort, Ticket oder QR-Code' : 'Suche nach Kunde, Standort, Schaden oder Einsatz'}
+              placeholder="Suche nach Name, E-Mail, Telefon, Anfrage oder Bewerbung"
             />
           </div>
 
@@ -1220,19 +1302,13 @@ export default function TicketsPageTranslated() {
 
           <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TypeFilter)}>
             <option value="all">Alle Typen</option>
-            {activeTab === 'inquiries' ? (
-              <option value="inquiry">Tickets</option>
-            ) : (
-              <>
-                <option value="damage">Schäden</option>
-                <option value="job_damage">Einsatzhinweise</option>
-              </>
-            )}
+            <option value="inquiry">Kundenanfragen</option>
+            <option value="application">Bewerbungen</option>
           </select>
 
-          <a href={activeTab === 'inquiries' ? `${baseUrl}/kunden` : `${baseUrl}/einsaetze`} data-astro-prefetch="false">
+          <a href={`${baseUrl}/kunden`} data-astro-prefetch="false">
             <Wrench size={17} />
-            {activeTab === 'inquiries' ? 'Kunden öffnen' : 'Zum Einsatz'}
+            Kunden öffnen
           </a>
         </div>
       </section>
@@ -1266,19 +1342,17 @@ export default function TicketsPageTranslated() {
               </div>
 
               <div className="opc-request-card-footer">
-                <TypeBadge type={item.type} />
+                <TypeBadge item={item} />
               </div>
 
               <div className="opc-request-card-actions">
                 <span className="opc-request-action dark">Details öffnen</span>
                 <span className="opc-request-action">
-                  {item.type === 'inquiry'
-                    ? normalizeStatus(item.status) !== 'converted'
+                  {item.isApplication
+                    ? 'Bewerbung ansehen'
+                    : normalizeStatus(item.status) !== 'converted'
                       ? 'Kunde übernehmen'
-                      : 'Anfrage ansehen'
-                    : item.jobId
-                      ? 'Einsatz öffnen'
-                      : 'Eintrag öffnen'}
+                      : 'Anfrage ansehen'}
                 </span>
               </div>
             </button>

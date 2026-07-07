@@ -397,7 +397,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       },
       {
         href: buildUrl(routes.tickets),
-        label: 'Tickets & Schäden',
+        label: 'Tickets',
         icon: AlertTriangle,
         key: 'tickets',
         match: [routes.tickets, '/anfragen-schaeden', '/dashboard/tickets'],
@@ -491,7 +491,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       },
       {
         href: buildUrl(routes.tickets),
-        label: 'Tickets & Schäden',
+        label: 'Tickets',
         icon: AlertTriangle,
         key: 'tickets',
         match: [routes.tickets, '/anfragen-schaeden', '/dashboard/tickets'],

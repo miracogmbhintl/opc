@@ -5,18 +5,22 @@ import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import {
   Activity,
   AlertTriangle,
+  Banknote,
   CalendarDays,
   ChevronRight,
   Clock3,
   FileText,
   FolderOpen,
+  HandCoins,
   MessageSquare,
   Plus,
+  ReceiptText,
   Upload,
   Users,
+  WalletCards,
 } from 'lucide-react';
 
-const DASHBOARD_PAGE_CACHE_KEY = 'opc:page-cache:dashboard-home';
+const DASHBOARD_PAGE_CACHE_KEY = 'opc:page-cache:dashboard-home:v6-truthful-live-counts';
 
 interface DashboardStats {
   todayJobs: number;
@@ -38,6 +42,9 @@ interface ServiceJob {
   priority?: string | null;
   planned_start?: string | null;
   planned_end?: string | null;
+  actual_end?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
   service_category?: string | null;
   billing_name?: string | null;
   site_name?: string | null;
@@ -72,6 +79,11 @@ interface InquiryItem {
   id?: string;
   inquiry_id?: string;
   status?: string | null;
+  onboarding_status?: string | null;
+  inquiry_status?: string | null;
+  frontend_status?: string | null;
+  client_id?: string | null;
+  converted_client_id?: string | null;
   source_channel?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -89,23 +101,78 @@ interface TicketItem {
 interface TimeLogItem {
   id?: string;
   employee_id?: string | null;
+  staff_role_id?: string | null;
   user_id?: string | null;
   profile_id?: string | null;
+  job_id?: string | null;
   status?: string | null;
   start_time?: string | null;
   started_at?: string | null;
   clock_in?: string | null;
+  clock_in_at?: string | null;
   end_time?: string | null;
   ended_at?: string | null;
   clock_out?: string | null;
+  clock_out_at?: string | null;
+  break_started_at?: string | null;
+  work_date?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+interface StaffIdentityItem {
+  id?: string;
+  employee_id?: string | null;
+  user_id?: string | null;
+}
+
+interface FinanceSummary {
+  totalOutstanding: number;
+  openOutstanding: number;
+  openInvoices: number;
+  overdueInvoices: number;
+  openQuotes: number;
+  monthlyRevenue: number;
+  monthlyExpenses: number;
+  activeEmployees: number;
+  payrollDue: number;
+  expensesTracked: boolean;
+}
+
+type FinanceRow = Record<string, any>;
+type FinancePreviewTab = 'invoices' | 'quotes' | 'payroll' | 'finance' | 'reminders';
+
+interface FinanceDocumentPreview {
+  id: string;
+  title: string;
+  number: string;
+  status: string;
+  amount: number;
+  balance?: number;
+  dateLabel: string;
+  href: string;
+}
+
+interface PayrollPreview {
+  id: string;
+  name: string;
+  amount: number;
+  status: string;
+}
+
+interface FinancePreviewData {
+  invoices: FinanceDocumentPreview[];
+  quotes: FinanceDocumentPreview[];
+  reminders: FinanceDocumentPreview[];
+  payroll: PayrollPreview[];
 }
 
 type DashboardTab = 'today' | 'live' | 'week' | 'overdue' | 'reports';
 
 interface DashboardPageCache {
   stats: DashboardStats;
+  finance: FinanceSummary;
+  financePreviews?: FinancePreviewData;
   jobs: ServiceJob[];
   activeTab: DashboardTab;
 }
@@ -121,6 +188,26 @@ const EMPTY_DASHBOARD_STATS: DashboardStats = {
   jobsThisWeek: 0,
   unreadMessages: 0,
   urgentItems: 0,
+};
+
+const EMPTY_FINANCE_SUMMARY: FinanceSummary = {
+  totalOutstanding: 0,
+  openOutstanding: 0,
+  openInvoices: 0,
+  overdueInvoices: 0,
+  openQuotes: 0,
+  monthlyRevenue: 0,
+  monthlyExpenses: 0,
+  activeEmployees: 0,
+  payrollDue: 0,
+  expensesTracked: false,
+};
+
+const EMPTY_FINANCE_PREVIEWS: FinancePreviewData = {
+  invoices: [],
+  quotes: [],
+  reminders: [],
+  payroll: [],
 };
 
 const BRAND = {
@@ -141,12 +228,17 @@ const BRAND = {
 const pageFont =
   '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
 
-const CLOSED_JOB_STATUSES = new Set([
+const COMPLETED_JOB_STATUSES = new Set([
   'completed',
-  'cancelled',
   'report_approved',
   'approved',
   'sent_to_client',
+]);
+
+const CLOSED_JOB_STATUSES = new Set([
+  ...COMPLETED_JOB_STATUSES,
+  'cancelled',
+  'rejected',
 ]);
 
 const OPEN_REPORT_STATUSES = new Set([
@@ -159,11 +251,15 @@ const OPEN_REPORT_STATUSES = new Set([
 ]);
 
 const LIVE_JOB_STATUSES = new Set(['on_site', 'onsite', 'in_progress', 'started', 'running']);
-const CLOSED_INQUIRY_STATUSES = new Set(['closed', 'converted', 'spam', 'archived', 'resolved', 'done', 'completed']);
+const CLOSED_INQUIRY_STATUSES = new Set(['closed', 'converted', 'spam', 'archived', 'resolved', 'done', 'completed', 'rejected', 'abgelehnt', 'archiviert']);
 const CLOSED_TICKET_STATUSES = new Set(['closed', 'resolved', 'done', 'completed', 'cancelled', 'archived']);
 const CLOSED_TIME_LOG_STATUSES = new Set(['submitted', 'approved', 'cancelled', 'rejected', 'completed', 'closed']);
+const ACTIVE_TIME_LOG_STATUSES = new Set(['open', 'on_break', 'active', 'clocked_in', 'in_progress', 'running', 'started']);
 
 const STALE_JOB_DAYS = 120;
+const OPEN_INVOICE_STATUSES = new Set(['sent', 'viewed', 'partially_paid', 'overdue', 'open']);
+const OPEN_QUOTE_STATUSES = new Set(['draft', 'ready', 'sent', 'viewed', 'open']);
+const ACTIVE_EMPLOYEE_STATUSES = new Set(['active', 'aktiv', 'enabled']);
 
 const statusLabels: Record<string, string> = {
   scheduled: 'Geplant',
@@ -180,6 +276,19 @@ const statusLabels: Record<string, string> = {
   submitted: 'Zur Prüfung',
   sent_to_client: 'An Kunde gesendet',
   approved: 'Freigegeben',
+  ready: 'Bereit',
+  sent: 'Gesendet',
+  viewed: 'Gesehen',
+  accepted: 'Angenommen',
+  declined: 'Abgelehnt',
+  expired: 'Abgelaufen',
+  converted_to_job: 'Einsatz erstellt',
+  invoiced: 'Verrechnet',
+  paid: 'Bezahlt',
+  partially_paid: 'Teilweise bezahlt',
+  overdue: 'Überfällig',
+  open: 'Offen',
+  active: 'Aktiv',
 };
 
 const cardStyle: CSSProperties = {
@@ -243,6 +352,15 @@ function formatDateTime(dateString?: string | null) {
   });
 }
 
+function formatMoney(value: number) {
+  return new Intl.NumberFormat('de-CH', {
+    style: 'currency',
+    currency: 'CHF',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
 function startOfDay(date: Date) {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
@@ -259,6 +377,18 @@ function addDays(date: Date, days: number) {
   const copy = new Date(date);
   copy.setDate(copy.getDate() + days);
   return copy;
+}
+
+function startOfWeek(date: Date) {
+  const copy = startOfDay(date);
+  const day = copy.getDay();
+  const distanceToMonday = day === 0 ? -6 : 1 - day;
+  copy.setDate(copy.getDate() + distanceToMonday);
+  return copy;
+}
+
+function endOfWeek(date: Date) {
+  return endOfDay(addDays(startOfWeek(date), 6));
 }
 
 function getTimeDistance(dateString?: string | null) {
@@ -343,6 +473,18 @@ function isClosedJob(job: ServiceJob) {
   return CLOSED_JOB_STATUSES.has(normalizeStatus(job.status));
 }
 
+function isCompletedJob(job: ServiceJob) {
+  return COMPLETED_JOB_STATUSES.has(normalizeStatus(job.status));
+}
+
+function getJobCompletionDate(job: ServiceJob) {
+  const value = job.completed_at || job.actual_end || job.planned_end || job.updated_at || job.planned_start;
+  if (!value) return null;
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function isOpenReportStatus(status?: string | null) {
   const normalized = normalizeStatus(status);
 
@@ -353,10 +495,7 @@ function isOpenReportStatus(status?: string | null) {
 
 function isOpenReport(report: ReportItem) {
   const status = normalizeStatus(report.report_status || report.status);
-
-  if (!status) return false;
-
-  return !['approved', 'sent_to_client', 'report_approved', 'completed', 'cancelled'].includes(status);
+  return Boolean(status && OPEN_REPORT_STATUSES.has(status));
 }
 
 function isStaleHistoricJob(job: ServiceJob, now = new Date()) {
@@ -376,22 +515,40 @@ function isStaleHistoricJob(job: ServiceJob, now = new Date()) {
 }
 
 function isLiveJob(job: ServiceJob, now = new Date()) {
+  if (isClosedJob(job) || job.actual_end || job.completed_at) return false;
+
   const status = normalizeStatus(job.status);
-
-  if (LIVE_JOB_STATUSES.has(status)) return true;
-  if (!job.planned_start || !job.planned_end) return false;
-
-  const start = new Date(job.planned_start).getTime();
-  const end = new Date(job.planned_end).getTime();
   const current = now.getTime();
+  const start = job.planned_start ? new Date(job.planned_start).getTime() : Number.NaN;
+  const end = job.planned_end ? new Date(job.planned_end).getTime() : Number.NaN;
 
-  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+  if (Number.isFinite(start) && Number.isFinite(end) && current >= start && current <= end) {
+    return true;
+  }
 
-  return current >= start && current <= end && !isClosedJob(job);
+  if (!LIVE_JOB_STATUSES.has(status)) return false;
+
+  const recentReference = Number.isFinite(start)
+    ? start
+    : job.updated_at
+      ? new Date(job.updated_at).getTime()
+      : Number.NaN;
+
+  if (!Number.isFinite(recentReference)) return false;
+
+  const ageMs = current - recentReference;
+  return ageMs >= -5 * 60_000 && ageMs <= 20 * 60 * 60_000;
 }
 
 function isNewInquiry(inquiry: InquiryItem) {
-  const status = normalizeStatus(inquiry.status);
+  if (inquiry.converted_client_id) return false;
+
+  const status = normalizeStatus(
+    inquiry.status ||
+      inquiry.onboarding_status ||
+      inquiry.inquiry_status ||
+      inquiry.frontend_status,
+  );
 
   if (!status) return true;
 
@@ -406,27 +563,75 @@ function isOpenTicket(ticket: TicketItem) {
   return !CLOSED_TICKET_STATUSES.has(status);
 }
 
-function isActiveTimeLog(log: TimeLogItem) {
-  const status = normalizeStatus(log.status);
-  const hasEnd = Boolean(log.end_time || log.ended_at || log.clock_out);
-
-  if (hasEnd) return false;
-  if (!status) return Boolean(log.start_time || log.started_at || log.clock_in);
-
-  return !CLOSED_TIME_LOG_STATUSES.has(status);
+function localIsoDate(date: Date) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
-function countActiveEmployees(logs: TimeLogItem[]) {
-  const activeLogs = logs.filter(isActiveTimeLog);
+function timeLogStartValue(log: TimeLogItem) {
+  return log.start_time || log.started_at || log.clock_in || log.clock_in_at || log.created_at || null;
+}
+
+function isActiveTimeLog(log: TimeLogItem, now = new Date()) {
+  const status = normalizeStatus(log.status);
+  const startValue = timeLogStartValue(log);
+  const hasEnd = Boolean(log.end_time || log.ended_at || log.clock_out || log.clock_out_at);
+
+  if (!startValue || hasEnd) return false;
+  if (!ACTIVE_TIME_LOG_STATUSES.has(status)) return false;
+
+  if (log.work_date && String(log.work_date).slice(0, 10) !== localIsoDate(now)) return false;
+
+  const startedAt = new Date(startValue).getTime();
+  if (!Number.isFinite(startedAt)) return false;
+
+  const ageMs = now.getTime() - startedAt;
+  return ageMs >= -5 * 60_000 && ageMs <= 20 * 60 * 60_000;
+}
+
+function countActiveEmployees(logs: TimeLogItem[], staffRows: StaffIdentityItem[], now = new Date()) {
+  const staffByRoleId = new Map(staffRows.filter((row) => row.id).map((row) => [String(row.id), row]));
+  const staffByUserId = new Map(staffRows.filter((row) => row.user_id).map((row) => [String(row.user_id), row]));
   const uniqueEmployees = new Set<string>();
 
-  activeLogs.forEach((log) => {
-    const employeeKey = log.employee_id || log.user_id || log.profile_id;
+  logs.filter((log) => isActiveTimeLog(log, now)).forEach((log) => {
+    const staff =
+      (log.staff_role_id ? staffByRoleId.get(String(log.staff_role_id)) : undefined) ||
+      (log.user_id ? staffByUserId.get(String(log.user_id)) : undefined);
 
-    if (employeeKey) uniqueEmployees.add(employeeKey);
+    const employeeKey =
+      log.employee_id ||
+      staff?.employee_id ||
+      log.user_id ||
+      staff?.user_id ||
+      log.staff_role_id ||
+      log.profile_id;
+
+    if (employeeKey) uniqueEmployees.add(String(employeeKey));
   });
 
-  return uniqueEmployees.size || activeLogs.length;
+  return uniqueEmployees.size;
+}
+
+function rowTimestamp(row: { updated_at?: string | null; created_at?: string | null }) {
+  const value = row.updated_at || row.created_at || '';
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function dedupeLatest<T>(rows: T[], getKey: (row: T, index: number) => string) {
+  const map = new Map<string, T>();
+
+  rows.forEach((row, index) => {
+    const key = getKey(row, index);
+    const existing = map.get(key);
+
+    if (!existing || rowTimestamp(row as any) >= rowTimestamp(existing as any)) {
+      map.set(key, row);
+    }
+  });
+
+  return Array.from(map.values());
 }
 
 async function readList<T>(table: string, select = '*', limit = 50): Promise<T[]> {
@@ -438,6 +643,383 @@ async function readList<T>(table: string, select = '*', limit = 50): Promise<T[]
   }
 
   return (data || []) as T[];
+}
+
+function financeClean(value: unknown) {
+  return String(value ?? '').trim();
+}
+
+function financeNormalize(value: unknown) {
+  return financeClean(value).toLowerCase();
+}
+
+function financeNumber(value: unknown) {
+  const parsed = Number(String(value ?? 0).replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function financeRound(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function financeIsoDate(value: unknown) {
+  const match = financeClean(value).match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : '';
+}
+
+function financeMonthRange() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  const year = local.getFullYear();
+  const monthIndex = local.getMonth();
+  const month = String(monthIndex + 1).padStart(2, '0');
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+
+  return {
+    today: local.toISOString().slice(0, 10),
+    from: `${year}-${month}-01`,
+    to: `${year}-${month}-${String(lastDay).padStart(2, '0')}`,
+  };
+}
+
+function invoiceBalance(invoice: FinanceRow) {
+  const explicit = financeNumber(invoice.balance_chf ?? invoice.balance ?? invoice.open_amount_chf);
+  if (explicit > 0) return explicit;
+
+  if (!OPEN_INVOICE_STATUSES.has(financeNormalize(invoice.status))) return 0;
+
+  const total = financeNumber(invoice.total_chf ?? invoice.total_amount ?? invoice.total);
+  const paid = financeNumber(invoice.paid_chf ?? invoice.paid_amount_chf ?? invoice.paid_amount);
+  return Math.max(total - paid, 0);
+}
+
+function invoiceIsOverdue(invoice: FinanceRow, today: string) {
+  if (invoiceBalance(invoice) <= 0) return false;
+  if (financeNormalize(invoice.status) === 'overdue') return true;
+
+  const dueDate = financeIsoDate(invoice.due_date);
+  return Boolean(dueDate && dueDate < today);
+}
+
+function invoicePaymentDate(invoice: FinanceRow) {
+  return financeIsoDate(
+    invoice.paid_at || invoice.payment_date || invoice.updated_at || invoice.issue_date || invoice.created_at,
+  );
+}
+
+function invoicePaidAmount(invoice: FinanceRow) {
+  const paid = financeNumber(invoice.paid_chf ?? invoice.paid_amount_chf ?? invoice.paid_amount);
+  if (paid > 0) return paid;
+  if (financeNormalize(invoice.status) === 'paid') {
+    return financeNumber(invoice.total_chf ?? invoice.total_amount ?? invoice.total);
+  }
+  return 0;
+}
+
+function financeObject(value: unknown): FinanceRow {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as FinanceRow) }
+    : {};
+}
+
+function contractActiveOn(contract: FinanceRow, workDate: string) {
+  const status = financeNormalize(contract.status);
+  if (['cancelled', 'canceled', 'draft', 'inactive', 'terminated'].includes(status)) return false;
+
+  const validFrom = financeIsoDate(contract.valid_from) || '0000-01-01';
+  const validUntil = financeIsoDate(contract.valid_until) || '9999-12-31';
+  return validFrom <= workDate && validUntil >= workDate;
+}
+
+function employeeHourlyOverride(employee: FinanceRow) {
+  const metadata = financeObject(employee.metadata);
+  const override = financeObject(metadata.payroll_hourly_rate_override);
+  const rate = financeNumber(override.hourly_rate_chf);
+  const validFrom = financeIsoDate(override.valid_from);
+
+  if (rate <= 0 || !validFrom) return null;
+
+  return {
+    employee_id: employee.id,
+    salary_type: 'hourly',
+    hourly_rate_chf: rate,
+    monthly_salary_chf: 0,
+    valid_from: validFrom,
+    valid_until: financeIsoDate(override.valid_until) || null,
+    status: 'active',
+    __priority: 1000,
+  } as FinanceRow;
+}
+
+function financeContractForDate(contracts: FinanceRow[], workDate: string, salaryType?: string) {
+  return contracts
+    .filter((contract) => contractActiveOn(contract, workDate))
+    .filter((contract) => !salaryType || financeNormalize(contract.salary_type) === salaryType)
+    .sort((a, b) => {
+      const priority = financeNumber(b.__priority) - financeNumber(a.__priority);
+      if (priority) return priority;
+      return financeClean(b.valid_from).localeCompare(financeClean(a.valid_from));
+    })[0] || null;
+}
+
+function financeEntryMinutes(entry: FinanceRow) {
+  const stored = financeNumber(entry.total_minutes);
+  if (stored > 0) return stored;
+
+  const start = new Date(entry.clock_in_at || entry.start_time || entry.started_at || 0).getTime();
+  const end = new Date(entry.clock_out_at || entry.end_time || entry.ended_at || 0).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+
+  return Math.max(0, Math.floor((end - start) / 60000) - financeNumber(entry.break_minutes));
+}
+
+async function readFinanceDashboardDirect(): Promise<{
+  summary: FinanceSummary;
+  previews: FinancePreviewData;
+}> {
+  const emptyResult = {
+    summary: EMPTY_FINANCE_SUMMARY,
+    previews: EMPTY_FINANCE_PREVIEWS,
+  };
+
+  try {
+    const range = financeMonthRange();
+    const monthStartTimestamp = `${range.from}T00:00:00`;
+    const monthEndTimestamp = `${range.to}T23:59:59`;
+
+    // Dashboard-Abfragen bleiben bewusst klein. Die Detailseiten laden ihre eigenen vollständigen Listen.
+    const [openInvoiceResponse, latestInvoiceResponse, monthlyInvoiceResponse, openQuoteResponse, latestQuoteResponse, employeeResponse] =
+      await Promise.all([
+        supabase
+          .from('opc_invoices')
+          .select('id,invoice_number,status,title,issue_date,due_date,total_chf,balance_chf,paid_chf,created_at,updated_at,client_snapshot')
+          .in('status', Array.from(OPEN_INVOICE_STATUSES))
+          .order('created_at', { ascending: false })
+          .limit(250),
+        supabase
+          .from('opc_invoices')
+          .select('id,invoice_number,status,title,issue_date,due_date,total_chf,balance_chf,paid_chf,created_at,updated_at,client_snapshot')
+          .order('created_at', { ascending: false })
+          .limit(2),
+        supabase
+          .from('opc_invoices')
+          .select('id,status,total_chf,paid_chf,issue_date,created_at,updated_at')
+          .in('status', ['paid', 'partially_paid'])
+          .gte('updated_at', monthStartTimestamp)
+          .lte('updated_at', monthEndTimestamp)
+          .order('updated_at', { ascending: false })
+          .limit(250),
+        supabase
+          .from('opc_quotes')
+          .select('id,quote_number,status,title,quote_type,issue_date,valid_until,total_chf,created_at,updated_at')
+          .in('status', Array.from(OPEN_QUOTE_STATUSES))
+          .order('created_at', { ascending: false })
+          .limit(250),
+        supabase
+          .from('opc_quotes')
+          .select('id,quote_number,status,title,quote_type,issue_date,valid_until,total_chf,created_at,updated_at')
+          .order('created_at', { ascending: false })
+          .limit(2),
+        supabase
+          .from('opc_employees')
+          .select('id,legal_first_name,legal_last_name,preferred_name,status,payroll_in_scope,portal_access_only,metadata')
+          .in('status', Array.from(ACTIVE_EMPLOYEE_STATUSES))
+          .order('created_at', { ascending: false })
+          .limit(250),
+      ]);
+
+    const warn = (label: string, error: any) => {
+      if (error) console.warn(`[OPC Dashboard] ${label}:`, error.message || error);
+    };
+
+    warn('Offene Rechnungen konnten nicht geladen werden', openInvoiceResponse.error);
+    warn('Rechnungsvorschau konnte nicht geladen werden', latestInvoiceResponse.error);
+    warn('Monatseinnahmen konnten nicht geladen werden', monthlyInvoiceResponse.error);
+    warn('Offene Offerten konnten nicht geladen werden', openQuoteResponse.error);
+    warn('Offertenvorschau konnte nicht geladen werden', latestQuoteResponse.error);
+    warn('Mitarbeiterübersicht konnte nicht geladen werden', employeeResponse.error);
+
+    const openInvoices = (openInvoiceResponse.data || []) as FinanceRow[];
+    const latestInvoices = (latestInvoiceResponse.data || []) as FinanceRow[];
+    const monthlyInvoices = (monthlyInvoiceResponse.data || []) as FinanceRow[];
+    const openQuotes = (openQuoteResponse.data || []) as FinanceRow[];
+    const latestQuotes = (latestQuoteResponse.data || []) as FinanceRow[];
+    const activeEmployees = ((employeeResponse.data || []) as FinanceRow[]).filter(
+      (employee) => employee.portal_access_only !== true,
+    );
+
+    const outstandingRows = openInvoices
+      .map((invoice) => ({ invoice, balance: invoiceBalance(invoice) }))
+      .filter((row) => row.balance > 0);
+    const overdueRows = outstandingRows.filter(({ invoice }) => invoiceIsOverdue(invoice, range.today));
+    const overdueIds = new Set(overdueRows.map(({ invoice }) => financeClean(invoice.id)));
+
+    const totalOutstanding = outstandingRows.reduce((sum, row) => sum + row.balance, 0);
+    const openOutstanding = outstandingRows
+      .filter(({ invoice }) => !overdueIds.has(financeClean(invoice.id)))
+      .reduce((sum, row) => sum + row.balance, 0);
+    const monthlyRevenue = monthlyInvoices
+      .filter((invoice) => {
+        const date = invoicePaymentDate(invoice);
+        return date >= range.from && date <= range.to && invoicePaidAmount(invoice) > 0;
+      })
+      .reduce((sum, invoice) => sum + invoicePaidAmount(invoice), 0);
+
+    const employeeIds = activeEmployees.map((employee) => financeClean(employee.id)).filter(Boolean);
+    let contracts: FinanceRow[] = [];
+    let timeEntries: FinanceRow[] = [];
+
+    if (employeeIds.length) {
+      const [contractResponse, timeResponse] = await Promise.all([
+        supabase
+          .from('opc_employment_contracts')
+          .select('employee_id,salary_type,hourly_rate_chf,monthly_salary_chf,valid_from,valid_until,status')
+          .in('employee_id', employeeIds)
+          .order('valid_from', { ascending: false })
+          .limit(1000),
+        supabase
+          .from('opc_employee_time_entries')
+          .select('employee_id,work_date,total_minutes,break_minutes,clock_in_at,clock_out_at,status')
+          .in('employee_id', employeeIds)
+          .eq('status', 'approved')
+          .gte('work_date', range.from)
+          .lte('work_date', range.to)
+          .order('work_date', { ascending: false })
+          .limit(1500),
+      ]);
+
+      warn('Arbeitsverträge konnten nicht geladen werden', contractResponse.error);
+      warn('Genehmigte Arbeitszeiten konnten nicht geladen werden', timeResponse.error);
+      contracts = (contractResponse.data || []) as FinanceRow[];
+      timeEntries = (timeResponse.data || []) as FinanceRow[];
+    }
+
+    const contractsByEmployee = new Map<string, FinanceRow[]>();
+    for (const contract of contracts) {
+      const employeeId = financeClean(contract.employee_id);
+      if (!employeeId) continue;
+      const rows = contractsByEmployee.get(employeeId) || [];
+      rows.push(contract);
+      contractsByEmployee.set(employeeId, rows);
+    }
+
+    for (const employee of activeEmployees) {
+      const override = employeeHourlyOverride(employee);
+      if (!override) continue;
+      const employeeId = financeClean(employee.id);
+      const rows = contractsByEmployee.get(employeeId) || [];
+      rows.unshift(override);
+      contractsByEmployee.set(employeeId, rows);
+    }
+
+    const payrollByEmployee = new Map<string, number>();
+    const monthlyEmployees = new Set<string>();
+
+    for (const employee of activeEmployees) {
+      if (employee.payroll_in_scope === false) continue;
+      const employeeId = financeClean(employee.id);
+      const employeeContracts = contractsByEmployee.get(employeeId) || [];
+      const monthlyContract = financeContractForDate(employeeContracts, range.to, 'monthly');
+
+      if (monthlyContract) {
+        const amount = financeNumber(monthlyContract.monthly_salary_chf);
+        if (amount > 0) {
+          payrollByEmployee.set(employeeId, amount);
+          monthlyEmployees.add(employeeId);
+        }
+      }
+    }
+
+    for (const entry of timeEntries) {
+      const employeeId = financeClean(entry.employee_id);
+      if (!employeeId || monthlyEmployees.has(employeeId)) continue;
+      const workDate = financeIsoDate(entry.work_date);
+      if (!workDate) continue;
+
+      const hourlyContract = financeContractForDate(
+        contractsByEmployee.get(employeeId) || [],
+        workDate,
+        'hourly',
+      );
+      if (!hourlyContract) continue;
+
+      const amount =
+        (financeEntryMinutes(entry) / 60) * financeNumber(hourlyContract.hourly_rate_chf);
+      payrollByEmployee.set(employeeId, (payrollByEmployee.get(employeeId) || 0) + amount);
+    }
+
+    const payrollDue = Array.from(payrollByEmployee.values()).reduce((sum, amount) => sum + amount, 0);
+
+    const employeeName = (employee: FinanceRow) =>
+      financeClean(employee.preferred_name) ||
+      [financeClean(employee.legal_first_name), financeClean(employee.legal_last_name)].filter(Boolean).join(' ') ||
+      'Mitarbeiter';
+
+    const mapInvoicePreview = (invoice: FinanceRow): FinanceDocumentPreview => ({
+      id: financeClean(invoice.id),
+      title: financeClean(invoice.title) || 'Rechnung',
+      number: financeClean(invoice.invoice_number) || 'Ohne Rechnungsnummer',
+      status: financeNormalize(invoice.status) || 'open',
+      amount: financeNumber(invoice.total_chf),
+      balance: invoiceBalance(invoice),
+      dateLabel: [
+        formatDate(invoice.issue_date || invoice.created_at),
+        invoice.due_date ? `fällig bis ${formatDate(invoice.due_date)}` : '',
+      ].filter(Boolean).join(' · '),
+      href: `${baseUrl}/rechnung/${financeClean(invoice.id)}`,
+    });
+
+    const mapQuotePreview = (quote: FinanceRow): FinanceDocumentPreview => ({
+      id: financeClean(quote.id),
+      title: financeClean(quote.title || quote.quote_type) || 'Offerte',
+      number: financeClean(quote.quote_number) || 'Ohne Offertennummer',
+      status: financeNormalize(quote.status) || 'draft',
+      amount: financeNumber(quote.total_chf),
+      dateLabel: [
+        formatDate(quote.issue_date || quote.created_at),
+        quote.valid_until ? `gültig bis ${formatDate(quote.valid_until)}` : '',
+      ].filter(Boolean).join(' · '),
+      href: `${baseUrl}/offerte/${financeClean(quote.id)}`,
+    });
+
+    const payroll = activeEmployees
+      .map((employee) => ({
+        id: financeClean(employee.id),
+        name: employeeName(employee),
+        amount: financeRound(payrollByEmployee.get(financeClean(employee.id)) || 0),
+        status: employee.payroll_in_scope === false ? 'Nicht in Lohnabrechnung' : 'Aktueller Monat',
+      }))
+      .filter((employee) => employee.amount > 0 || employee.status !== 'Nicht in Lohnabrechnung')
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 2);
+
+    return {
+      summary: {
+        totalOutstanding: financeRound(totalOutstanding),
+        openOutstanding: financeRound(openOutstanding),
+        openInvoices: outstandingRows.length,
+        overdueInvoices: overdueRows.length,
+        openQuotes: openQuotes.length,
+        monthlyRevenue: financeRound(monthlyRevenue),
+        monthlyExpenses: 0,
+        activeEmployees: activeEmployees.length,
+        payrollDue: financeRound(payrollDue),
+        expensesTracked: false,
+      },
+      previews: {
+        invoices: latestInvoices.map(mapInvoicePreview).slice(0, 2),
+        quotes: latestQuotes.map(mapQuotePreview).slice(0, 2),
+        reminders: overdueRows
+          .sort((a, b) => financeClean(a.invoice.due_date).localeCompare(financeClean(b.invoice.due_date)))
+          .slice(0, 2)
+          .map(({ invoice }) => mapInvoicePreview(invoice)),
+        payroll,
+      },
+    };
+  } catch (error) {
+    console.warn('[OPC Dashboard] Direkte Finanzdaten konnten nicht geladen werden:', error);
+    return emptyResult;
+  }
 }
 
 function StatusBadge({ status }: { status?: string | null }) {
@@ -519,8 +1101,8 @@ function MetricCard({
   tone = 'neutral',
 }: {
   label: string;
-  value: number;
-  subline: string;
+  value: number | string;
+  subline?: string;
   icon: ReactNode;
   href: string;
   tone?: 'neutral' | 'danger' | 'dark';
@@ -533,7 +1115,7 @@ function MetricCard({
       type="button"
       onClick={() => navigateTo(href)}
       className="opc-dashboard-metric-card"
-      aria-label={`${label}: ${value}. ${subline}`}
+      aria-label={`${label}: ${value}${subline ? `. ${subline}` : ''}`}
       style={{
         ...cardStyle,
         minHeight: '96px',
@@ -800,64 +1382,191 @@ function DashboardTabs({
   );
 }
 
-function MiniStat({
-  label,
-  value,
-  tone,
-  href,
-}: {
-  label: string;
-  value: number;
-  tone: 'danger' | 'warning' | 'dark' | 'neutral';
-  href: string;
-}) {
-  const color =
-    tone === 'danger'
-      ? BRAND.red
-      : tone === 'warning'
-        ? BRAND.amber
-        : tone === 'dark'
-          ? BRAND.black
-          : BRAND.green;
-
+function MiniStat({ label, value, href }: { label: string; value: number; href: string }) {
   return (
     <button
       type="button"
       onClick={() => navigateTo(href)}
       style={{
         width: '100%',
+        height: '48px',
         border: `1px solid ${BRAND.border}`,
-        borderRadius: '15px',
+        borderRadius: '14px',
         background: '#FFFFFF',
-        padding: '13px 14px',
+        padding: '0 16px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: '14px',
+        color: BRAND.text,
         fontFamily: pageFont,
         cursor: 'pointer',
       }}
     >
-      <span
-        style={{
-          color: BRAND.muted,
-          fontSize: '12px',
-          fontWeight: 720,
-        }}
-      >
-        {label}
-      </span>
+      <span style={{ color: BRAND.text, fontSize: '14px', fontWeight: 760 }}>{label}</span>
+      <span style={{ color: BRAND.text, fontSize: '15px', fontWeight: 820 }}>{value}</span>
+    </button>
+  );
+}
 
-      <span
+function FinanceTabButton({
+  active,
+  label,
+  icon,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        width: '100%',
+        height: '48px',
+        borderRadius: '14px',
+        border: active ? `1px solid ${BRAND.black}` : `1px solid ${BRAND.border}`,
+        background: active ? BRAND.black : '#FFFFFF',
+        color: active ? '#FFFFFF' : BRAND.text,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '9px',
+        fontSize: '14px',
+        fontWeight: 760,
+        fontFamily: pageFont,
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function FinanceDocumentPreviewCard({ item, kind }: { item: FinanceDocumentPreview; kind: 'invoice' | 'quote' }) {
+  return (
+    <article style={{ ...cardStyle, padding: '18px' }}>
+      <div
         style={{
-          color,
-          fontSize: '18px',
-          fontWeight: 820,
-          letterSpacing: '-0.04em',
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) auto',
+          gap: '18px',
+          alignItems: 'start',
         }}
       >
-        {value}
-      </span>
+        <div style={{ minWidth: 0 }}>
+          <h3
+            style={{
+              margin: 0,
+              color: BRAND.text,
+              fontSize: '18px',
+              lineHeight: 1.2,
+              fontWeight: 840,
+              letterSpacing: '-0.03em',
+            }}
+          >
+            {item.title}
+          </h3>
+          <div
+            style={{
+              marginTop: '9px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px 14px',
+              color: BRAND.muted,
+              fontSize: '13px',
+              lineHeight: 1.4,
+              fontWeight: 650,
+            }}
+          >
+            <span>{item.number}</span>
+            <span>{item.dateLabel}</span>
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <StatusBadge status={item.status} />
+          <div style={{ marginTop: '9px', color: BRAND.text, fontSize: '18px', fontWeight: 840 }}>
+            {formatMoney(item.amount)}
+          </div>
+          {kind === 'invoice' ? (
+            <div style={{ marginTop: '3px', color: BRAND.muted, fontSize: '12px', fontWeight: 680 }}>
+              Offen: {formatMoney(item.balance || 0)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => navigateTo(item.href)}
+        style={{
+          marginTop: '16px',
+          minHeight: '42px',
+          padding: '0 16px',
+          borderRadius: '13px',
+          border: `1px solid ${BRAND.black}`,
+          background: BRAND.black,
+          color: '#FFFFFF',
+          fontSize: '13px',
+          fontWeight: 760,
+          fontFamily: pageFont,
+          cursor: 'pointer',
+        }}
+      >
+        {kind === 'invoice' ? 'Rechnung öffnen' : 'Offerte öffnen'}
+      </button>
+    </article>
+  );
+}
+
+function PayrollPreviewCard({ item }: { item: PayrollPreview }) {
+  return (
+    <article style={{ ...cardStyle, padding: '18px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '18px', alignItems: 'center' }}>
+        <div style={{ minWidth: 0 }}>
+          <h3 style={{ margin: 0, color: BRAND.text, fontSize: '18px', fontWeight: 840, letterSpacing: '-0.03em' }}>
+            {item.name}
+          </h3>
+          <div style={{ marginTop: '8px', color: BRAND.muted, fontSize: '13px', fontWeight: 650 }}>{item.status}</div>
+        </div>
+        <strong style={{ color: BRAND.text, fontSize: '19px', fontWeight: 840, whiteSpace: 'nowrap' }}>
+          {formatMoney(item.amount)}
+        </strong>
+      </div>
+    </article>
+  );
+}
+
+function FinanceMoreButton({ href, label }: { href: string; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={() => navigateTo(href)}
+      style={{
+        width: '100%',
+        height: '48px',
+        borderRadius: '14px',
+        border: `1px solid ${BRAND.black}`,
+        background: BRAND.black,
+        color: '#FFFFFF',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '9px',
+        fontSize: '14px',
+        fontWeight: 760,
+        fontFamily: pageFont,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+      <ChevronRight size={16} />
     </button>
   );
 }
@@ -888,6 +1597,10 @@ function EmptyState({ text }: { text: string }) {
 
 export default function OwnerDashboardHome() {
   const [stats, setStats] = useState<DashboardStats>(EMPTY_DASHBOARD_STATS);
+  const [finance, setFinance] = useState<FinanceSummary>(EMPTY_FINANCE_SUMMARY);
+  const [financePreviews, setFinancePreviews] = useState<FinancePreviewData>(EMPTY_FINANCE_PREVIEWS);
+  const [activeFinanceTab, setActiveFinanceTab] = useState<FinancePreviewTab>('invoices');
+  const [financeLoading, setFinanceLoading] = useState(false);
 
   const [jobs, setJobs] = useState<ServiceJob[]>([]);
   const [activeTab, setActiveTab] = useState<DashboardTab>('today');
@@ -898,13 +1611,18 @@ export default function OwnerDashboardHome() {
 
     if (cached) {
       setStats({ ...EMPTY_DASHBOARD_STATS, ...cached.stats });
+      setFinance({ ...EMPTY_FINANCE_SUMMARY, ...cached.finance });
+      setFinancePreviews({ ...EMPTY_FINANCE_PREVIEWS, ...(cached.financePreviews || {}) });
       setJobs(cached.jobs);
       setActiveTab(cached.activeTab);
       setLoading(false);
+      void loadData({ background: true });
+      window.setTimeout(() => void loadFinanceData({ background: true }), 120);
       return;
     }
 
     void loadData();
+    window.setTimeout(() => void loadFinanceData(), 120);
   }, []);
 
   async function loadData(options: { background?: boolean } = {}) {
@@ -913,21 +1631,47 @@ export default function OwnerDashboardHome() {
     if (!isBackground) setLoading(true);
 
     try {
-      const [jobsData, inboxData, reportsData, inquiriesData, ticketsData, timeLogsData] = await Promise.all([
-        readList<ServiceJob>('opc_my_portal_job_feed', '*', 150),
-        readList<InboxMessage>('opc_my_conversation_inbox', '*', 30),
-        readList<ReportItem>('opc_portal_report_feed', '*', 100),
-        readList<InquiryItem>('opc_inquiries', '*', 100),
-        readList<TicketItem>('opc_tickets', '*', 100),
-        readList<TimeLogItem>('opc_job_time_logs', '*', 100),
+      const [
+        jobsData,
+        inboxData,
+        reportsData,
+        inquiriesData,
+        ticketsData,
+        jobTimeLogsData,
+        employeeTimeEntriesData,
+        staffRows,
+      ] = await Promise.all([
+        readList<ServiceJob>('opc_my_portal_job_feed', '*', 500),
+        readList<InboxMessage>('opc_my_conversation_inbox', '*', 250),
+        readList<ReportItem>('opc_portal_report_feed', '*', 500),
+        readList<InquiryItem>('opc_portal_onboarding_cards', '*', 500),
+        readList<TicketItem>('opc_tickets', '*', 500),
+        readList<TimeLogItem>('opc_job_time_logs', '*', 500),
+        readList<TimeLogItem>('opc_employee_time_entries', '*', 500),
+        readList<StaffIdentityItem>('opc_staff_roles', 'id,employee_id,user_id', 500),
       ]);
 
       const now = new Date();
       const todayStart = startOfDay(now);
       const todayEnd = endOfDay(now);
-      const weekEnd = endOfDay(addDays(now, 7));
+      const weekStart = startOfWeek(now);
+      const weekEnd = endOfWeek(now);
 
-      const visibleJobs = jobsData.filter((job) => !isStaleHistoricJob(job, now));
+      const uniqueJobs = dedupeLatest(jobsData, (job, index) => job.job_id || `job-${index}`);
+      const uniqueReports = dedupeLatest(
+        reportsData,
+        (report, index) => report.report_id || report.job_id || `report-${index}`,
+      );
+      const uniqueInquiries = dedupeLatest(
+        inquiriesData,
+        (inquiry, index) => inquiry.inquiry_id || inquiry.id || `inquiry-${index}`,
+      );
+      const uniqueTickets = dedupeLatest(
+        ticketsData,
+        (ticket, index) => ticket.ticket_id || ticket.id || `ticket-${index}`,
+      );
+
+      const visibleJobs = uniqueJobs.filter((job) => !isStaleHistoricJob(job, now));
       const operationalJobs = visibleJobs.filter((job) => !isClosedJob(job));
 
       const todayJobs = operationalJobs.filter((job) => {
@@ -936,22 +1680,33 @@ export default function OwnerDashboardHome() {
         return planned >= todayStart && planned <= todayEnd;
       });
 
-      const weekJobs = operationalJobs.filter((job) => {
-        if (!job.planned_start) return false;
-        const planned = new Date(job.planned_start);
-        return planned >= todayStart && planned <= weekEnd;
-      });
-
-      const overdueJobs = operationalJobs.filter((job) => {
-        if (!job.planned_start) return false;
-        return new Date(job.planned_start) < todayStart;
+      const weekJobs = visibleJobs.filter((job) => {
+        if (!isCompletedJob(job)) return false;
+        const completed = getJobCompletionDate(job);
+        return Boolean(completed && completed >= weekStart && completed <= weekEnd);
       });
 
       const liveJobs = operationalJobs.filter((job) => isLiveJob(job, now));
-      const openReports = reportsData.filter(isOpenReport);
-      const newInquiries = inquiriesData.filter(isNewInquiry);
-      const openTickets = ticketsData.filter(isOpenTicket);
-      const activeEmployees = countActiveEmployees(timeLogsData);
+      const liveJobIds = new Set(liveJobs.map((job) => job.job_id));
+      const overdueJobs = operationalJobs.filter((job) => {
+        if (liveJobIds.has(job.job_id)) return false;
+        if (normalizeStatus(job.status) === 'report_pending') return false;
+
+        const dueValue = job.planned_end || job.planned_start;
+        if (!dueValue) return false;
+
+        const dueAt = new Date(dueValue).getTime();
+        return Number.isFinite(dueAt) && dueAt < now.getTime();
+      });
+
+      const openReports = uniqueReports.filter(isOpenReport);
+      const newInquiries = uniqueInquiries.filter(isNewInquiry);
+      const openTickets = uniqueTickets.filter(isOpenTicket);
+      const activeEmployees = countActiveEmployees(
+        [...employeeTimeEntriesData, ...jobTimeLogsData],
+        staffRows,
+        now,
+      );
       const unreadMessages = inboxData.filter((message) => Boolean(message.unread)).length;
 
       const nextStats: DashboardStats = {
@@ -977,12 +1732,21 @@ export default function OwnerDashboardHome() {
 
       setJobs(sortedVisibleJobs);
 
-      const nextActiveTab: DashboardTab = todayJobs.length === 0 && overdueJobs.length > 0 ? 'overdue' : 'today';
+      const nextActiveTab: DashboardTab = todayJobs.length > 0
+        ? 'today'
+        : liveJobs.length > 0
+          ? 'live'
+          : weekJobs.length > 0
+            ? 'week'
+            : 'reports';
 
       setActiveTab(nextActiveTab);
 
+      const existingCache = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
       writeOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY, {
         stats: nextStats,
+        finance: existingCache?.finance || finance,
+        financePreviews: existingCache?.financePreviews || financePreviews,
         jobs: sortedVisibleJobs,
         activeTab: nextActiveTab,
       });
@@ -990,6 +1754,29 @@ export default function OwnerDashboardHome() {
       console.error('Error loading OPC dashboard:', error);
     } finally {
       if (!isBackground) setLoading(false);
+    }
+  }
+
+  async function loadFinanceData(options: { background?: boolean } = {}) {
+    if (!options.background) setFinanceLoading(true);
+
+    try {
+      const result = await readFinanceDashboardDirect();
+      setFinance(result.summary);
+      setFinancePreviews(result.previews);
+
+      const existingCache = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
+      writeOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY, {
+        stats: existingCache?.stats || stats,
+        finance: result.summary,
+        financePreviews: result.previews,
+        jobs: existingCache?.jobs || jobs,
+        activeTab: existingCache?.activeTab || activeTab,
+      });
+    } catch (error) {
+      console.warn('[OPC Dashboard] Finanzvorschau konnte nicht aktualisiert werden:', error);
+    } finally {
+      setFinanceLoading(false);
     }
   }
 
@@ -1008,7 +1795,7 @@ export default function OwnerDashboardHome() {
       .sort((a, b) => {
         const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
         const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
-        return aTime - bTime;
+        return bTime - aTime;
       });
   }, [jobs]);
 
@@ -1021,37 +1808,39 @@ export default function OwnerDashboardHome() {
       .sort((a, b) => {
         const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
         const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
-        return aTime - bTime;
+        return bTime - aTime;
       });
   }, [jobs]);
 
   const weekJobs = useMemo(() => {
     const now = new Date();
+    const weekStart = startOfWeek(now);
+    const weekEnd = endOfWeek(now);
+
+    return jobs
+      .filter(isCompletedJob)
+      .filter((job) => {
+        const completed = getJobCompletionDate(job);
+        return Boolean(completed && completed >= weekStart && completed <= weekEnd);
+      })
+      .sort((a, b) => {
+        const aTime = getJobCompletionDate(a)?.getTime() || 0;
+        const bTime = getJobCompletionDate(b)?.getTime() || 0;
+        return bTime - aTime;
+      });
+  }, [jobs]);
+
+  const overdueJobs = useMemo(() => {
+    const now = new Date();
     const todayStart = startOfDay(now);
-    const weekEnd = endOfDay(addDays(now, 7));
+    const weekStart = startOfWeek(now);
 
     return jobs
       .filter((job) => !isClosedJob(job))
       .filter((job) => {
         if (!job.planned_start) return false;
         const planned = new Date(job.planned_start);
-        return planned >= todayStart && planned <= weekEnd;
-      })
-      .sort((a, b) => {
-        const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
-        const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
-        return aTime - bTime;
-      });
-  }, [jobs]);
-
-  const overdueJobs = useMemo(() => {
-    const todayStart = startOfDay(new Date());
-
-    return jobs
-      .filter((job) => !isClosedJob(job))
-      .filter((job) => {
-        if (!job.planned_start) return false;
-        return new Date(job.planned_start) < todayStart;
+        return planned >= weekStart && planned < todayStart;
       })
       .sort((a, b) => {
         const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
@@ -1061,11 +1850,21 @@ export default function OwnerDashboardHome() {
   }, [jobs]);
 
   const reportJobs = useMemo(() => {
+    const now = new Date();
+    const weekStart = startOfWeek(now);
+    const weekEnd = endOfWeek(now);
+
     return jobs
       .filter((job) => isOpenReportStatus(job.report_status))
+      .filter((job) => {
+        const relevantDate = job.planned_start || job.updated_at;
+        if (!relevantDate) return false;
+        const date = new Date(relevantDate);
+        return date >= weekStart && date <= weekEnd;
+      })
       .sort((a, b) => {
-        const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
-        const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
+        const aTime = new Date(a.planned_start || a.updated_at || 0).getTime();
+        const bTime = new Date(b.planned_start || b.updated_at || 0).getTime();
         return bTime - aTime;
       });
   }, [jobs]);
@@ -1089,7 +1888,7 @@ export default function OwnerDashboardHome() {
   const tabEmptyText: Record<DashboardTab, string> = {
     today: 'Heute sind keine Einsätze geplant.',
     live: 'Aktuell läuft kein Einsatz.',
-    week: 'In den nächsten 7 Tagen sind keine Einsätze geplant.',
+    week: 'In dieser Woche wurden noch keine Einsätze abgeschlossen.',
     overdue: 'Keine operativ relevanten überfälligen Einsätze.',
     reports: 'Keine offenen Berichte in der Einsatzliste.',
   };
@@ -1197,9 +1996,9 @@ export default function OwnerDashboardHome() {
             />
 
             <MetricCard
-              label="Neue Anfragen"
+              label="Offene Anfragen"
               value={stats.newInquiries}
-              subline="Website, Portal, WhatsApp"
+              subline="Kundenanfragen & Bewerbungen"
               icon={<MessageSquare size={17} />}
               href={`${baseUrl}/anfragen?filter=new`}
               tone={stats.newInquiries > 0 ? 'dark' : 'neutral'}
@@ -1226,31 +2025,75 @@ export default function OwnerDashboardHome() {
             <MetricCard
               label="Diese Woche"
               value={stats.jobsThisWeek}
-              subline="Nächste 7 Tage"
+              subline="Abgeschlossen"
               icon={<Clock3 size={17} />}
               href={`${baseUrl}/einsaetze?filter=week`}
             />
           </div>
 
-          <div className="opc-dashboard-list-heading">
-            <div style={{ minWidth: 0 }}>
+          <section className="opc-dashboard-jobs-section">
+            <div className="opc-dashboard-list-heading">
               <h2 style={sectionTitleStyle}>Einsätze</h2>
-              <p
+
+              <button
+                type="button"
+                onClick={() => navigateTo(`${baseUrl}/einsaetze`)}
                 style={{
-                  margin: '6px 0 0',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  minHeight: '42px',
+                  padding: '0 16px',
+                  borderRadius: '13px',
+                  background: '#FFFFFF',
+                  border: `1px solid ${BRAND.border}`,
                   color: BRAND.muted,
                   fontSize: '13px',
-                  fontWeight: 600,
-                  lineHeight: 1.45,
+                  fontWeight: 740,
+                  fontFamily: pageFont,
+                  whiteSpace: 'nowrap',
+                  cursor: 'pointer',
                 }}
               >
-                Heute, live laufende Einsätze, kommende Termine und offene Berichte.
-              </p>
+                Alle Einsätze
+                <ChevronRight size={15} />
+              </button>
             </div>
+
+            <div style={{ marginTop: '16px' }}>
+              <DashboardTabs activeTab={activeTab} onChange={setActiveTab} counts={tabCounts} />
+            </div>
+
+            {tabJobs.length === 0 ? (
+              <div style={{ marginTop: '14px' }}>
+                <EmptyState text={tabEmptyText[activeTab]} />
+              </div>
+            ) : (
+              <div
+                className="opc-dashboard-job-list"
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  maxHeight: '680px',
+                  overflowY: 'auto',
+                  padding: '14px 4px 2px 0',
+                }}
+              >
+                {tabJobs.slice(0, 20).map((job) => (
+                  <JobCard key={job.job_id} job={job} />
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="opc-dashboard-list-heading opc-finance-heading">
+            <h2 style={sectionTitleStyle}>Finanzen</h2>
 
             <button
               type="button"
-              onClick={() => navigateTo(`${baseUrl}/einsaetze`)}
+              onClick={() => navigateTo(`${baseUrl}/finanzen`)}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -1269,22 +2112,177 @@ export default function OwnerDashboardHome() {
                 cursor: 'pointer',
               }}
             >
-              Alle anzeigen
+              Alle Finanzen
               <ChevronRight size={15} />
             </button>
           </div>
 
-          <DashboardTabs activeTab={activeTab} onChange={setActiveTab} counts={tabCounts} />
+          <div className="opc-finance-metric-grid">
+            <MetricCard
+              label="Geschuldet gesamt"
+              value={formatMoney(finance.totalOutstanding)}
+              icon={<HandCoins size={17} />}
+              href={`${baseUrl}/rechnung?filter=open`}
+            />
+            <MetricCard
+              label="Offen, nicht überfällig"
+              value={formatMoney(finance.openOutstanding)}
+              icon={<Banknote size={17} />}
+              href={`${baseUrl}/rechnung?filter=open`}
+            />
+            <MetricCard
+              label="Offene Rechnungen"
+              value={finance.openInvoices}
+              icon={<ReceiptText size={17} />}
+              href={`${baseUrl}/rechnung?filter=open`}
+            />
+            <MetricCard
+              label="Überfällige Rechnungen"
+              value={finance.overdueInvoices}
+              icon={<AlertTriangle size={17} />}
+              href={`${baseUrl}/rechnung?filter=overdue`}
+            />
+            <MetricCard
+              label="Offene Offerten"
+              value={finance.openQuotes}
+              icon={<FileText size={17} />}
+              href={`${baseUrl}/offerten?filter=open`}
+            />
+            <MetricCard
+              label="Monatseinnahmen"
+              value={formatMoney(finance.monthlyRevenue)}
+              icon={<WalletCards size={17} />}
+              href={`${baseUrl}/finanzen`}
+            />
+            <MetricCard
+              label={finance.expensesTracked ? 'Monatsausgaben' : 'Monatsausgaben'}
+              value={formatMoney(finance.monthlyExpenses)}
+              icon={<Banknote size={17} />}
+              href={`${baseUrl}/finanzen?section=expenses`}
+            />
+            <MetricCard
+              label="Mitarbeiter gesamt"
+              value={finance.activeEmployees}
+              icon={<Users size={17} />}
+              href={`${baseUrl}/mitarbeiter`}
+            />
+            <MetricCard
+              label="Löhne dieses Monats"
+              value={formatMoney(finance.payrollDue)}
+              icon={<HandCoins size={17} />}
+              href={`${baseUrl}/finanzen?section=payroll`}
+            />
+          </div>
 
-          {tabJobs.length === 0 ? (
-            <EmptyState text={tabEmptyText[activeTab]} />
-          ) : (
-            <div className="opc-dashboard-job-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {tabJobs.slice(0, 8).map((job) => (
-                <JobCard key={job.job_id} job={job} />
-              ))}
-            </div>
-          )}
+          <div className="opc-finance-actions-grid" aria-label="Finanzvorschau auswählen">
+            <FinanceTabButton
+              active={activeFinanceTab === 'invoices'}
+              label="Rechnungen"
+              icon={<ReceiptText size={17} />}
+              onClick={() => setActiveFinanceTab('invoices')}
+            />
+            <FinanceTabButton
+              active={activeFinanceTab === 'quotes'}
+              label="Offerten"
+              icon={<FileText size={17} />}
+              onClick={() => setActiveFinanceTab('quotes')}
+            />
+            <FinanceTabButton
+              active={activeFinanceTab === 'payroll'}
+              label="Löhne"
+              icon={<HandCoins size={17} />}
+              onClick={() => setActiveFinanceTab('payroll')}
+            />
+            <FinanceTabButton
+              active={activeFinanceTab === 'finance'}
+              label="Finanzen"
+              icon={<WalletCards size={17} />}
+              onClick={() => setActiveFinanceTab('finance')}
+            />
+            <FinanceTabButton
+              active={activeFinanceTab === 'reminders'}
+              label="Mahnungen"
+              icon={<AlertTriangle size={17} />}
+              onClick={() => setActiveFinanceTab('reminders')}
+            />
+          </div>
+
+          <section className="opc-finance-preview-section" aria-live="polite">
+            {financeLoading &&
+            financePreviews.invoices.length === 0 &&
+            financePreviews.quotes.length === 0 &&
+            financePreviews.payroll.length === 0 ? (
+              <EmptyState text="Finanzvorschau wird geladen …" />
+            ) : activeFinanceTab === 'invoices' ? (
+              <>
+                <div className="opc-finance-preview-list">
+                  {financePreviews.invoices.length ? (
+                    financePreviews.invoices.map((item) => (
+                      <FinanceDocumentPreviewCard key={item.id} item={item} kind="invoice" />
+                    ))
+                  ) : (
+                    <EmptyState text="Keine Rechnungen für die Vorschau gefunden." />
+                  )}
+                </div>
+                <FinanceMoreButton href={`${baseUrl}/rechnungen`} label="Weitere Rechnungen" />
+              </>
+            ) : activeFinanceTab === 'quotes' ? (
+              <>
+                <div className="opc-finance-preview-list">
+                  {financePreviews.quotes.length ? (
+                    financePreviews.quotes.map((item) => (
+                      <FinanceDocumentPreviewCard key={item.id} item={item} kind="quote" />
+                    ))
+                  ) : (
+                    <EmptyState text="Keine Offerten für die Vorschau gefunden." />
+                  )}
+                </div>
+                <FinanceMoreButton href={`${baseUrl}/offerten`} label="Weitere Offerten" />
+              </>
+            ) : activeFinanceTab === 'payroll' ? (
+              <>
+                <div className="opc-finance-preview-list">
+                  {financePreviews.payroll.length ? (
+                    financePreviews.payroll.map((item) => <PayrollPreviewCard key={item.id} item={item} />)
+                  ) : (
+                    <EmptyState text="Für diesen Monat ist noch keine Lohnvorschau verfügbar." />
+                  )}
+                </div>
+                <FinanceMoreButton href={`${baseUrl}/finanzen?section=payroll`} label="Löhne öffnen" />
+              </>
+            ) : activeFinanceTab === 'reminders' ? (
+              <>
+                <div className="opc-finance-preview-list">
+                  {financePreviews.reminders.length ? (
+                    financePreviews.reminders.map((item) => (
+                      <FinanceDocumentPreviewCard key={item.id} item={item} kind="invoice" />
+                    ))
+                  ) : (
+                    <EmptyState text="Keine überfälligen Rechnungen gefunden." />
+                  )}
+                </div>
+                <FinanceMoreButton href={`${baseUrl}/rechnungen?filter=overdue`} label="Mahnungen öffnen" />
+              </>
+            ) : (
+              <>
+                <div className="opc-finance-overview-preview">
+                  <MetricCard
+                    label="Monatseinnahmen"
+                    value={formatMoney(finance.monthlyRevenue)}
+                    icon={<WalletCards size={17} />}
+                    href={`${baseUrl}/finanzen`}
+                  />
+                  <MetricCard
+                    label="Geschuldet gesamt"
+                    value={formatMoney(finance.totalOutstanding)}
+                    icon={<HandCoins size={17} />}
+                    href={`${baseUrl}/finanzen`}
+                  />
+                </div>
+                <FinanceMoreButton href={`${baseUrl}/finanzen`} label="Finanzen öffnen" />
+              </>
+            )}
+          </section>
         </main>
 
         <aside style={{ display: 'flex', flexDirection: 'column', gap: '14px', minWidth: 0 }}>
@@ -1295,71 +2293,28 @@ export default function OwnerDashboardHome() {
               <ActionButton href={`${baseUrl}/einsatz-planen`} icon={<Plus size={17} />} label="Einsatz planen" dark />
               <ActionButton href={`${baseUrl}/kunde-anlegen`} icon={<Users size={17} />} label="Kunde anlegen" />
               <ActionButton href={`${baseUrl}/berichte-dateien`} icon={<Upload size={17} />} label="Bericht prüfen" />
-              <ActionButton href={`${baseUrl}/anfragen-schaeden`} icon={<MessageSquare size={17} />} label="Anfrage / Schaden" />
+              <ActionButton href={`${baseUrl}/anfragen`} icon={<MessageSquare size={17} />} label="Anfragen öffnen" />
             </div>
           </section>
 
           <section style={{ ...cardStyle, padding: '20px' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                marginBottom: '16px',
-              }}
-            >
-              <div
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '12px',
-                  background: '#F9FAFB',
-                  border: `1px solid ${BRAND.border}`,
-                  color: stats.urgentItems > 0 ? BRAND.red : BRAND.black,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                }}
-              >
-                <AlertTriangle size={17} />
-              </div>
-
-              <div>
-                <h2 style={sectionTitleStyle}>Aufmerksamkeit</h2>
-                <p
-                  style={{
-                    margin: '4px 0 0',
-                    color: BRAND.muted,
-                    fontSize: '12px',
-                    fontWeight: 620,
-                  }}
-                >
-                  Punkte, die geprüft werden sollten
-                </p>
-              </div>
-            </div>
+            <h2 style={{ ...sectionTitleStyle, marginBottom: '16px' }}>Aufmerksamkeit</h2>
 
             <div style={{ display: 'grid', gap: '10px' }}>
               <MiniStat
                 label="Überfällige Einsätze"
                 value={stats.overdueJobs}
-                tone={stats.overdueJobs > 0 ? 'danger' : 'neutral'}
                 href={`${baseUrl}/einsaetze?filter=overdue`}
               />
-
               <MiniStat
                 label="Offene Berichte"
                 value={stats.openReports}
-                tone={stats.openReports > 0 ? 'warning' : 'neutral'}
                 href={`${baseUrl}/berichte-dateien?filter=open`}
               />
-
               <MiniStat
                 label="Ungelesene Nachrichten"
                 value={stats.unreadMessages}
-                tone={stats.unreadMessages > 0 ? 'dark' : 'neutral'}
-                href={`${baseUrl}/anfragen-schaeden?filter=unread`}
+                href={`${baseUrl}/anfragen?filter=unread`}
               />
             </div>
           </section>
@@ -1411,6 +2366,54 @@ export default function OwnerDashboardHome() {
           scrollbar-width: none;
         }
 
+        .opc-dashboard-job-list {
+          scrollbar-width: thin;
+          scrollbar-color: ${BRAND.borderStrong} transparent;
+        }
+
+        .opc-dashboard-job-list::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .opc-dashboard-job-list::-webkit-scrollbar-thumb {
+          background: ${BRAND.borderStrong};
+          border-radius: 999px;
+        }
+
+        .opc-finance-heading {
+          margin-top: 8px;
+        }
+
+        .opc-finance-metric-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .opc-finance-actions-grid {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .opc-finance-preview-section {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+
+        .opc-finance-preview-list {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        .opc-finance-overview-preview {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+
         .opc-dashboard-metric-card:focus-visible {
           outline: 2px solid ${BRAND.black};
           outline-offset: 2px;
@@ -1423,6 +2426,14 @@ export default function OwnerDashboardHome() {
 
           .opc-metric-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .opc-finance-metric-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          }
+
+          .opc-finance-actions-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
           }
         }
 
@@ -1457,6 +2468,14 @@ export default function OwnerDashboardHome() {
             flex: 1 1 0 !important;
             padding: 0 10px !important;
             font-size: 13px !important;
+          }
+
+          .opc-finance-metric-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .opc-finance-actions-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
           }
         }
 
@@ -1510,6 +2529,15 @@ export default function OwnerDashboardHome() {
             flex-direction: row !important;
             align-items: center !important;
             justify-content: space-between !important;
+          }
+
+          .opc-dashboard-jobs-section {
+            padding: 16px !important;
+          }
+
+          .opc-finance-metric-grid,
+          .opc-finance-actions-grid {
+            grid-template-columns: 1fr !important;
           }
         }
       `}</style>
