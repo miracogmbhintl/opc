@@ -186,6 +186,23 @@ function documentLines(value: unknown) {
     .filter(Boolean);
 }
 
+const OPC_DOCUMENT_SPACER = '[[OPC_SPACER]]';
+
+function richDocumentLines(value: unknown) {
+  const source = String(value ?? '').replace(/\r\n?/g, '\n');
+  if (!source.trim()) return [];
+
+  const lines = source.split('\n');
+
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+  return lines.map((line) => {
+    const normalized = line.trim();
+    return normalized || OPC_DOCUMENT_SPACER;
+  });
+}
+
 function editableIntroParagraphs(value: unknown, salutation: string) {
   const intro = paragraphs(value);
   if (!intro.length) {
@@ -481,7 +498,7 @@ function mapItems(items: OPCDocumentItem[]) {
 function quoteServiceDescriptionParagraphs(quote: any) {
   const mode = clean(quote.service_description_mode || 'embedded');
   const embedded = mode === 'embedded' || mode === 'embedded_and_separate';
-  return embedded ? documentLines(quote.service_description_text) : [];
+  return embedded ? richDocumentLines(quote.service_description_text) : [];
 }
 
 
@@ -707,7 +724,7 @@ function buildOfferData(input: OPCQuotePdfInput) {
       key: 'scope',
       // Optionaler zusätzlicher Leistungsumfang folgt erst danach.
       title: 'Leistungsumfang',
-      paragraphs: documentLines(quote.scope_text),
+      paragraphs: richDocumentLines(quote.scope_text),
     },
   ].filter((section) => section.paragraphs.length > 0);
 
@@ -715,12 +732,12 @@ function buildOfferData(input: OPCQuotePdfInput) {
     {
       key: 'conditions',
       title: 'Bedingungen',
-      paragraphs: documentLines(quote.terms_text),
+      paragraphs: richDocumentLines(quote.terms_text),
     },
     {
       key: 'payment-conditions',
       title: 'Zahlungsbedingungen',
-      paragraphs: documentLines(quote.payment_terms),
+      paragraphs: richDocumentLines(quote.payment_terms),
     },
   ].filter((section) => section.paragraphs.length > 0);
 
@@ -1339,7 +1356,7 @@ async function renderHtmlInBrowserToPdfBase64(
       const rect = page.getBoundingClientRect();
       const canvas = await html2canvas(page, {
         backgroundColor: '#ffffff',
-        scale: 3,
+        scale: Math.min(2, Math.max(1.5, Number(window.devicePixelRatio || 1.5))),
         useCORS: true,
         allowTaint: false,
         logging: false,
@@ -1359,6 +1376,9 @@ async function renderHtmlInBrowserToPdfBase64(
 
       const pageImage = canvas.toDataURL('image/png');
       pdf.addImage(pageImage, 'PNG', 0, 0, 210, 297, `opc-page-${index + 1}`, 'FAST');
+
+      canvas.width = 1;
+      canvas.height = 1;
 
       const pageLinks = Array.from(
         page.querySelectorAll<HTMLAnchorElement>(
@@ -1480,8 +1500,16 @@ export function downloadBase64Pdf(base64: string, filename: string) {
   const blob = new Blob([bytes], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
+
   anchor.href = url;
   anchor.download = filename;
+  anchor.style.display = 'none';
+
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+
+  window.setTimeout(() => {
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }, 1500);
 }

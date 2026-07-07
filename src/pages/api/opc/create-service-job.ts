@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { getOpcSupabaseUrl, getOpcSupabaseAnonKey, getOpcSupabaseServiceRoleKey } from '../../../lib/opc-server-env';
+import { resolveOpcAssignmentCandidates } from '../../../lib/opc-assignment-candidates';
 
 export const prerender = false;
 
@@ -281,15 +282,30 @@ function buildAssignmentVariants({
   userId?: string | null;
 }) {
   const now = new Date().toISOString();
-  const employeeStaffId = employee.id;
+  const employeeStaffId = employee.staff_role_id || null;
   const employeeUserId = employee.user_id || null;
-  const employeeExternalId = employee.employee_id || null;
+  const employeeExternalId = employee.employee_id || employee.id || null;
   const assignedBy = staffRoleId || userId || null;
 
   return [
     {
       job_id: jobId,
-      employee_id: employeeExternalId || employeeStaffId,
+      employee_id: employeeExternalId,
+      staff_role_id: employeeStaffId,
+      user_id: employeeUserId,
+      employee_name: employee.display_name || employee.email || 'Mitarbeiter',
+      employee_email: employee.email || null,
+      employee_phone: employee.phone_e164 || employee.phone_raw || null,
+      status: 'assigned',
+      notes: note || null,
+      assigned_by: assignedBy,
+      created_at: now,
+      updated_at: now,
+    },
+    {
+      job_id: jobId,
+      employee_id: employeeExternalId,
+      user_id: employeeUserId,
       status: 'assigned',
       notes: note || null,
       assigned_by: assignedBy,
@@ -299,6 +315,7 @@ function buildAssignmentVariants({
     {
       job_id: jobId,
       staff_role_id: employeeStaffId,
+      user_id: employeeUserId,
       status: 'assigned',
       notes: note || null,
       assigned_by: assignedBy,
@@ -332,19 +349,14 @@ function buildAssignmentVariants({
       created_at: now,
       updated_at: now,
     },
-    {
-      job_id: jobId,
-      employee_id: employeeExternalId || employeeStaffId,
-      status: 'assigned',
-      created_at: now,
-    },
-    {
-      job_id: jobId,
-      staff_role_id: employeeStaffId,
-      status: 'assigned',
-      created_at: now,
-    },
-  ];
+  ].filter(
+    (payload) =>
+      Boolean(payload.employee_id) ||
+      Boolean(payload.staff_role_id) ||
+      Boolean(payload.staff_id) ||
+      Boolean(payload.user_id) ||
+      Boolean(payload.assigned_to),
+  );
 }
 
 
@@ -473,9 +485,11 @@ async function findOrCreateTeamCalendar(adminClient: any, userId: string, staffR
 }
 
 async function findEmployeeCalendar(adminClient: any, employee: JsonRecord) {
-  const staffRoleId = employee.id ? String(employee.id) : null;
+  const staffRoleId = employee.staff_role_id ? String(employee.staff_role_id) : null;
   const userId = employee.user_id ? String(employee.user_id) : null;
-  const employeeId = employee.employee_id ? String(employee.employee_id) : null;
+  const employeeId = employee.employee_id || employee.id
+    ? String(employee.employee_id || employee.id)
+    : null;
 
   const attempts: Array<{ select: string; apply?: (query: any) => any }> = [];
 
@@ -632,9 +646,9 @@ function buildCalendarAttendeeVariants({
   return [
     {
       event_id: eventId,
-      staff_role_id: employee.id || null,
+      staff_role_id: employee.staff_role_id || null,
       user_id: employee.user_id || null,
-      employee_id: employee.employee_id || null,
+      employee_id: employee.employee_id || employee.id || null,
       email: employee.email || null,
       display_name: name,
       response_status: 'accepted',
@@ -645,7 +659,7 @@ function buildCalendarAttendeeVariants({
     },
     {
       calendar_event_id: eventId,
-      attendee_staff_role_id: employee.id || null,
+      attendee_staff_role_id: employee.staff_role_id || null,
       attendee_user_id: employee.user_id || null,
       attendee_email: employee.email || null,
       response_status: 'accepted',
@@ -1046,12 +1060,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let employeeRows: JsonRecord[] = [];
 
     if (assignedEmployeeIds.length > 0) {
-      const { data: employees } = await adminClient
-        .from('opc_staff_roles')
-        .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,role,status')
-        .in('id', assignedEmployeeIds);
+      employeeRows = await resolveOpcAssignmentCandidates(
+        adminClient,
+        assignedEmployeeIds,
+      );
 
-      employeeRows = Array.isArray(employees) ? employees : [];
+      if (employeeRows.length !== new Set(assignedEmployeeIds).size) {
+        return jsonResponse(
+          {
+            error:
+              'Mindestens ein ausgewählter Mitarbeiter ist nicht mehr verfügbar oder darf nicht zugewiesen werden. Bitte laden Sie die Mitarbeiterauswahl neu.',
+          },
+          400,
+        );
+      }
+
       const assignmentNote = optionalString(body.assignment_note);
 
       for (const jobId of jobIds) {

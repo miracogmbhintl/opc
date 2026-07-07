@@ -37,8 +37,11 @@ interface SiteOption {
 
 interface EmployeeOption {
   id: string;
+  source?: 'employee' | 'staff' | string;
   user_id?: string | null;
   employee_id?: string | null;
+  staff_role_id?: string | null;
+  employee_number?: string | null;
   display_name?: string | null;
   email?: string | null;
   phone_e164?: string | null;
@@ -46,6 +49,7 @@ interface EmployeeOption {
   whatsapp_wa_id?: string | null;
   role?: string | null;
   status?: string | null;
+  assignment_status?: string | null;
 }
 
 type RecurrenceType = 'none' | 'daily' | 'weekdays' | 'monthly_count';
@@ -521,30 +525,43 @@ export default function CreateProjectForm() {
     setLoadingEmployees(true);
 
     try {
-      const { data, error } = await supabase
-        .from('opc_staff_roles')
-        .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,whatsapp_wa_id,role,status')
-        .order('display_name', { ascending: true });
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-      if (error) throw new Error(error.message);
+      if (sessionError || !session?.access_token) {
+        throw new Error('Sitzung ist abgelaufen.');
+      }
 
-      const rows = ((data || []) as EmployeeOption[]).filter((employee) => {
-        const role = normalize(employee.role);
-        const status = normalize(employee.status);
-        const isEmployee =
-          role === 'employee' ||
-          role === 'mitarbeiter' ||
-          role === 'cleaner' ||
-          role === 'reinigung' ||
-          role === '';
-        const isActive =
-          !status || status === 'active' || status === 'aktiv' || status === 'enabled';
+      const response = await fetch(
+        `${baseUrl}/api/opc/assignment-candidates`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: 'no-store',
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
 
-        return employee.id && isEmployee && isActive;
-      });
+      if (!response.ok) {
+        throw new Error(
+          payload?.error ||
+            'Mitarbeiter konnten nicht geladen werden.',
+        );
+      }
 
-      setEmployees(rows);
-    } catch {
+      setEmployees(
+        Array.isArray(payload?.candidates)
+          ? (payload.candidates as EmployeeOption[])
+          : [],
+      );
+    } catch (error) {
+      console.error(
+        '[CreateProjectForm] assignment candidates failed',
+        error,
+      );
       setEmployees([]);
     } finally {
       setLoadingEmployees(false);

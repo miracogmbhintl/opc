@@ -411,19 +411,35 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
     try {
       if (!supabase) throw new Error('Supabase ist nicht verfügbar.');
 
-      const [quoteResponse, itemsResponse, templatesResponse] = await Promise.all([
+      const [quoteResponse, itemsResponse] = await Promise.all([
         supabase.from('opc_quotes').select('*').eq('id', quoteId).single(),
         supabase.from('opc_quote_items').select('*').eq('quote_id', quoteId).order('sort_order', { ascending: true }),
-        supabase.from('opc_service_description_templates').select('*').eq('status', 'active').order('title', { ascending: true }),
       ]);
 
       if (quoteResponse.error) throw quoteResponse.error;
       if (itemsResponse.error) throw itemsResponse.error;
-      if (templatesResponse.error) console.warn(templatesResponse.error.message);
 
       setQuote(normalizeQuoteAfterLoad(quoteResponse.data));
       setItems(itemsResponse.data || []);
-      setTemplates(templatesResponse.data || []);
+
+      void (async () => {
+        try {
+          const templatesResponse = await supabase
+            .from('opc_service_description_templates')
+            .select('*')
+            .eq('status', 'active')
+            .order('title', { ascending: true });
+
+          if (templatesResponse.error) {
+            console.warn('Offertenvorlagen konnten nicht geladen werden:', templatesResponse.error.message);
+            return;
+          }
+
+          setTemplates(templatesResponse.data || []);
+        } catch (templateError) {
+          console.warn('Offertenvorlagen konnten nicht geladen werden:', templateError);
+        }
+      })();
     } catch (error: any) {
       setErrorMessage(error?.message || 'Offerte konnte nicht geladen werden.');
     } finally {
@@ -569,9 +585,11 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
       const validUntil = quote.valid_until || addDays(issueDate, 14);
       const status = nextStatus || quote.status || 'draft';
       const correctedQuoteNumber = clean(quote.quote_number);
+      const now = new Date().toISOString();
 
       if (DOCUMENT_CORRECTION_MODE) {
         if (!correctedQuoteNumber) throw new Error('Die Offertennummer darf im Korrekturmodus nicht leer sein.');
+
         const { data: duplicate, error: duplicateError } = await supabase
           .from('opc_quotes')
           .select('id, quote_number')
@@ -579,6 +597,7 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           .neq('id', quote.id)
           .limit(1)
           .maybeSingle();
+
         if (duplicateError) throw duplicateError;
         if (duplicate) throw new Error(`Die Offertennummer ${correctedQuoteNumber} wird bereits verwendet.`);
       }
@@ -605,20 +624,17 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         tax_rate: roundMoney(totals.taxRate),
         tax_chf: roundMoney(totals.tax),
         total_chf: roundMoney(totals.total),
-        sent_at: nextStatus === 'sent' && !quote.sent_at ? new Date().toISOString() : quote.sent_at || null,
-        accepted_at: nextStatus === 'accepted' && !quote.accepted_at ? new Date().toISOString() : quote.accepted_at || null,
-        updated_at: new Date().toISOString(),
+        sent_at: nextStatus === 'sent' && !quote.sent_at ? now : quote.sent_at || null,
+        accepted_at: nextStatus === 'accepted' && !quote.accepted_at ? now : quote.accepted_at || null,
+        updated_at: now,
         metadata: {
           ...getMetadata(quote),
           price_input_mode: priceInputMode,
         },
       };
 
-      const { error: quoteError } = await supabase.from('opc_quotes').update(quotePayload).eq('id', quote.id);
-      if (quoteError) throw quoteError;
-
-      for (const [index, item] of items.entries()) {
-        const itemPayload = {
+      const preparedItems = items.map((item, index) => {
+        const payload = {
           quote_id: quote.id,
           sort_order: index + 1,
           item_type: item.item_type || 'service',
@@ -632,39 +648,111 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           subtotal_chf: roundMoney(toNumber(item.subtotal_chf)),
           tax_chf: roundMoney(toNumber(item.tax_chf)),
           total_chf: roundMoney(toNumber(item.total_chf)),
-          updated_at: new Date().toISOString(),
+          updated_at: now,
           metadata: {
             ...getMetadata(item),
             input_price_mode: priceInputMode,
           },
         };
 
-        if (String(item.id).startsWith('local-')) {
-          const { error } = await supabase.from('opc_quote_items').insert(itemPayload);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from('opc_quote_items').update(itemPayload).eq('id', item.id);
-          if (error) throw error;
-        }
-      }
-
-      await supabase.from('opc_quote_events').insert({
-        quote_id: quote.id,
-        client_id: quote.client_id,
-        event_type: nextStatus && nextStatus !== quote.status ? 'status_changed' : 'updated',
-        message: nextStatus && nextStatus !== quote.status ? `Status auf ${nextStatus} geändert.` : 'Offerte gespeichert.',
-        previous_status: quote.status || null,
-        new_status: status,
+        return {
+          item,
+          payload,
+          isLocal: Boolean(item.isLocal) || String(item.id || '').startsWith('local-'),
+        };
       });
 
-      const savedTime = new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+      const { data: savedQuote, error: quoteError } = await supabase
+        .from('opc_quotes')
+        .update(quotePayload)
+        .eq('id', quote.id)
+        .select('*')
+        .single();
+
+      if (quoteError) throw quoteError;
+
+      const existingPayloads = preparedItems
+        .filter((entry) => !entry.isLocal)
+        .map((entry) => ({
+          id: entry.item.id,
+          ...entry.payload,
+        }));
+
+      const newPayloads = preparedItems
+        .filter((entry) => entry.isLocal)
+        .map((entry) => entry.payload);
+
+      const existingRequest = existingPayloads.length
+        ? supabase
+            .from('opc_quote_items')
+            .upsert(existingPayloads, { onConflict: 'id' })
+            .select('*')
+        : Promise.resolve({ data: [] as QuoteItem[], error: null });
+
+      const newRequest = newPayloads.length
+        ? supabase
+            .from('opc_quote_items')
+            .insert(newPayloads)
+            .select('*')
+        : Promise.resolve({ data: [] as QuoteItem[], error: null });
+
+      const [existingResponse, newResponse] = await Promise.all([
+        existingRequest,
+        newRequest,
+      ]);
+
+      if (existingResponse.error) throw existingResponse.error;
+      if (newResponse.error) throw newResponse.error;
+
+      const savedItems = [
+        ...(existingResponse.data || []),
+        ...(newResponse.data || []),
+      ].sort((left: QuoteItem, right: QuoteItem) =>
+        Number(left.sort_order || 0) - Number(right.sort_order || 0)
+      );
+
+      setItems(savedItems);
+
+      const nextQuote = normalizeQuoteAfterLoad(
+        savedQuote || {
+          ...quote,
+          ...quotePayload,
+        },
+      );
+
+      setQuote(nextQuote);
+
+      const { error: eventError } = await supabase
+        .from('opc_quote_events')
+        .insert({
+          quote_id: quote.id,
+          client_id: quote.client_id,
+          event_type: nextStatus && nextStatus !== quote.status ? 'status_changed' : 'updated',
+          message: nextStatus && nextStatus !== quote.status ? `Status auf ${nextStatus} geändert.` : 'Offerte gespeichert.',
+          previous_status: quote.status || null,
+          new_status: status,
+        });
+
+      if (eventError) {
+        console.warn('Offerten-Ereignis konnte nicht protokolliert werden:', eventError.message);
+      }
+
+      const savedTime = new Date().toLocaleTimeString('de-CH', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);
 
-      await loadQuote({ clearMessages: false });
-      return { ...quote, ...quotePayload };
+      return nextQuote;
     } catch (error: any) {
-      setErrorMessage(error?.message || 'Offerte konnte nicht gespeichert werden.');
+      const message =
+        error?.message === 'Load failed' || error?.message === 'Failed to fetch'
+          ? 'Die Verbindung wurde während des Speicherns unterbrochen. Bitte nochmals versuchen.'
+          : error?.message || 'Offerte konnte nicht gespeichert werden.';
+
+      setErrorMessage(message);
       throw error;
     } finally {
       setSaving(false);
@@ -1110,48 +1198,96 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   }
 
   async function handleDownloadQuotePdf() {
+    if (!quote || saving || creatingAction !== '') return;
+
+    setCreatingAction('quote_pdf');
+    setErrorMessage('');
+    setSuccessMessage('');
+
     try {
-      await saveQuote(undefined, { silent: true });
-      const filename = buildQuoteFileName(quote!, 'Offerte');
+      const savedQuote = await saveQuote(undefined, { silent: true });
+      const filename = buildQuoteFileName(savedQuote || quote, 'Offerte');
       const input = buildQuotePdfInput('quote');
 
-      if (input) {
+      if (!input) throw new Error('PDF-Daten konnten nicht vorbereitet werden.');
+
+      let downloaded = false;
+
+      try {
         const html = buildQuoteHtml(input);
         const rendered = await renderHtmlToPdfBase64(html, filename);
 
         if (rendered?.base64) {
           downloadBase64Pdf(rendered.base64, filename);
-        } else {
-          const doc = await generateQuotePdf('quote');
-          if (doc) downloadPdf(doc, filename);
+          downloaded = true;
         }
+      } catch (rendererError) {
+        console.warn('HTML-PDF-Renderer fehlgeschlagen; Standard-PDF wird verwendet.', rendererError);
       }
+
+      if (!downloaded) {
+        const doc = await generateQuotePdf('quote');
+        if (!doc) throw new Error('PDF konnte nicht erstellt werden.');
+        downloadPdf(doc, filename);
+      }
+
       setSuccessMessage('PDF wurde erstellt.');
-    } catch {
-      // error already shown
+    } catch (error: any) {
+      const message =
+        error?.message === 'Load failed' || error?.message === 'Failed to fetch'
+          ? 'Die PDF-Komponenten konnten nicht geladen werden. Bitte die Seite neu laden und nochmals versuchen.'
+          : error?.message || 'PDF konnte nicht erstellt werden.';
+
+      setErrorMessage(message);
+    } finally {
+      setCreatingAction('');
     }
   }
 
   async function handleDownloadOrderConfirmation() {
+    if (!quote || saving || creatingAction !== '') return;
+
+    setCreatingAction('order_confirmation_pdf');
+    setErrorMessage('');
+    setSuccessMessage('');
+
     try {
-      await saveQuote('accepted', { silent: true });
-      const filename = buildQuoteFileName(quote!, 'Auftragsbestaetigung');
+      const savedQuote = await saveQuote('accepted', { silent: true });
+      const filename = buildQuoteFileName(savedQuote || quote, 'Auftragsbestaetigung');
       const input = buildQuotePdfInput('order_confirmation');
 
-      if (input) {
+      if (!input) throw new Error('PDF-Daten konnten nicht vorbereitet werden.');
+
+      let downloaded = false;
+
+      try {
         const html = buildQuoteHtml(input);
         const rendered = await renderHtmlToPdfBase64(html, filename);
 
         if (rendered?.base64) {
           downloadBase64Pdf(rendered.base64, filename);
-        } else {
-          const doc = await generateQuotePdf('order_confirmation');
-          if (doc) downloadPdf(doc, filename);
+          downloaded = true;
         }
+      } catch (rendererError) {
+        console.warn('HTML-PDF-Renderer fehlgeschlagen; Standard-PDF wird verwendet.', rendererError);
       }
+
+      if (!downloaded) {
+        const doc = await generateQuotePdf('order_confirmation');
+        if (!doc) throw new Error('Auftragsbestätigung konnte nicht erstellt werden.');
+        downloadPdf(doc, filename);
+      }
+
       setSuccessMessage('Auftragsbestätigung wurde erstellt.');
-    } catch {
-      // error already shown
+    } catch (error: any) {
+      const message =
+        error?.message === 'Load failed' || error?.message === 'Failed to fetch'
+          ? 'Die PDF-Komponenten konnten nicht geladen werden. Bitte die Seite neu laden und nochmals versuchen.'
+          : error?.message || 'Auftragsbestätigung konnte nicht erstellt werden.';
+
+      setErrorMessage(message);
+    } finally {
+      setCreatingAction('');
     }
   }
 
@@ -1932,7 +2068,16 @@ function EditableTextArea({
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  function formatSelectedLines(mode: 'bullet' | 'plain') {
+  function restoreSelection(start: number, end: number) {
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(start, end);
+    });
+  }
+
+  function formatSelectedLines(mode: 'bullet' | 'plain' | 'heading') {
     const textarea = textareaRef.current;
     if (!textarea) return;
 
@@ -1945,28 +2090,96 @@ function EditableTextArea({
     const sourceLines = selectedBlock ? selectedBlock.split('\n') : [''];
 
     const formattedLines = sourceLines.map((line) => {
-      const plainLine = line.replace(/^\s*[•*-]\s*/, '');
-      return mode === 'bullet' ? `• ${plainLine}` : plainLine;
+      const plainLine = line
+        .replace(/^\s*(?:[•*-]\s+|#{1,3}\s+)/, '')
+        .trimEnd();
+
+      if (mode === 'bullet') return `• ${plainLine}`;
+      if (mode === 'heading') return `## ${plainLine}`;
+      return plainLine;
     });
+
     const replacement = formattedLines.join('\n');
     const nextValue = `${value.slice(0, lineStart)}${replacement}${value.slice(lineEnd)}`;
 
     onChange(nextValue);
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(lineStart, lineStart + replacement.length);
-    });
+    restoreSelection(lineStart, lineStart + replacement.length);
   }
+
+  function formatBold() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? start;
+    const selected = value.slice(start, end);
+    const replacement = selected ? `**${selected}**` : '****';
+    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+
+    onChange(nextValue);
+
+    if (selected) {
+      restoreSelection(start, start + replacement.length);
+    } else {
+      restoreSelection(start + 2, start + 2);
+    }
+  }
+
+  function insertParagraphSpacing() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? value.length;
+    const end = textarea.selectionEnd ?? start;
+    const replacement = '\n\n';
+    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+
+    onChange(nextValue);
+    restoreSelection(start + replacement.length, start + replacement.length);
+  }
+
+  const preventToolbarBlur = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
 
   return (
     <label style={wide ? { gridColumn: '1 / -1' } : undefined}>
       <span style={labelStyle}>{label}</span>
+
       <div style={editorToolbarStyle}>
-        <button type="button" onClick={() => formatSelectedLines('bullet')} style={editorToolButtonStyle}>• Aufzählung</button>
-        <button type="button" onClick={() => formatSelectedLines('plain')} style={editorToolButtonStyle}>Text</button>
-        {onAction && actionLabel ? <button type="button" onClick={onAction} style={editorToolButtonStyle}>{actionLabel}</button> : null}
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={() => formatSelectedLines('heading')} style={editorToolButtonStyle}>
+          Überschrift
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={formatBold} style={editorToolButtonStyle}>
+          Fett
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={() => formatSelectedLines('bullet')} style={editorToolButtonStyle}>
+          • Aufzählung
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={() => formatSelectedLines('plain')} style={editorToolButtonStyle}>
+          Normaler Text
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={insertParagraphSpacing} style={editorToolButtonStyle}>
+          Absatzabstand
+        </button>
+        {onAction && actionLabel ? (
+          <button type="button" onMouseDown={preventToolbarBlur} onClick={onAction} style={editorToolButtonStyle}>
+            {actionLabel}
+          </button>
+        ) : null}
       </div>
-      <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} rows={5} style={textareaStyle} />
+
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={wide ? 12 : 8}
+        style={textareaStyle}
+      />
+
+      <span style={editorHintStyle}>
+        Leerzeilen bleiben im PDF erhalten. Überschriften und markierter fetter Text werden ebenfalls übernommen.
+      </span>
     </label>
   );
 }
@@ -2024,6 +2237,14 @@ const editorToolButtonStyle: CSSProperties = {
   fontSize: 11,
   fontWeight: 750,
   cursor: 'pointer',
+};
+
+const editorHintStyle: CSSProperties = {
+  display: 'block',
+  marginTop: 7,
+  color: OPC_BRAND.muted,
+  fontSize: 11,
+  lineHeight: 1.4,
 };
 
 const detailTopBarStyle: CSSProperties = {
@@ -2162,7 +2383,7 @@ const cardTitleStyle: CSSProperties = { margin: 0, fontSize: 15, fontWeight: 820
 const cardHeaderWithActionStyle: CSSProperties = { padding: '0 20px', minHeight: 76, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, borderBottom: `1px solid ${OPC_BRAND.border}` };
 const labelStyle: CSSProperties = { display: 'block', fontSize: 12, fontWeight: 760, color: OPC_BRAND.faint, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 7 };
 const inputStyle: CSSProperties = { ...opcInputStyle, height: 46 };
-const textareaStyle: CSSProperties = { ...opcInputStyle, minHeight: 108, height: 'auto', resize: 'vertical', paddingTop: 12, lineHeight: 1.45 };
+const textareaStyle: CSSProperties = { ...opcInputStyle, minHeight: 180, height: 'auto', resize: 'vertical', paddingTop: 12, lineHeight: 1.55, whiteSpace: 'pre-wrap' };
 const itemsStackStyle: CSSProperties = { padding: 20, display: 'grid', gap: 14 };
 const itemCardStyle: CSSProperties = { border: `1px solid ${OPC_BRAND.border}`, borderRadius: 16, padding: 16, background: '#FAFAFA' };
 const itemGridStyle: CSSProperties = { display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) 120px 100px 160px minmax(0, 1.6fr) 130px 44px', gap: 12, alignItems: 'end' };

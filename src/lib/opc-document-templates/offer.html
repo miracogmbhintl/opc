@@ -25,6 +25,8 @@
       color: var(--text);
       font-family: var(--font);
       font-weight: 400;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
@@ -151,6 +153,36 @@
     }
 
     .document-section p:last-child { margin-bottom: 0; }
+
+    .document-subheading {
+      margin: 2.8mm 0 1.2mm;
+      font-size: 11pt;
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    .document-section-title + .document-subheading {
+      margin-top: 1.5mm;
+    }
+
+    .document-bullet {
+      margin: 0 0 1.05mm;
+      padding-left: 4mm;
+      text-indent: -4mm;
+      line-height: 1.2;
+    }
+
+    .document-spacer {
+      height: 2.8mm;
+      min-height: 2.8mm;
+    }
+
+    .document-section strong,
+    .final-section strong,
+    .paragraphs strong,
+    .closing-exact strong {
+      font-weight: 700;
+    }
 
     .offer-table {
       width: 100%;
@@ -556,6 +588,93 @@
       });
     }
 
+    const OPC_DOCUMENT_SPACER = "[[OPC_SPACER]]";
+
+    function setRichText(target, value) {
+      target.replaceChildren();
+      const text = String(value || "");
+      const parts = text.split(/(\*\*[^*]+\*\*)/g);
+
+      parts.forEach(part => {
+        if (!part) return;
+
+        if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+          const strong = document.createElement("strong");
+          strong.textContent = part.slice(2, -2);
+          target.appendChild(strong);
+          return;
+        }
+
+        target.appendChild(document.createTextNode(part));
+      });
+    }
+
+    function classifyContentLine(value, nextValue = "") {
+      const raw = String(value || "").trim();
+      const next = String(nextValue || "").trim();
+
+      if (raw === OPC_DOCUMENT_SPACER) {
+        return { kind: "spacer", text: "" };
+      }
+
+      const explicitHeading = raw.match(/^#{1,3}\s+(.+)$/);
+      if (explicitHeading) {
+        return { kind: "heading", text: explicitHeading[1].trim() };
+      }
+
+      if (/^\d+\.\s+\S/.test(raw)) {
+        return { kind: "heading", text: raw };
+      }
+
+      const bullet = raw.match(/^[•*-]\s+(.+)$/);
+      if (bullet) {
+        return { kind: "bullet", text: bullet[1].trim() };
+      }
+
+      const looksLikeSubheading =
+        raw.length <= 90 &&
+        raw.split(/\s+/).length <= 10 &&
+        !/[.!?:;]$/.test(raw) &&
+        /^[•*-]\s+/.test(next);
+
+      if (looksLikeSubheading) {
+        return { kind: "heading", text: raw };
+      }
+
+      return { kind: "paragraph", text: raw };
+    }
+
+    function appendRichLine(container, value, nextValue = "") {
+      const classified = classifyContentLine(value, nextValue);
+
+      if (classified.kind === "spacer") {
+        const spacer = document.createElement("div");
+        spacer.className = "document-spacer";
+        spacer.setAttribute("aria-hidden", "true");
+        container.appendChild(spacer);
+        return;
+      }
+
+      if (classified.kind === "heading") {
+        const heading = document.createElement("h3");
+        heading.className = "document-subheading";
+        setRichText(heading, classified.text);
+        container.appendChild(heading);
+        return;
+      }
+
+      const paragraph = document.createElement("p");
+
+      if (classified.kind === "bullet") {
+        paragraph.className = "document-bullet";
+        setRichText(paragraph, `• ${classified.text}`);
+      } else {
+        setRichText(paragraph, classified.text);
+      }
+
+      container.appendChild(paragraph);
+    }
+
     function renderParagraphs(target, paragraphs) {
       target.replaceChildren();
       const normalized = Array.isArray(paragraphs)
@@ -564,7 +683,7 @@
 
       normalized.filter(hasValue).forEach(text => {
         const paragraph = document.createElement("p");
-        paragraph.textContent = text;
+        setRichText(paragraph, text);
         target.appendChild(paragraph);
       });
     }
@@ -603,14 +722,36 @@
     function contentUnits(data) {
       return normalizeContentSections(data).flatMap(section =>
         section.paragraphs.flatMap((paragraph, paragraphIndex) => {
-          const text = String(paragraph || "").trim();
-          if (!text) return [];
+          const rawText = String(paragraph || "");
+          const nextText =
+            section.paragraphs
+              .slice(paragraphIndex + 1)
+              .find(value => {
+                const normalized = String(value || "").trim();
+                return normalized && normalized !== OPC_DOCUMENT_SPACER;
+              }) || "";
 
-          if (text.length <= 420) {
+          const classified = classifyContentLine(rawText, nextText);
+
+          if (classified.kind === "spacer") {
             return [{
               sectionKey: section.key,
               sectionTitle: section.title,
               paragraphIndex,
+              kind: "spacer",
+              text: OPC_DOCUMENT_SPACER,
+            }];
+          }
+
+          const text = classified.text;
+          if (!text) return [];
+
+          if (classified.kind !== "paragraph" || text.length <= 420) {
+            return [{
+              sectionKey: section.key,
+              sectionTitle: section.title,
+              paragraphIndex,
+              kind: classified.kind,
               text,
             }];
           }
@@ -635,6 +776,7 @@
             sectionKey: section.key,
             sectionTitle: section.title,
             paragraphIndex: paragraphIndex + pieceIndex / 100,
+            kind: "paragraph",
             text: piece,
           }));
         }),
@@ -649,7 +791,7 @@
       let currentSection = null;
       let currentKey = "";
 
-      values.forEach(unit => {
+      values.forEach((unit, unitIndex) => {
         if (unit.sectionKey !== currentKey) {
           currentKey = unit.sectionKey;
           currentSection = document.createElement("section");
@@ -665,9 +807,21 @@
           fragment.appendChild(currentSection);
         }
 
-        const paragraph = document.createElement("p");
-        paragraph.textContent = unit.text;
-        currentSection.appendChild(paragraph);
+        const nextUnit = values[unitIndex + 1];
+        const nextText =
+          nextUnit && nextUnit.sectionKey === unit.sectionKey
+            ? nextUnit.text
+            : "";
+
+        if (unit.kind === "spacer") {
+          appendRichLine(currentSection, OPC_DOCUMENT_SPACER, nextText);
+        } else if (unit.kind === "heading") {
+          appendRichLine(currentSection, `## ${unit.text}`, nextText);
+        } else if (unit.kind === "bullet") {
+          appendRichLine(currentSection, `• ${unit.text}`, nextText);
+        } else {
+          appendRichLine(currentSection, unit.text, nextText);
+        }
       });
 
       return fragment;
@@ -806,10 +960,9 @@
           section.appendChild(title);
         }
 
-        paragraphs.forEach(value => {
-          const paragraph = document.createElement("p");
-          paragraph.textContent = value;
-          section.appendChild(paragraph);
+        paragraphs.forEach((value, paragraphIndex) => {
+          const nextValue = paragraphs[paragraphIndex + 1] || "";
+          appendRichLine(section, value, nextValue);
         });
         fragment.appendChild(section);
       });
