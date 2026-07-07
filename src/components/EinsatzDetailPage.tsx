@@ -90,8 +90,11 @@ function resolveInitialBackTarget(): BackTarget {
 
 type EmployeeOption = {
   id: string;
+  source?: 'employee' | 'staff' | string;
   user_id?: string | null;
   employee_id?: string | null;
+  staff_role_id?: string | null;
+  employee_number?: string | null;
   display_name?: string | null;
   email?: string | null;
   phone_e164?: string | null;
@@ -99,6 +102,7 @@ type EmployeeOption = {
   whatsapp_wa_id?: string | null;
   role?: string | null;
   status?: string | null;
+  assignment_status?: string | null;
 };
 
 type NoteRow = {
@@ -1205,13 +1209,20 @@ function buildAssignmentPayloadVariants({
 }) {
   const now = new Date().toISOString();
   const assignedBy = assignedByStaffId || assignedByUserId || null;
+  const staffRoleId =
+    employee.staff_role_id ||
+    (employee.source === 'staff' ? employee.id : null);
+  const employeeId =
+    employee.employee_id ||
+    (employee.source !== 'staff' ? employee.id : null);
+  const userId = employee.user_id || null;
 
   return [
     {
       job_id: jobId,
-      staff_role_id: employee.id,
-      user_id: employee.user_id || null,
-      employee_id: employee.employee_id || null,
+      staff_role_id: staffRoleId,
+      user_id: userId,
+      employee_id: employeeId,
       employee_name: employee.display_name || employee.email || 'Mitarbeiter',
       employee_email: employee.email || null,
       employee_phone: employee.phone_e164 || employee.phone_raw || null,
@@ -1223,9 +1234,8 @@ function buildAssignmentPayloadVariants({
     },
     {
       job_id: jobId,
-      staff_role_id: employee.id,
-      user_id: employee.user_id || null,
-      employee_id: employee.employee_id || null,
+      employee_id: employeeId,
+      user_id: userId,
       status: 'assigned',
       notes: note || null,
       assigned_by: assignedBy,
@@ -1234,8 +1244,8 @@ function buildAssignmentPayloadVariants({
     },
     {
       job_id: jobId,
-      staff_role_id: employee.id,
-      user_id: employee.user_id || null,
+      staff_role_id: staffRoleId,
+      user_id: userId,
       status: 'assigned',
       notes: note || null,
       assigned_by: assignedBy,
@@ -1244,7 +1254,7 @@ function buildAssignmentPayloadVariants({
     },
     {
       job_id: jobId,
-      employee_id: employee.employee_id || employee.id,
+      employee_id: employeeId,
       status: 'assigned',
       notes: note || null,
       assigned_by: assignedBy,
@@ -1253,14 +1263,19 @@ function buildAssignmentPayloadVariants({
     },
     {
       job_id: jobId,
-      user_id: employee.user_id || null,
+      user_id: userId,
       status: 'assigned',
       notes: note || null,
       assigned_by: assignedBy,
       created_at: now,
       updated_at: now,
     },
-  ];
+  ].filter(
+    (payload) =>
+      Boolean(payload.staff_role_id) ||
+      Boolean(payload.employee_id) ||
+      Boolean(payload.user_id),
+  );
 }
 
 function buildMediaPayloadVariants({
@@ -2030,6 +2045,9 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         ...employee,
         alreadyAssigned:
           assignedIds.has(String(employee.id)) ||
+          (employee.staff_role_id
+            ? assignedIds.has(String(employee.staff_role_id))
+            : false) ||
           (employee.user_id ? assignedIds.has(String(employee.user_id)) : false) ||
           (employee.employee_id ? assignedIds.has(String(employee.employee_id)) : false),
       }));
@@ -2396,52 +2414,44 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     if (employeesLoaded || !access.canEdit) return;
 
     try {
-      const queries = [
-        supabase
-          .from('opc_staff_roles')
-          .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,whatsapp_wa_id,role,status')
-          .in('status', ['active', 'aktiv'])
-          .order('display_name', { ascending: true }),
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
 
-        supabase
-          .from('opc_staff_roles')
-          .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw,whatsapp_wa_id,role,status')
-          .order('display_name', { ascending: true }),
-      ];
-
-      for (const query of queries) {
-        const { data, error } = await query;
-
-        if (!error && Array.isArray(data)) {
-          const employeeRows = (data as EmployeeOption[]).filter((employee) => {
-            const role = normalize(employee.role);
-            const status = normalize(employee.status);
-
-            const isEmployee =
-              role === 'employee' ||
-              role === 'mitarbeiter' ||
-              role === 'cleaner' ||
-              role === 'reinigung' ||
-              role === '';
-
-            const isActive =
-              !status ||
-              status === 'active' ||
-              status === 'aktiv' ||
-              status === 'enabled';
-
-            return employee.id && isActive && isEmployee;
-          });
-
-          setEmployees(employeeRows);
-          setEmployeesLoaded(true);
-          return;
-        }
+      if (sessionError || !session?.access_token) {
+        throw new Error('Sitzung ist abgelaufen.');
       }
 
-      setEmployees([]);
+      const response = await fetch(
+        `${baseUrl}/api/opc/assignment-candidates`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          cache: 'no-store',
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error ||
+            'Mitarbeiter konnten nicht geladen werden.',
+        );
+      }
+
+      setEmployees(
+        Array.isArray(payload?.candidates)
+          ? (payload.candidates as EmployeeOption[])
+          : [],
+      );
       setEmployeesLoaded(true);
-    } catch {
+    } catch (error) {
+      console.error(
+        '[EinsatzDetailPage] assignment candidates failed',
+        error,
+      );
       setEmployees([]);
       setEmployeesLoaded(true);
     }
@@ -2746,7 +2756,8 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     const apiPayload = {
       job_id: job.job_id,
       assignment_id: assignmentId || null,
-      employee_staff_role_id: employee.id,
+      employee_staff_role_id: employee.staff_role_id || null,
+      employee_id: employee.employee_id || employee.id,
       employee_user_id: employee.user_id || null,
       title,
       start_time: start,
@@ -2854,6 +2865,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         (employee) =>
           [
             employee.id,
+            employee.staff_role_id,
             employee.user_id,
             employee.employee_id,
           ]
@@ -4375,6 +4387,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   ) {
     return [
       employee.id,
+      employee.staff_role_id,
       employee.user_id,
       employee.employee_id,
     ]
