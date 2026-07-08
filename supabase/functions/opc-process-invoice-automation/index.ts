@@ -13,6 +13,12 @@ function clean(value: unknown) {
   return String(value ?? '').trim();
 }
 
+function automationEnabled() {
+  return ['1', 'true', 'yes', 'on'].includes(
+    clean(Deno.env.get('OPC_INVOICE_AUTOMATION_ENABLED')).toLowerCase(),
+  );
+}
+
 function constantTimeEqual(left: string, right: string) {
   if (!left || !right || left.length !== right.length) return false;
 
@@ -30,6 +36,8 @@ Deno.serve(async (request) => {
       ok: true,
       service: 'opc-process-invoice-automation',
       runtime: 'supabase-edge-function',
+      enabled: automationEnabled(),
+      mode: automationEnabled() ? 'automatic' : 'manual-approval',
     });
   }
 
@@ -53,6 +61,19 @@ Deno.serve(async (request) => {
 
     if (!constantTimeEqual(suppliedSecret, expectedSecret)) {
       return json({ ok: false, error: 'Nicht autorisiert.' }, 401);
+    }
+
+    if (!automationEnabled()) {
+      return json({
+        ok: true,
+        disabled: true,
+        mode: 'manual-approval',
+        claimed: 0,
+        completed: 0,
+        manualReview: 0,
+        failed: 0,
+        results: [],
+      });
     }
 
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
