@@ -1,7 +1,6 @@
 ---
 import EmployeesManagement from '../components/EmployeesManagement';
 import '../styles/miraka-portal.css';
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -26,7 +25,6 @@ import { ClientRouter } from 'astro:transitions';
       } catch { document.startViewTransition = noMotionTransition; }
     })();
   </script>
-  <ClientRouter fallback="swap" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />

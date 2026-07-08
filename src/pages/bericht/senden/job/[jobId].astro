@@ -1,6 +1,5 @@
 ---
 import BerichtClientSendPage from '../../../../components/BerichtClientSendPage';
-import { ClientRouter } from 'astro:transitions';
 
 const { jobId } = Astro.params;
 ---
@@ -51,8 +50,6 @@ const { jobId } = Astro.params;
       }
     })();
   </script>
-
-  <ClientRouter fallback="swap" />
 
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />

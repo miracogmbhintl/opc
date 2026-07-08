@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
-import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
+import { readOpcPageCache } from '../lib/opc-page-cache';
+import { readCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import {
   Activity,
   AlertTriangle,
@@ -20,7 +21,16 @@ import {
   WalletCards,
 } from 'lucide-react';
 
-const DASHBOARD_PAGE_CACHE_KEY = 'opc:page-cache:dashboard-home:v6-truthful-live-counts';
+// OPC_DASHBOARD_SPLIT_PERSISTENT_CACHE_V1
+// Core cards and finance use separate user-scoped snapshots. A core refresh can
+// therefore never erase a valid finance snapshot, and both survive navigation,
+// app restarts and a later login by the same user.
+const LEGACY_DASHBOARD_PAGE_CACHE_KEY = 'opc:page-cache:dashboard-home:v9-progressive-cache';
+const DASHBOARD_CORE_CACHE_KEY = 'opc:dashboard:core-snapshot:v10';
+const DASHBOARD_FINANCE_CACHE_KEY = 'opc:dashboard:finance-snapshot:v10';
+const DASHBOARD_CORE_TTL_MS = 5 * 60 * 1000;
+const DASHBOARD_FINANCE_TTL_MS = 10 * 60 * 1000;
+const DASHBOARD_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 interface DashboardStats {
   todayJobs: number;
@@ -177,6 +187,28 @@ interface DashboardPageCache {
   activeTab: DashboardTab;
 }
 
+interface DashboardCoreSnapshotData {
+  stats: DashboardStats;
+  jobs: ServiceJob[];
+  activeTab: DashboardTab;
+}
+
+interface DashboardFinanceSnapshotData {
+  finance: FinanceSummary;
+  financePreviews: FinancePreviewData;
+}
+
+type DashboardPersistentSlice<T> = {
+  savedAt: number;
+  userId: string;
+  data: T;
+};
+
+type DashboardReadableSlice<T> = {
+  savedAt: number;
+  data: T;
+};
+
 const EMPTY_DASHBOARD_STATS: DashboardStats = {
   todayJobs: 0,
   liveJobs: 0,
@@ -209,6 +241,130 @@ const EMPTY_FINANCE_PREVIEWS: FinancePreviewData = {
   reminders: [],
   payroll: [],
 };
+
+function dashboardCacheUserId() {
+  return String(readCachedOpcAuthProfile()?.id || '').trim();
+}
+
+function readDashboardPersistentSlice<T>(
+  key: string,
+  maxAgeMs = DASHBOARD_SNAPSHOT_MAX_AGE_MS,
+): DashboardReadableSlice<T> | null {
+  if (typeof window === 'undefined') return null;
+
+  const userId = dashboardCacheUserId();
+  if (!userId) return null;
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as DashboardPersistentSlice<T>;
+    if (
+      !parsed ||
+      parsed.userId !== userId ||
+      typeof parsed.savedAt !== 'number' ||
+      !parsed.data
+    ) {
+      return null;
+    }
+
+    if (Date.now() - parsed.savedAt > maxAgeMs) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+
+    return {
+      savedAt: parsed.savedAt,
+      data: parsed.data,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDashboardPersistentSlice<T>(
+  key: string,
+  data: T,
+  savedAt = Date.now(),
+) {
+  if (typeof window === 'undefined') return;
+
+  const userId = dashboardCacheUserId();
+  if (!userId) return;
+
+  try {
+    const payload: DashboardPersistentSlice<T> = {
+      savedAt,
+      userId,
+      data,
+    };
+
+    window.localStorage.setItem(key, JSON.stringify(payload));
+  } catch {
+    // Storage failure must not block dashboard rendering.
+  }
+}
+
+function dashboardPersistentSliceIsFresh<T>(
+  slice: DashboardReadableSlice<T> | null,
+  ttlMs: number,
+) {
+  return Boolean(slice && Date.now() - slice.savedAt < ttlMs);
+}
+
+function readDashboardBootstrapCache() {
+  let core = readDashboardPersistentSlice<DashboardCoreSnapshotData>(
+    DASHBOARD_CORE_CACHE_KEY,
+  );
+  let finance = readDashboardPersistentSlice<DashboardFinanceSnapshotData>(
+    DASHBOARD_FINANCE_CACHE_KEY,
+  );
+
+  // One-time migration from the previous combined session cache.
+  if ((!core || !finance) && typeof window !== 'undefined') {
+    const legacy = readOpcPageCache<DashboardPageCache>(
+      LEGACY_DASHBOARD_PAGE_CACHE_KEY,
+      DASHBOARD_SNAPSHOT_MAX_AGE_MS,
+    );
+
+    if (legacy) {
+      if (!core) {
+        writeDashboardPersistentSlice<DashboardCoreSnapshotData>(
+          DASHBOARD_CORE_CACHE_KEY,
+          {
+            stats: { ...EMPTY_DASHBOARD_STATS, ...legacy.stats },
+            jobs: legacy.jobs || [],
+            activeTab: legacy.activeTab || 'today',
+          },
+          Date.now() - DASHBOARD_CORE_TTL_MS - 1000,
+        );
+        core = readDashboardPersistentSlice<DashboardCoreSnapshotData>(
+          DASHBOARD_CORE_CACHE_KEY,
+        );
+      }
+
+      if (!finance) {
+        writeDashboardPersistentSlice<DashboardFinanceSnapshotData>(
+          DASHBOARD_FINANCE_CACHE_KEY,
+          {
+            finance: { ...EMPTY_FINANCE_SUMMARY, ...legacy.finance },
+            financePreviews: {
+              ...EMPTY_FINANCE_PREVIEWS,
+              ...(legacy.financePreviews || {}),
+            },
+          },
+          Date.now() - DASHBOARD_FINANCE_TTL_MS - 1000,
+        );
+        finance = readDashboardPersistentSlice<DashboardFinanceSnapshotData>(
+          DASHBOARD_FINANCE_CACHE_KEY,
+        );
+      }
+    }
+  }
+
+  return { core, finance };
+}
 
 const BRAND = {
   bg: '#FFFFFF',
@@ -309,6 +465,22 @@ const sectionTitleStyle: CSSProperties = {
 
 function navigateTo(href: string) {
   window.location.href = href;
+}
+
+function scheduleDashboardTask(task: () => void, timeout = 1800) {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    const idleWindow = window as typeof window & {
+      requestIdleCallback: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+    };
+
+    idleWindow.requestIdleCallback(task, { timeout });
+    return;
+  }
+
+  window.setTimeout(task, timeout);
 }
 
 function normalizeStatus(status?: string | null) {
@@ -639,7 +811,7 @@ async function readList<T>(table: string, select = '*', limit = 50): Promise<T[]
 
   if (error) {
     console.warn(`[OPC Dashboard] ${table} konnte nicht geladen werden:`, error.message);
-    return [];
+    throw error;
   }
 
   return (data || []) as T[];
@@ -777,11 +949,6 @@ async function readFinanceDashboardDirect(): Promise<{
   summary: FinanceSummary;
   previews: FinancePreviewData;
 }> {
-  const emptyResult = {
-    summary: EMPTY_FINANCE_SUMMARY,
-    previews: EMPTY_FINANCE_PREVIEWS,
-  };
-
   try {
     const range = financeMonthRange();
     const monthStartTimestamp = `${range.from}T00:00:00`;
@@ -795,7 +962,7 @@ async function readFinanceDashboardDirect(): Promise<{
           .select('id,invoice_number,status,title,issue_date,due_date,total_chf,balance_chf,paid_chf,created_at,updated_at,client_snapshot')
           .in('status', Array.from(OPEN_INVOICE_STATUSES))
           .order('created_at', { ascending: false })
-          .limit(250),
+          .limit(120),
         supabase
           .from('opc_invoices')
           .select('id,invoice_number,status,title,issue_date,due_date,total_chf,balance_chf,paid_chf,created_at,updated_at,client_snapshot')
@@ -808,13 +975,13 @@ async function readFinanceDashboardDirect(): Promise<{
           .gte('updated_at', monthStartTimestamp)
           .lte('updated_at', monthEndTimestamp)
           .order('updated_at', { ascending: false })
-          .limit(250),
+          .limit(120),
         supabase
           .from('opc_quotes')
           .select('id,quote_number,status,title,quote_type,issue_date,valid_until,total_chf,created_at,updated_at')
           .in('status', Array.from(OPEN_QUOTE_STATUSES))
           .order('created_at', { ascending: false })
-          .limit(250),
+          .limit(120),
         supabase
           .from('opc_quotes')
           .select('id,quote_number,status,title,quote_type,issue_date,valid_until,total_chf,created_at,updated_at')
@@ -825,7 +992,7 @@ async function readFinanceDashboardDirect(): Promise<{
           .select('id,legal_first_name,legal_last_name,preferred_name,status,payroll_in_scope,portal_access_only,metadata')
           .in('status', Array.from(ACTIVE_EMPLOYEE_STATUSES))
           .order('created_at', { ascending: false })
-          .limit(250),
+          .limit(80),
       ]);
 
     const warn = (label: string, error: any) => {
@@ -838,6 +1005,17 @@ async function readFinanceDashboardDirect(): Promise<{
     warn('Offene Offerten konnten nicht geladen werden', openQuoteResponse.error);
     warn('Offertenvorschau konnte nicht geladen werden', latestQuoteResponse.error);
     warn('Mitarbeiterübersicht konnte nicht geladen werden', employeeResponse.error);
+
+    const primaryFinanceError = [
+      openInvoiceResponse.error,
+      latestInvoiceResponse.error,
+      monthlyInvoiceResponse.error,
+      openQuoteResponse.error,
+      latestQuoteResponse.error,
+      employeeResponse.error,
+    ].find(Boolean);
+
+    if (primaryFinanceError) throw primaryFinanceError;
 
     const openInvoices = (openInvoiceResponse.data || []) as FinanceRow[];
     const latestInvoices = (latestInvoiceResponse.data || []) as FinanceRow[];
@@ -876,7 +1054,7 @@ async function readFinanceDashboardDirect(): Promise<{
           .select('employee_id,salary_type,hourly_rate_chf,monthly_salary_chf,valid_from,valid_until,status')
           .in('employee_id', employeeIds)
           .order('valid_from', { ascending: false })
-          .limit(1000),
+          .limit(250),
         supabase
           .from('opc_employee_time_entries')
           .select('employee_id,work_date,total_minutes,break_minutes,clock_in_at,clock_out_at,status')
@@ -885,11 +1063,15 @@ async function readFinanceDashboardDirect(): Promise<{
           .gte('work_date', range.from)
           .lte('work_date', range.to)
           .order('work_date', { ascending: false })
-          .limit(1500),
+          .limit(500),
       ]);
 
       warn('Arbeitsverträge konnten nicht geladen werden', contractResponse.error);
       warn('Genehmigte Arbeitszeiten konnten nicht geladen werden', timeResponse.error);
+
+      if (contractResponse.error) throw contractResponse.error;
+      if (timeResponse.error) throw timeResponse.error;
+
       contracts = (contractResponse.data || []) as FinanceRow[];
       timeEntries = (timeResponse.data || []) as FinanceRow[];
     }
@@ -1018,7 +1200,7 @@ async function readFinanceDashboardDirect(): Promise<{
     };
   } catch (error) {
     console.warn('[OPC Dashboard] Direkte Finanzdaten konnten nicht geladen werden:', error);
-    return emptyResult;
+    throw error;
   }
 }
 
@@ -1596,33 +1778,62 @@ function EmptyState({ text }: { text: string }) {
 }
 
 export default function OwnerDashboardHome() {
-  const [stats, setStats] = useState<DashboardStats>(EMPTY_DASHBOARD_STATS);
-  const [finance, setFinance] = useState<FinanceSummary>(EMPTY_FINANCE_SUMMARY);
-  const [financePreviews, setFinancePreviews] = useState<FinancePreviewData>(EMPTY_FINANCE_PREVIEWS);
-  const [activeFinanceTab, setActiveFinanceTab] = useState<FinancePreviewTab>('invoices');
-  const [financeLoading, setFinanceLoading] = useState(false);
+  const bootstrapCache = useMemo(() => readDashboardBootstrapCache(), []);
+  const bootstrapCore = bootstrapCache.core?.data || null;
+  const bootstrapFinance = bootstrapCache.finance?.data || null;
 
-  const [jobs, setJobs] = useState<ServiceJob[]>([]);
-  const [activeTab, setActiveTab] = useState<DashboardTab>('today');
-  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>(() => ({
+    ...EMPTY_DASHBOARD_STATS,
+    ...(bootstrapCore?.stats || {}),
+  }));
+  const [finance, setFinance] = useState<FinanceSummary>(() => ({
+    ...EMPTY_FINANCE_SUMMARY,
+    ...(bootstrapFinance?.finance || {}),
+  }));
+  const [financePreviews, setFinancePreviews] = useState<FinancePreviewData>(() => ({
+    ...EMPTY_FINANCE_PREVIEWS,
+    ...(bootstrapFinance?.financePreviews || {}),
+  }));
+  const [activeFinanceTab, setActiveFinanceTab] = useState<FinancePreviewTab>('invoices');
+  const [financeLoading, setFinanceLoading] = useState(() => !bootstrapFinance);
+
+  const [jobs, setJobs] = useState<ServiceJob[]>(() => bootstrapCore?.jobs || []);
+  const [activeTab, setActiveTab] = useState<DashboardTab>(() => bootstrapCore?.activeTab || 'today');
+  const [loading, setLoading] = useState(() => !bootstrapCore);
 
   useEffect(() => {
-    const cached = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
+    const coreFresh = dashboardPersistentSliceIsFresh(
+      bootstrapCache.core,
+      DASHBOARD_CORE_TTL_MS,
+    );
+    const financeFresh = dashboardPersistentSliceIsFresh(
+      bootstrapCache.finance,
+      DASHBOARD_FINANCE_TTL_MS,
+    );
 
-    if (cached) {
-      setStats({ ...EMPTY_DASHBOARD_STATS, ...cached.stats });
-      setFinance({ ...EMPTY_FINANCE_SUMMARY, ...cached.finance });
-      setFinancePreviews({ ...EMPTY_FINANCE_PREVIEWS, ...(cached.financePreviews || {}) });
-      setJobs(cached.jobs);
-      setActiveTab(cached.activeTab);
+    // The eight top cards are already painted synchronously from localStorage.
+    // When missing or stale, refresh them immediately instead of waiting for idle time.
+    if (!coreFresh) {
+      void loadData({ background: Boolean(bootstrapCore) });
+    } else {
       setLoading(false);
-      void loadData({ background: true });
-      window.setTimeout(() => void loadFinanceData({ background: true }), 120);
-      return;
     }
 
-    void loadData();
-    window.setTimeout(() => void loadFinanceData(), 120);
+    let financeTimer = 0;
+
+    if (!financeFresh) {
+      // Finance never blocks authentication or the first eight cards. It starts on
+      // a deterministic short delay and keeps a stale snapshot visible while refreshing.
+      financeTimer = window.setTimeout(() => {
+        void loadFinanceData({ background: Boolean(bootstrapFinance) });
+      }, bootstrapCore ? 700 : 1100);
+    } else {
+      setFinanceLoading(false);
+    }
+
+    return () => {
+      if (financeTimer) window.clearTimeout(financeTimer);
+    };
   }, []);
 
   async function loadData(options: { background?: boolean } = {}) {
@@ -1631,25 +1842,31 @@ export default function OwnerDashboardHome() {
     if (!isBackground) setLoading(true);
 
     try {
-      const [
-        jobsData,
-        inboxData,
-        reportsData,
-        inquiriesData,
-        ticketsData,
-        jobTimeLogsData,
-        employeeTimeEntriesData,
-        staffRows,
-      ] = await Promise.all([
-        readList<ServiceJob>('opc_my_portal_job_feed', '*', 500),
-        readList<InboxMessage>('opc_my_conversation_inbox', '*', 250),
-        readList<ReportItem>('opc_portal_report_feed', '*', 500),
-        readList<InquiryItem>('opc_portal_onboarding_cards', '*', 500),
-        readList<TicketItem>('opc_tickets', '*', 500),
-        readList<TimeLogItem>('opc_job_time_logs', '*', 500),
-        readList<TimeLogItem>('opc_employee_time_entries', '*', 500),
-        readList<StaffIdentityItem>('opc_staff_roles', 'id,employee_id,user_id', 500),
+      // The eight top cards are the authentication priority. Inbox data is
+      // started separately and must not delay those cards.
+      const inboxPromise = readList<InboxMessage>('opc_my_conversation_inbox', '*', 80)
+        .catch((error) => {
+          console.warn('[OPC Dashboard] Nachrichtenzähler konnte nicht geladen werden:', error);
+          return null as InboxMessage[] | null;
+        });
+
+      const [jobsData, reportsData, inquiriesData, ticketsData] = await Promise.all([
+        readList<ServiceJob>('opc_my_portal_job_feed', '*', 180),
+        readList<ReportItem>('opc_portal_report_feed', '*', 120),
+        readList<InquiryItem>('opc_portal_onboarding_cards', '*', 120),
+        readList<TicketItem>('opc_tickets', '*', 120),
       ]);
+
+      const [jobTimeLogsData, employeeTimeEntriesData, staffRows] =
+        await Promise.all([
+          readList<TimeLogItem>('opc_job_time_logs', '*', 120),
+          readList<TimeLogItem>('opc_employee_time_entries', '*', 120),
+          readList<StaffIdentityItem>(
+            'opc_staff_roles',
+            'id,employee_id,user_id',
+            120,
+          ),
+        ]);
 
       const now = new Date();
       const todayStart = startOfDay(now);
@@ -1680,10 +1897,13 @@ export default function OwnerDashboardHome() {
         return planned >= todayStart && planned <= todayEnd;
       });
 
+      // OPC_DASHBOARD_WEEK_ALL_PLANNED_V1
+      // The weekly dashboard covers every job scheduled for this calendar week:
+      // planned, assigned, live and completed. It is no longer a completion-only metric.
       const weekJobs = visibleJobs.filter((job) => {
-        if (!isCompletedJob(job)) return false;
-        const completed = getJobCompletionDate(job);
-        return Boolean(completed && completed >= weekStart && completed <= weekEnd);
+        if (!job.planned_start) return false;
+        const planned = new Date(job.planned_start);
+        return planned >= weekStart && planned <= weekEnd;
       });
 
       const liveJobs = operationalJobs.filter((job) => isLiveJob(job, now));
@@ -1707,7 +1927,9 @@ export default function OwnerDashboardHome() {
         staffRows,
         now,
       );
-      const unreadMessages = inboxData.filter((message) => Boolean(message.unread)).length;
+      // Keep the previous unread value for the first-card paint. The inbox result
+      // updates the secondary attention area immediately after the core snapshot.
+      const unreadMessages = stats.unreadMessages;
 
       const nextStats: DashboardStats = {
         todayJobs: todayJobs.length,
@@ -1742,14 +1964,49 @@ export default function OwnerDashboardHome() {
 
       setActiveTab(nextActiveTab);
 
-      const existingCache = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
-      writeOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY, {
-        stats: nextStats,
-        finance: existingCache?.finance || finance,
-        financePreviews: existingCache?.financePreviews || financePreviews,
-        jobs: sortedVisibleJobs,
-        activeTab: nextActiveTab,
-      });
+      writeDashboardPersistentSlice<DashboardCoreSnapshotData>(
+        DASHBOARD_CORE_CACHE_KEY,
+        {
+          stats: nextStats,
+          jobs: sortedVisibleJobs,
+          activeTab: nextActiveTab,
+        },
+      );
+
+      void inboxPromise
+        .then((inboxData) => {
+          if (!inboxData) return;
+
+          const nextUnreadMessages = inboxData.filter((message) => Boolean(message.unread)).length;
+
+          setStats((currentStats) => {
+            const nextStatsWithInbox: DashboardStats = {
+              ...currentStats,
+              unreadMessages: nextUnreadMessages,
+              urgentItems:
+                currentStats.overdueJobs +
+                currentStats.openReports +
+                currentStats.newInquiries +
+                currentStats.openTickets +
+                nextUnreadMessages,
+            };
+
+            const currentCore = readDashboardPersistentSlice<DashboardCoreSnapshotData>(
+              DASHBOARD_CORE_CACHE_KEY,
+            );
+
+            writeDashboardPersistentSlice<DashboardCoreSnapshotData>(
+              DASHBOARD_CORE_CACHE_KEY,
+              {
+                stats: nextStatsWithInbox,
+                jobs: currentCore?.data.jobs || sortedVisibleJobs,
+                activeTab: currentCore?.data.activeTab || nextActiveTab,
+              },
+            );
+
+            return nextStatsWithInbox;
+          });
+        });
     } catch (error) {
       console.error('Error loading OPC dashboard:', error);
     } finally {
@@ -1765,15 +2022,15 @@ export default function OwnerDashboardHome() {
       setFinance(result.summary);
       setFinancePreviews(result.previews);
 
-      const existingCache = readOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY);
-      writeOpcPageCache<DashboardPageCache>(DASHBOARD_PAGE_CACHE_KEY, {
-        stats: existingCache?.stats || stats,
-        finance: result.summary,
-        financePreviews: result.previews,
-        jobs: existingCache?.jobs || jobs,
-        activeTab: existingCache?.activeTab || activeTab,
-      });
+      writeDashboardPersistentSlice<DashboardFinanceSnapshotData>(
+        DASHBOARD_FINANCE_CACHE_KEY,
+        {
+          finance: result.summary,
+          financePreviews: result.previews,
+        },
+      );
     } catch (error) {
+      // Keep the last valid snapshot visible and retry on a later dashboard visit.
       console.warn('[OPC Dashboard] Finanzvorschau konnte nicht aktualisiert werden:', error);
     } finally {
       setFinanceLoading(false);
@@ -1818,14 +2075,14 @@ export default function OwnerDashboardHome() {
     const weekEnd = endOfWeek(now);
 
     return jobs
-      .filter(isCompletedJob)
       .filter((job) => {
-        const completed = getJobCompletionDate(job);
-        return Boolean(completed && completed >= weekStart && completed <= weekEnd);
+        if (!job.planned_start) return false;
+        const planned = new Date(job.planned_start);
+        return planned >= weekStart && planned <= weekEnd;
       })
       .sort((a, b) => {
-        const aTime = getJobCompletionDate(a)?.getTime() || 0;
-        const bTime = getJobCompletionDate(b)?.getTime() || 0;
+        const aTime = a.planned_start ? new Date(a.planned_start).getTime() : 0;
+        const bTime = b.planned_start ? new Date(b.planned_start).getTime() : 0;
         return bTime - aTime;
       });
   }, [jobs]);
@@ -1888,7 +2145,7 @@ export default function OwnerDashboardHome() {
   const tabEmptyText: Record<DashboardTab, string> = {
     today: 'Heute sind keine Einsätze geplant.',
     live: 'Aktuell läuft kein Einsatz.',
-    week: 'In dieser Woche wurden noch keine Einsätze abgeschlossen.',
+    week: 'In dieser Woche sind keine Einsätze geplant.',
     overdue: 'Keine operativ relevanten überfälligen Einsätze.',
     reports: 'Keine offenen Berichte in der Einsatzliste.',
   };
@@ -2025,7 +2282,7 @@ export default function OwnerDashboardHome() {
             <MetricCard
               label="Diese Woche"
               value={stats.jobsThisWeek}
-              subline="Abgeschlossen"
+              subline="Geplant diese Woche"
               icon={<Clock3 size={17} />}
               href={`${baseUrl}/einsaetze?filter=week`}
             />

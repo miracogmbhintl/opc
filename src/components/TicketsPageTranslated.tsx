@@ -15,7 +15,21 @@ import {
   X,
 } from 'lucide-react';
 
-const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v12-all-inquiries';
+const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v14-schema-aware-progressive';
+// OPC_REQUESTS_PROGRESSIVE_LOAD_V1
+const REQUESTS_PAGE_SIZE = 25;
+const REQUESTS_OPEN_LIMIT = 100;
+const REQUESTS_CACHE_TTL_MS = 2 * 60 * 1000;
+const REQUESTS_CLOSED_STATUSES = [
+  'converted', 'rejected', 'resolved', 'closed', 'completed', 'approved',
+  'report_approved', 'sent_to_client', 'cancelled', 'archived', 'abgelehnt', 'archiviert',
+];
+
+type RequestsPageCache = {
+  items: PortalItem[];
+  hasMore: boolean;
+  nextOffset: number;
+};
 
 type ActiveTab = 'all' | 'inquiries' | 'applications';
 type ItemType = 'inquiry' | 'damage' | 'job_damage';
@@ -633,25 +647,18 @@ function buildLocationLine(objectType: string, address: string, postalCode: stri
   return [objectType, address, city].filter(Boolean).join(' · ');
 }
 
-async function readList<T>(table: string, limit = 300): Promise<T[]> {
-  const { data, error } = await supabase.from(table).select('*').limit(limit);
-
-  if (error) {
-    console.warn(`[Tickets] ${table} konnte nicht geladen werden:`, error.message);
-    return [];
-  }
-
-  const rows = ((data || []) as RawRow[]).map((row) => ({ ...row }));
+async function hydrateInquiryContacts<T>(inputRows: T[]): Promise<T[]> {
+  const rows = (inputRows as RawRow[]).map((row) => ({ ...row }));
   const contactIds = Array.from(new Set(rows.map((row) => cleanValue(row.contact_id)).filter(Boolean)));
 
   if (!contactIds.length) return rows as T[];
 
-  const { data: contacts, error: contactError } = await supabase
+  const { data: contacts, error } = await supabase
     .from('opc_contacts')
-    .select('id, full_name, first_name, last_name, company_name, email, phone_raw, phone_e164, metadata')
+    .select('id,full_name,first_name,last_name,company_name,email,phone_raw,phone_e164,metadata')
     .in('id', contactIds);
 
-  if (contactError) return rows as T[];
+  if (error) return rows as T[];
 
   const contactMap = new Map<string, RawRow>();
   ((contacts || []) as RawRow[]).forEach((contact) => {
@@ -663,6 +670,131 @@ async function readList<T>(table: string, limit = 300): Promise<T[]> {
     const contact = contactMap.get(cleanValue(row.contact_id));
     return contact ? { ...row, contact, opc_contacts: contact } : row;
   }) as T[];
+}
+
+type InquiryViewSchema = {
+  statusColumn: string | null;
+  orderColumn: string | null;
+};
+
+let inquiryViewSchemaPromise: Promise<InquiryViewSchema> | null = null;
+
+async function getInquiryViewSchema(): Promise<InquiryViewSchema> {
+  if (inquiryViewSchemaPromise) return inquiryViewSchemaPromise;
+
+  inquiryViewSchemaPromise = (async () => {
+    const { data, error } = await supabase
+      .from('opc_portal_onboarding_cards')
+      .select('*')
+      .limit(1);
+
+    if (error) throw error;
+
+    const firstRow = ((data || [])[0] || {}) as RawRow;
+    const columns = new Set(Object.keys(firstRow));
+
+    const statusColumn =
+      ['frontend_status', 'onboarding_status', 'inquiry_status', 'case_status', 'state']
+        .find((column) => columns.has(column)) || null;
+
+    const orderColumn =
+      [
+        'last_activity_at',
+        'case_updated_at',
+        'submitted_at',
+        'onboarding_created_at',
+        'case_created_at',
+        'inquiry_created_at',
+        'received_at',
+      ].find((column) => columns.has(column)) || null;
+
+    return { statusColumn, orderColumn };
+  })();
+
+  return inquiryViewSchemaPromise;
+}
+
+function getRawInquiryStatus(row: RawRow) {
+  return getFirstValue(
+    row,
+    ['frontend_status', 'onboarding_status', 'inquiry_status', 'case_status', 'state'],
+    'new',
+  );
+}
+
+async function readInquiryPage(offset: number, pageSize = REQUESTS_PAGE_SIZE + 1) {
+  const schema = await getInquiryViewSchema();
+
+  let query = supabase
+    .from('opc_portal_onboarding_cards')
+    .select('*');
+
+  if (schema.orderColumn) {
+    query = query.order(schema.orderColumn, {
+      ascending: false,
+      nullsFirst: false,
+    });
+  }
+
+  const response = await query.range(offset, offset + pageSize - 1);
+
+  if (response.error) throw response.error;
+
+  return hydrateInquiryContacts<RawRow>(
+    (response.data || []) as RawRow[],
+  );
+}
+
+async function readOpenInquiries() {
+  const schema = await getInquiryViewSchema();
+
+  let query = supabase
+    .from('opc_portal_onboarding_cards')
+    .select('*');
+
+  if (schema.statusColumn) {
+    query = query.or(
+      `${schema.statusColumn}.is.null,${schema.statusColumn}.not.in.(${REQUESTS_CLOSED_STATUSES.join(',')})`,
+    );
+  }
+
+  if (schema.orderColumn) {
+    query = query.order(schema.orderColumn, {
+      ascending: false,
+      nullsFirst: false,
+    });
+  }
+
+  const response = await query.limit(REQUESTS_OPEN_LIMIT);
+
+  if (response.error) {
+    console.warn(
+      '[Anfragen] Offene Anfragen konnten nicht geladen werden:',
+      response.error.message,
+    );
+    return [] as RawRow[];
+  }
+
+  const openRows = ((response.data || []) as RawRow[]).filter(
+    (row) => getStatusGroup(getRawInquiryStatus(row)) !== 'done',
+  );
+
+  return hydrateInquiryContacts<RawRow>(openRows);
+}
+
+function mergePortalItems(...groups: PortalItem[][]) {
+  const byId = new Map<string, PortalItem>();
+  groups.flat().forEach((item) => {
+    const key = `${item.type}:${item.id}`;
+    const existing = byId.get(key);
+    const itemTime = new Date(item.updatedAt || item.createdAt || 0).getTime();
+    const existingTime = new Date(existing?.updatedAt || existing?.createdAt || 0).getTime();
+    if (!existing || itemTime >= existingTime) byId.set(key, item);
+  });
+  return Array.from(byId.values()).sort((a, b) =>
+    new Date(b.updatedAt || b.createdAt || 0).getTime() -
+    new Date(a.updatedAt || a.createdAt || 0).getTime()
+  );
 }
 
 function buildJobMap(jobs: JobFeedRow[]) {
@@ -1034,6 +1166,9 @@ export default function TicketsPageTranslated() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const didLoadRef = useRef(false);
 
   const [selectedInquiry, setSelectedInquiry] = useState<PortalItem | null>(null);
@@ -1047,12 +1182,16 @@ export default function TicketsPageTranslated() {
     if (didLoadRef.current) return;
     didLoadRef.current = true;
 
-    const cachedItems = readOpcPageCache<PortalItem[]>(REQUESTS_PAGE_CACHE_KEY);
+    const cached = readOpcPageCache<RequestsPageCache>(
+      REQUESTS_PAGE_CACHE_KEY,
+      REQUESTS_CACHE_TTL_MS,
+    );
 
-    if (cachedItems) {
-      setItems(cachedItems);
+    if (cached) {
+      setItems(cached.items || []);
+      setHasMore(Boolean(cached.hasMore));
+      setNextOffset(Number(cached.nextOffset || REQUESTS_PAGE_SIZE));
       setLoading(false);
-      void loadItems({ background: true });
       return;
     }
 
@@ -1065,22 +1204,55 @@ export default function TicketsPageTranslated() {
     setErrorMessage('');
 
     try {
-      const inquiriesData = await readList<RawRow>('opc_portal_onboarding_cards', 5000);
-      const inquiryItems = inquiriesData.map(mapInquiry).filter(Boolean) as PortalItem[];
-
-      const merged = inquiryItems.sort((a, b) => {
-        const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
-        const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
-        return bTime - aTime;
-      });
+      const [openRows, recentRows] = await Promise.all([
+        readOpenInquiries(),
+        readInquiryPage(0),
+      ]);
+      const recentVisible = recentRows.slice(0, REQUESTS_PAGE_SIZE);
+      const openItems = openRows.map(mapInquiry).filter(Boolean) as PortalItem[];
+      const recentItems = recentVisible.map(mapInquiry).filter(Boolean) as PortalItem[];
+      const merged = mergePortalItems(openItems, recentItems);
+      const nextCache: RequestsPageCache = {
+        items: merged,
+        hasMore: recentRows.length > REQUESTS_PAGE_SIZE,
+        nextOffset: REQUESTS_PAGE_SIZE,
+      };
 
       setItems(merged);
-      writeOpcPageCache<PortalItem[]>(REQUESTS_PAGE_CACHE_KEY, merged);
+      setHasMore(nextCache.hasMore);
+      setNextOffset(nextCache.nextOffset);
+      writeOpcPageCache(REQUESTS_PAGE_CACHE_KEY, nextCache);
     } catch (error: any) {
       console.error('Anfragen konnten nicht geladen werden:', error);
       setErrorMessage(error?.message || 'Anfragen konnten nicht geladen werden.');
     } finally {
       if (!isBackground) setLoading(false);
+    }
+  }
+
+  async function loadMoreItems() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setErrorMessage('');
+
+    try {
+      const page = await readInquiryPage(nextOffset);
+      const pageItems = page.slice(0, REQUESTS_PAGE_SIZE).map(mapInquiry).filter(Boolean) as PortalItem[];
+      const merged = mergePortalItems(items, pageItems);
+      const nextCache: RequestsPageCache = {
+        items: merged,
+        hasMore: page.length > REQUESTS_PAGE_SIZE,
+        nextOffset: nextOffset + REQUESTS_PAGE_SIZE,
+      };
+
+      setItems(merged);
+      setHasMore(nextCache.hasMore);
+      setNextOffset(nextCache.nextOffset);
+      writeOpcPageCache(REQUESTS_PAGE_CACHE_KEY, nextCache);
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Weitere Anfragen konnten nicht geladen werden.');
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -1360,7 +1532,20 @@ export default function TicketsPageTranslated() {
         </div>
       )}
 
-      {filteredItems.length > 0 ? <div className="opc-count-line">{filteredItems.length} von {tabItems.length} Einträgen</div> : null}
+      {hasMore ? (
+        <button
+          type="button"
+          className="opc-load-more-button"
+          onClick={() => void loadMoreItems()}
+          disabled={loadingMore}
+        >
+          {loadingMore ? 'Weitere Anfragen werden geladen…' : '25 weitere laden'}
+        </button>
+      ) : null}
+
+      {filteredItems.length > 0 ? (
+        <div className="opc-count-line">{filteredItems.length} geladene Einträge</div>
+      ) : null}
 
       {selectedInquiryPreview ? (
         <InquiryPreviewModal
@@ -1391,6 +1576,26 @@ export default function TicketsPageTranslated() {
         .opc-requests-page,
         .opc-requests-page * {
           box-sizing: border-box;
+        }
+
+
+        .opc-load-more-button {
+          width: 100%;
+          min-height: 48px;
+          margin-top: 14px;
+          border-radius: 14px;
+          border: 1px solid ${BRAND.black};
+          background: ${BRAND.black};
+          color: #FFFFFF;
+          font-family: ${pageFont};
+          font-size: 14px;
+          font-weight: 820;
+          cursor: pointer;
+        }
+
+        .opc-load-more-button:disabled {
+          opacity: 0.62;
+          cursor: wait;
         }
 
         .opc-requests-page {

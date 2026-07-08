@@ -3,7 +3,6 @@ import MirakaDashboardShell from '../components/MirakaDashboardShell';
 import TicketsPageTranslated from '../components/TicketsPageTranslated';
 
 export const prerender = false;
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -52,7 +51,6 @@ import { ClientRouter } from 'astro:transitions';
       }
     })();
   </script>
-  <ClientRouter fallback="swap" />
   
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />

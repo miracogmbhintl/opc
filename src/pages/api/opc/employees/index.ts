@@ -109,6 +109,146 @@ export const GET: APIRoute = async ({ request, locals, cookies }) => {
   try {
     const { supabase, access } = await requireEmployeeHrAccess({ request, locals, cookies });
 
+    // OPC_EMPLOYEE_SUMMARY_MODE_V1
+    const summaryMode = new URL(request.url).searchParams.get('mode') === 'summary';
+    if (summaryMode) {
+      const [employeeResponse, staffResponse, entityResponse, positionResponse, contractResponse] =
+        await Promise.all([
+          supabase
+            .from('opc_employees')
+            .select('id,employee_number,staff_role_id,user_id,legal_first_name,legal_last_name,preferred_name,private_email,business_email,phone_raw,phone_e164,status,assignment_status,profile_completion_status,personnel_type,payroll_in_scope,portal_access_only,employing_entity_id,metadata,entry_date,exit_date,created_at,updated_at')
+            .order('legal_last_name', { ascending: true }),
+          supabase
+            .from('opc_staff_roles')
+            .select('id,user_id,employee_id,email,display_name,phone_raw,phone_e164,whatsapp_wa_id,role,status,can_access_portal,created_at')
+            .order('display_name', { ascending: true }),
+          supabase
+            .from('opc_legal_entities')
+            .select('id,entity_code,legal_name,status')
+            .eq('status', 'active')
+            .order('legal_name'),
+          supabase
+            .from('opc_positions')
+            .select('id,position_code,title_de,is_active,sort_order')
+            .eq('is_active', true)
+            .order('sort_order'),
+          supabase
+            .from('opc_employment_contracts')
+            .select('id,employee_id,position_id,status,valid_from,valid_until'),
+        ]);
+
+      throwOnError(employeeResponse.error, 'Mitarbeiter konnten nicht geladen werden');
+      throwOnError(staffResponse.error, 'Portalrollen konnten nicht geladen werden');
+      throwOnError(entityResponse.error, 'Rechtsträger konnten nicht geladen werden');
+      throwOnError(positionResponse.error, 'Positionen konnten nicht geladen werden');
+      throwOnError(contractResponse.error, 'Positionszuordnungen konnten nicht geladen werden');
+
+      const employees = (employeeResponse.data || []) as JsonRow[];
+      const staffRows = ((staffResponse.data || []) as JsonRow[]).filter((row) =>
+        ['owner', 'admin', 'dispatch', 'dispatcher', 'disposition', 'employee', 'mitarbeiter']
+          .includes(String(row.role || '').trim().toLowerCase()),
+      );
+      const entities = (entityResponse.data || []) as JsonRow[];
+      const positions = (positionResponse.data || []) as JsonRow[];
+      const contracts = (contractResponse.data || []) as JsonRow[];
+      const staffById = new Map(staffRows.map((row): [string, JsonRow] => [String(row.id), row]));
+      const staffByUserId = new Map(
+        staffRows.filter((row) => row.user_id).map((row): [string, JsonRow] => [String(row.user_id), row]),
+      );
+      const entityById = new Map(entities.map((row): [string, JsonRow] => [String(row.id), row]));
+      const positionsById = new Map(positions.map((row): [string, JsonRow] => [String(row.id), row]));
+      const linkedStaffRoleIds = new Set<string>();
+
+      const hrRows = employees.map((employee) => {
+        const staff =
+          (employee.staff_role_id ? staffById.get(String(employee.staff_role_id)) : null) ||
+          (employee.user_id ? staffByUserId.get(String(employee.user_id)) : null) || null;
+        if (staff?.id) linkedStaffRoleIds.add(String(staff.id));
+        const entity = employee.employing_entity_id
+          ? entityById.get(String(employee.employing_entity_id)) || null
+          : null;
+        const position = choosePosition({ employee, contracts, positionsById });
+        return {
+          id: employee.id,
+          employee_id: employee.id,
+          source: 'hr',
+          employee_number: employee.employee_number,
+          staff_role_id: employee.staff_role_id,
+          user_id: employee.user_id,
+          display_name: employee.preferred_name || [employee.legal_first_name, employee.legal_last_name].filter(Boolean).join(' '),
+          email: employee.business_email || employee.private_email || staff?.email || null,
+          phone_raw: employee.phone_raw || staff?.phone_raw || null,
+          phone_e164: employee.phone_e164 || staff?.phone_e164 || null,
+          whatsapp_wa_id: staff?.whatsapp_wa_id || employee.phone_e164 || null,
+          status: employee.status,
+          assignment_status: employee.assignment_status,
+          profile_completion_status: employee.profile_completion_status,
+          personnel_type: employee.personnel_type,
+          payroll_in_scope: employee.payroll_in_scope,
+          portal_access_only: employee.portal_access_only,
+          portal_role: staff?.role || null,
+          entity_id: entity?.id || employee.employing_entity_id || null,
+          entity_code: entity?.entity_code || null,
+          entity_name: entity?.legal_name || null,
+          position,
+          city: null,
+          country_code: null,
+          active_skill_count: 0,
+          preferred_skills: [],
+          availability_mode: null,
+          is_available_today: null,
+          availability_label: 'Details öffnen',
+          entry_date: employee.entry_date,
+        };
+      });
+
+      const portalOnlyRows = staffRows
+        .filter((staff) => !linkedStaffRoleIds.has(String(staff.id)))
+        .map((staff) => ({
+          id: `staff:${staff.id}`,
+          employee_id: null,
+          source: 'portal_only',
+          employee_number: null,
+          staff_role_id: staff.id,
+          display_name: staff.display_name || staff.email || 'Portalnutzer',
+          email: staff.email || null,
+          phone_raw: staff.phone_raw || null,
+          phone_e164: staff.phone_e164 || null,
+          whatsapp_wa_id: staff.whatsapp_wa_id || staff.phone_e164 || null,
+          status: staff.status || 'active',
+          assignment_status: 'available',
+          profile_completion_status: 'missing',
+          personnel_type: 'unclassified',
+          payroll_in_scope: null,
+          portal_access_only: true,
+          portal_role: staff.role || null,
+          entity_id: null,
+          entity_code: null,
+          entity_name: null,
+          position: { id: null, code: null, title: null },
+          city: null,
+          country_code: null,
+          active_skill_count: 0,
+          preferred_skills: [],
+          availability_mode: null,
+          is_available_today: null,
+          availability_label: 'Personalakte fehlt',
+          entry_date: null,
+        }));
+
+      const rows = [...hrRows, ...portalOnlyRows].sort((a, b) =>
+        String(a.display_name || '').localeCompare(String(b.display_name || ''), 'de'),
+      );
+
+      return jsonResponse({
+        success: true,
+        role: access.role,
+        canManagePayroll: access.canManagePayroll,
+        employees: rows,
+        options: { entities, positions, skills: [], unlinkedStaff: [] },
+      });
+    }
+
     const [
       employeeResponse,
       staffResponse,

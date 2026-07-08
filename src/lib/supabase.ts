@@ -2,6 +2,113 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let _client: SupabaseClient | null = null;
 
+// OPC_SUPABASE_REST_DEDUPE_V1
+// Several React islands/components can ask for the same read during one paint.
+// Reuse the exact GET instead of opening duplicate Supabase REST connections.
+type OpcRestSnapshot = {
+  at: number;
+  status: number;
+  statusText: string;
+  headers: Array<[string, string]>;
+  body: ArrayBuffer;
+};
+
+const OPC_REST_DEDUPE_WINDOW_MS = 1200;
+const opcRestInFlight = new Map<string, Promise<Response>>();
+const opcRestRecent = new Map<string, OpcRestSnapshot>();
+
+function responseFromOpcSnapshot(snapshot: OpcRestSnapshot) {
+  return new Response(snapshot.body.slice(0), {
+    status: snapshot.status,
+    statusText: snapshot.statusText,
+    headers: snapshot.headers,
+  });
+}
+
+async function opcDedupedFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  let request: Request;
+
+  try {
+    request = input instanceof Request
+      ? new Request(input, init)
+      : new Request(input, init);
+  } catch {
+    return globalThis.fetch(input, init);
+  }
+
+  const url = new URL(request.url);
+  const isSupabaseRestRead =
+    request.method === 'GET' &&
+    url.pathname.includes('/rest/v1/');
+
+  if (!isSupabaseRestRead) {
+    return globalThis.fetch(request);
+  }
+
+  const key = [
+    request.method,
+    request.url,
+    request.headers.get('authorization') || '',
+    request.headers.get('apikey') || '',
+  ].join('::');
+
+  const cached = opcRestRecent.get(key);
+  if (
+    cached &&
+    Date.now() - cached.at < OPC_REST_DEDUPE_WINDOW_MS
+  ) {
+    return responseFromOpcSnapshot(cached);
+  }
+
+  const existing = opcRestInFlight.get(key);
+  if (existing) {
+    return (await existing).clone();
+  }
+
+  const requestPromise = globalThis.fetch(request);
+  opcRestInFlight.set(key, requestPromise);
+
+  try {
+    const response = await requestPromise;
+    const contentType = response.headers.get('content-type') || '';
+
+    if (
+      response.ok &&
+      contentType.toLowerCase().includes('application/json')
+    ) {
+      try {
+        const body = await response.clone().arrayBuffer();
+        const headers: Array<[string, string]> = [];
+        response.headers.forEach((value, name) => {
+          headers.push([name, value]);
+        });
+
+        opcRestRecent.set(key, {
+          at: Date.now(),
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+          body,
+        });
+
+        if (opcRestRecent.size > 100) {
+          const oldestKey = opcRestRecent.keys().next().value;
+          if (oldestKey) opcRestRecent.delete(oldestKey);
+        }
+      } catch {
+        // A normal uncached response is still returned.
+      }
+    }
+
+    return response.clone();
+  } finally {
+    opcRestInFlight.delete(key);
+  }
+}
+
 export function getSupabase(runtimeEnv?: Record<string, string>) {
   if (_client) return _client;
 
@@ -18,6 +125,7 @@ export function getSupabase(runtimeEnv?: Record<string, string>) {
   }
 
   _client = createClient(url, anon, {
+    global: { fetch: opcDedupedFetch },
     auth: {
       autoRefreshToken: true,
       persistSession: true,

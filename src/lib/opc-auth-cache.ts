@@ -229,47 +229,135 @@ export function clearCachedOpcAuthProfile() {
   }
 }
 
-async function fetchActiveStaffRoleByUser(userId: string, email?: string | null): Promise<StaffRoleRow | null> {
-  const fields = 'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs';
+const AUTH_PROFILE_NETWORK_TIMEOUT_MS = 4500;
+const AUTH_PROFILE_REFRESH_COOLDOWN_MS = 60_000;
+const AUTH_PROFILE_SHARED_REFRESH_KEY = 'opc:auth-profile-refresh-at:v1';
+const AUTH_PROFILE_SHARED_REFRESH_COOLDOWN_MS = 5 * 60_000;
 
-  const byUser = await supabase
-    .from('opc_staff_roles')
-    .select(fields)
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .eq('can_access_portal', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+let authProfileRequestInFlight: Promise<UserProfile | null> | null = null;
+let lastAuthProfileRefreshAt = 0;
+
+function sharedAuthRefreshIsRecent() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const value = Number(
+      window.localStorage.getItem(
+        AUTH_PROFILE_SHARED_REFRESH_KEY,
+      ) || 0,
+    );
+
+    return (
+      Number.isFinite(value) &&
+      value > 0 &&
+      Date.now() - value <
+        AUTH_PROFILE_SHARED_REFRESH_COOLDOWN_MS
+    );
+  } catch {
+    return false;
+  }
+}
+
+function markSharedAuthRefresh() {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(
+      AUTH_PROFILE_SHARED_REFRESH_KEY,
+      String(Date.now()),
+    );
+  } catch {
+    // The in-memory cooldown remains available.
+  }
+}
+
+function withAuthTimeout<T>(
+  request: PromiseLike<T>,
+  label: string,
+  timeoutMs = AUTH_PROFILE_NETWORK_TIMEOUT_MS,
+): Promise<T> {
+  return Promise.race([
+    Promise.resolve(request),
+    new Promise<T>((_, reject) => {
+      globalThis.setTimeout(() => {
+        reject(new Error(`${label} timeout after ${timeoutMs}ms`));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
+function explicitRoleValue(value: unknown) {
+  const clean = String(value || '').toLowerCase().trim();
+
+  return [
+    'godmode',
+    'owner',
+    'admin',
+    'dispatch',
+    'dispatcher',
+    'disposition',
+    'employee',
+    'mitarbeiter',
+    'staff',
+    'client',
+    'kunde',
+  ].includes(clean);
+}
+
+async function fetchActiveStaffRoleByUser(
+  userId: string,
+  email?: string | null,
+): Promise<StaffRoleRow | null> {
+  const fields =
+    'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs';
+
+  const byUser = await withAuthTimeout(
+    supabase
+      .from('opc_staff_roles')
+      .select(fields)
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .eq('can_access_portal', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    'opc_staff_roles by user',
+  );
 
   if (!byUser.error && byUser.data) return byUser.data as StaffRoleRow;
 
+  // Never double the request load when Supabase is timing out.
+  if (byUser.error && isNetworkLikeError(byUser.error)) throw byUser.error;
   if (!email) return null;
 
-  const byEmail = await supabase
-    .from('opc_staff_roles')
-    .select(fields)
-    .ilike('email', email)
-    .eq('status', 'active')
-    .eq('can_access_portal', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const byEmail = await withAuthTimeout(
+    supabase
+      .from('opc_staff_roles')
+      .select(fields)
+      .ilike('email', email)
+      .eq('status', 'active')
+      .eq('can_access_portal', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    'opc_staff_roles by email',
+  );
 
   if (!byEmail.error && byEmail.data) return byEmail.data as StaffRoleRow;
-
   return null;
 }
 
-export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
-  cleanupLegacyAuthCaches();
-
-  const cachedProfile = readCachedOpcAuthProfile();
-
+async function fetchLiveOpcAuthProfile(
+  cachedProfile: UserProfile | null,
+): Promise<UserProfile | null> {
   const {
     data: { session },
     error: sessionError,
-  } = await supabase.auth.getSession();
+  } = await withAuthTimeout(
+    supabase.auth.getSession(),
+    'Supabase session',
+    3500,
+  );
 
   if (sessionError) {
     if (cachedProfile && isNetworkLikeError(sessionError)) return cachedProfile;
@@ -277,66 +365,187 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
   }
 
   const user = session?.user || null;
+
   if (!user) {
     if (cachedProfile && !isExplicitlyLoggedOut()) return cachedProfile;
     return null;
   }
 
-  try {
-    const [staffRole, legacyProfileResult] = await Promise.all([
-      fetchActiveStaffRoleByUser(user.id, user.email),
+  const [staffRoleResult, legacyProfileResult] = await Promise.allSettled([
+    fetchActiveStaffRoleByUser(user.id, user.email),
+    withAuthTimeout(
       supabase
         .from('user_profiles')
         .select('*')
         .eq('id', user.id)
         .maybeSingle(),
-    ]);
-    const legacyProfile = legacyProfileResult.data || null;
-    const legacyRole = normalizeLegacyProfileRole(legacyProfile);
+      'user_profiles',
+    ),
+  ]);
 
-    if (staffRole) {
-      let employeeName = '';
-      let employeeEmail = '';
+  const staffRole =
+    staffRoleResult.status === 'fulfilled' ? staffRoleResult.value : null;
 
-      if (staffRole.employee_id) {
-        const { data: employee } = await supabase
-          .from('employees')
-          .select('full_name, email')
-          .eq('id', staffRole.employee_id)
-          .maybeSingle();
+  const legacyQuery =
+    legacyProfileResult.status === 'fulfilled' ? legacyProfileResult.value : null;
 
-        employeeName = employee?.full_name || '';
-        employeeEmail = employee?.email || '';
+  const legacyProfile =
+    legacyQuery && !legacyQuery.error ? legacyQuery.data || null : null;
+
+  const legacyRole = normalizeLegacyProfileRole(legacyProfile);
+
+  if (staffRole) {
+    let employeeName = '';
+    let employeeEmail = '';
+
+    const needsEmployeeFallback =
+      Boolean(staffRole.employee_id) &&
+      (!staffRole.display_name || !staffRole.email);
+
+    if (needsEmployeeFallback && staffRole.employee_id) {
+      try {
+        const employeeResult = await withAuthTimeout(
+          supabase
+            .from('employees')
+            .select('full_name,email')
+            .eq('id', staffRole.employee_id)
+            .maybeSingle(),
+          'employees profile fallback',
+          3000,
+        );
+
+        employeeName = employeeResult.data?.full_name || '';
+        employeeEmail = employeeResult.data?.email || '';
+      } catch {
+        // Staff role data is sufficient to enter the portal.
       }
-
-      const profile: UserProfile = {
-        id: user.id,
-        email: staffRole.email || employeeEmail || user.email || '',
-        full_name: staffRole.display_name || employeeName || user.email || 'User',
-        role: normalizeStaffRole(staffRole, legacyRole),
-        created_at: '',
-        updated_at: '',
-      };
-
-      writeCachedOpcAuthProfile(profile);
-      return profile;
     }
 
-    if (!legacyProfile) return cachedProfile || null;
+    const profile: UserProfile = {
+      id: user.id,
+      email: staffRole.email || employeeEmail || user.email || '',
+      full_name:
+        staffRole.display_name ||
+        employeeName ||
+        user.user_metadata?.full_name ||
+        user.email ||
+        'User',
+      role: normalizeStaffRole(staffRole, legacyRole),
+      created_at: '',
+      updated_at: '',
+    };
 
+    writeCachedOpcAuthProfile(profile);
+    return profile;
+  }
+
+  if (legacyProfile) {
     const profile: UserProfile = {
       ...legacyProfile,
       id: user.id,
       email: legacyProfile.email || user.email || '',
-      full_name: legacyProfile.full_name || legacyProfile.name || user.email || 'User',
+      full_name:
+        legacyProfile.full_name ||
+        legacyProfile.name ||
+        user.user_metadata?.full_name ||
+        user.email ||
+        'User',
       role: normalizeLegacyProfileRole(legacyProfile),
     } as UserProfile;
 
     writeCachedOpcAuthProfile(profile);
     return profile;
-  } catch (error) {
-    if (cachedProfile && isNetworkLikeError(error)) return cachedProfile;
-    if (cachedProfile) return cachedProfile;
-    return null;
   }
+
+  const metadataRole =
+    user.user_metadata?.app_role ||
+    user.user_metadata?.role ||
+    user.app_metadata?.app_role ||
+    user.app_metadata?.role;
+
+  if (explicitRoleValue(metadataRole)) {
+    const profile: UserProfile = {
+      id: user.id,
+      email: user.email || '',
+      full_name:
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        user.email ||
+        'User',
+      role: normalizeRole(metadataRole),
+      created_at: '',
+      updated_at: '',
+    };
+
+    writeCachedOpcAuthProfile(profile);
+    return profile;
+  }
+
+  return cachedProfile || null;
+}
+
+export async function refreshOpcAuthProfile(
+  force = false,
+): Promise<UserProfile | null> {
+  cleanupLegacyAuthCaches();
+  const cachedProfile = readCachedOpcAuthProfile();
+
+  if (
+    !force &&
+    cachedProfile &&
+    (
+      Date.now() - lastAuthProfileRefreshAt <
+        AUTH_PROFILE_REFRESH_COOLDOWN_MS ||
+      sharedAuthRefreshIsRecent()
+    )
+  ) {
+    return cachedProfile;
+  }
+
+  if (authProfileRequestInFlight) return authProfileRequestInFlight;
+
+  lastAuthProfileRefreshAt = Date.now();
+  markSharedAuthRefresh();
+
+  authProfileRequestInFlight = fetchLiveOpcAuthProfile(cachedProfile)
+    .catch((error) => {
+      if (cachedProfile) {
+        console.warn(
+          '[OPC Auth] Live-Profil nicht erreichbar; Cache wird verwendet.',
+          String((error as any)?.message || error || ''),
+        );
+        return cachedProfile;
+      }
+
+      console.warn(
+        '[OPC Auth] Profil konnte nicht geladen werden.',
+        String((error as any)?.message || error || ''),
+      );
+      return null;
+    })
+    .finally(() => {
+      authProfileRequestInFlight = null;
+    });
+
+  return authProfileRequestInFlight;
+}
+
+export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
+  cleanupLegacyAuthCaches();
+  const cachedProfile = readCachedOpcAuthProfile();
+
+  // Shell, router and sidebar render immediately from one persistent cache.
+  if (cachedProfile && !isExplicitlyLoggedOut()) {
+    if (
+      !authProfileRequestInFlight &&
+      Date.now() - lastAuthProfileRefreshAt >= AUTH_PROFILE_REFRESH_COOLDOWN_MS
+    ) {
+      void refreshOpcAuthProfile();
+    }
+
+    return cachedProfile;
+  }
+
+  // First login without cache: all callers share exactly one request.
+  return refreshOpcAuthProfile(true);
 }

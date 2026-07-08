@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { supabase, type UserProfile } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
-import { loadOpcAuthProfile } from '../lib/opc-auth-cache';
+import { loadOpcAuthProfile, readCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import OwnerDashboardHome from './OwnerDashboardHome';
 
 type EmployeeEntryStatus = 'open' | 'on_break' | 'submitted' | 'approved' | 'rejected' | string;
@@ -731,9 +731,15 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
 }
 
 export default function DashboardHomeRouter() {
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const didProfileLoadRef = useRef(false);
+  const initialProfile = useMemo(
+    () => readCachedOpcAuthProfile(),
+    [],
+  );
+  const [profile, setProfile] = useState<UserProfile | null>(
+    initialProfile,
+  );
+  const [loading, setLoading] = useState(!initialProfile);
+  const didProfileLoadRef = useRef(Boolean(initialProfile));
 
   useEffect(() => {
     if (didProfileLoadRef.current) return;

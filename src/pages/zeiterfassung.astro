@@ -2,7 +2,6 @@
 import EmployeeTimeTrackingPage from '../components/EmployeeTimeTrackingPage';
 import '../styles/miraka-portal.css';
 import '../styles/miraka-dashboard.css';
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -51,7 +50,6 @@ import { ClientRouter } from 'astro:transitions';
       }
     })();
   </script>
-  <ClientRouter fallback="swap" />
   
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />

@@ -245,17 +245,17 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   async function loadUserProfile() {
     try {
-      const liveProfile = await loadOpcAuthProfile();
-
-      if (liveProfile) {
-        setUser(liveProfile);
-        return;
-      }
-
       const cachedProfile = readCachedOpcAuthProfile();
 
       if (cachedProfile) {
         setUser(cachedProfile);
+        return;
+      }
+
+      const liveProfile = await loadOpcAuthProfile();
+
+      if (liveProfile) {
+        setUser(liveProfile);
         return;
       }
 
@@ -293,7 +293,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
     clearCachedOpcAuthProfile();
 
     try {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
     } catch (error) {
       console.warn('Supabase sign out failed:', error);
     }
@@ -669,6 +669,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
           <a
             href={buildUrl(routes.dashboard)}
             data-astro-prefetch="false"
+                data-astro-reload="true"
             title="Orange Pro Clean GmbH"
             style={{
               display: 'flex',
@@ -771,6 +772,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                 key={item.key}
                 href={item.href}
                 data-astro-prefetch="false"
+                data-astro-reload="true"
                 title={isCollapsed ? item.label : undefined}
                 style={{
                   ...desktopButtonBaseStyle,
@@ -927,20 +929,6 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
           </button>
         </div>
       </aside>
-
-      <div
-        className="miraka-mobile-nav"
-        style={{
-          display: 'none',
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 1000,
-          fontFamily: "'Helvetica Neue', Helvetica, Arial, sans-serif",
-          pointerEvents: 'none',
-        }}
-      ></div>
 
       <div
         className="miraka-mobile-nav"

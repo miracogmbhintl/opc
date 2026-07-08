@@ -4,7 +4,6 @@ import JobAssignmentCalendarManager from '../../components/opc/jobs/JobAssignmen
 import '../../styles/miraka-portal.css';
 
 const { id } = Astro.params;
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -48,7 +47,6 @@ import { ClientRouter } from 'astro:transitions';
   </script>
   <script is:inline src="/opc-jobs-feed-bridge.js?v=20260705-2"></script>
   <script is:inline src="/opc-calendar-fetch-bridge.js"></script>
-  <ClientRouter fallback="swap" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />

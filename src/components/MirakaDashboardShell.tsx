@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { type UserProfile, type UserRole } from '../lib/supabase';
+import { supabase, type UserProfile, type UserRole } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
@@ -18,6 +18,83 @@ interface DashboardShellProps {
 
 const dashboardFont =
   '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+
+
+// OPC_AUTH_COOKIE_BRIDGE_V1
+const OPC_AUTH_COOKIE_SYNC_KEY = 'opc:auth-cookie-sync-at:v1';
+const OPC_AUTH_COOKIE_SYNC_INTERVAL_MS = 5 * 60_000;
+let opcAuthCookieSyncInFlight: Promise<void> | null = null;
+
+async function syncOpcAuthCookies(force = false) {
+  if (typeof window === 'undefined') return;
+
+  if (!force) {
+    try {
+      const lastSync = Number(
+        window.localStorage.getItem(
+          OPC_AUTH_COOKIE_SYNC_KEY,
+        ) || 0,
+      );
+
+      if (
+        Number.isFinite(lastSync) &&
+        lastSync > 0 &&
+        Date.now() - lastSync <
+          OPC_AUTH_COOKIE_SYNC_INTERVAL_MS
+      ) {
+        return;
+      }
+    } catch {
+      // Continue without the cross-page timestamp.
+    }
+  }
+
+  if (opcAuthCookieSyncInFlight) {
+    return opcAuthCookieSyncInFlight;
+  }
+
+  opcAuthCookieSyncInFlight = (async () => {
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (!session) return;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      5000,
+    );
+
+    try {
+      const response = await fetch('/api/auth/set-session', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        window.localStorage.setItem(
+          OPC_AUTH_COOKIE_SYNC_KEY,
+          String(Date.now()),
+        );
+      }
+    } catch {
+      // A temporary cookie-sync failure must never log the user out.
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  })().finally(() => {
+    opcAuthCookieSyncInFlight = null;
+  });
+
+  return opcAuthCookieSyncInFlight;
+}
 
 function normalizeRole(role?: string | null): UserRole {
   const clean = String(role || '').toLowerCase().trim();
@@ -258,9 +335,14 @@ function installOpcJobRequestDeduper() {
       url.pathname ===
         '/api/opc/jobs/manager-proxy';
 
+    const isOpcApiRead =
+      request.method === 'GET' &&
+      url.pathname.startsWith('/api/opc/');
+
     if (
       !isAccessRequest &&
-      !isManagerProxy
+      !isManagerProxy &&
+      !isOpcApiRead
     ) {
       return originalFetch(request);
     }
@@ -469,6 +551,34 @@ function DashboardShellContent({
   useEffect(() => {
     const cleanupSingleNavigationGuard = installOpcSingleNavigationGuard();
     return cleanupSingleNavigationGuard;
+  }, []);
+
+
+  useEffect(() => {
+    void syncOpcAuthCookies();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!session) return;
+
+        if (
+          event === 'SIGNED_IN' ||
+          event === 'TOKEN_REFRESHED'
+        ) {
+          window.setTimeout(() => {
+            void syncOpcAuthCookies(
+              event === 'TOKEN_REFRESHED',
+            );
+          }, 0);
+        }
+      },
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

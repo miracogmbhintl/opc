@@ -19,6 +19,7 @@ import {
 import MirakaDashboardShell from './MirakaDashboardShell';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 
 type JsonRow = Record<string, any>;
 
@@ -74,6 +75,9 @@ type ListPayload = {
 
 type MainFilter = 'active' | 'incomplete' | 'all';
 type AvailabilityFilter = 'all' | 'available' | 'unavailable' | 'not_maintained';
+// OPC_EMPLOYEE_SUMMARY_CACHE_V1
+const EMPLOYEE_SUMMARY_CACHE_KEY = 'opc:page-cache:employees:summary:v1';
+const EMPLOYEE_SUMMARY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const BRAND = {
   text: '#111827',
@@ -285,8 +289,9 @@ function EmployeeCard({ row }: { row: EmployeeListRow }) {
         <div>
           <BadgeCheck size={14} />
           <span>
-            {row.active_skill_count} Skill{row.active_skill_count === 1 ? '' : 's'}
-            {row.preferred_skills?.length ? ` · ${row.preferred_skills.join(', ')}` : ''}
+            {row.availability_label === 'Details öffnen'
+              ? 'Skills in den Details'
+              : `${row.active_skill_count} Skill${row.active_skill_count === 1 ? '' : 's'}${row.preferred_skills?.length ? ` · ${row.preferred_skills.join(', ')}` : ''}`}
           </span>
         </div>
       </div>
@@ -339,19 +344,33 @@ export default function EmployeesManagement() {
   const [role, setRole] = useState<'owner' | 'admin' | ''>('');
 
   useEffect(() => {
+    const cached = readOpcPageCache<ListPayload>(
+      EMPLOYEE_SUMMARY_CACHE_KEY,
+      EMPLOYEE_SUMMARY_CACHE_TTL_MS,
+    );
+    if (cached) {
+      applyEmployeePayload(cached);
+      setLoading(false);
+      return;
+    }
     void loadEmployees();
   }, []);
+
+  function applyEmployeePayload(payload: ListPayload) {
+    setRows(payload.employees || []);
+    setEntities(payload.options?.entities || []);
+    setPositions(payload.options?.positions || []);
+    setRole(payload.role || '');
+  }
 
   async function loadEmployees() {
     setLoading(true);
     setErrorMessage('');
 
     try {
-      const payload = await apiGet<ListPayload>('/api/opc/employees');
-      setRows(payload.employees || []);
-      setEntities(payload.options?.entities || []);
-      setPositions(payload.options?.positions || []);
-      setRole(payload.role || '');
+      const payload = await apiGet<ListPayload>('/api/opc/employees?mode=summary');
+      applyEmployeePayload(payload);
+      writeOpcPageCache(EMPLOYEE_SUMMARY_CACHE_KEY, payload);
     } catch (error: any) {
       setErrorMessage(error?.message || 'Mitarbeiter konnten nicht geladen werden.');
     } finally {

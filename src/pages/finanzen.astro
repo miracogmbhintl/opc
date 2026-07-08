@@ -1,6 +1,5 @@
 ---
 import FinancePage from '../components/FinancePage';
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -48,8 +47,6 @@ import { ClientRouter } from 'astro:transitions';
         }
       })();
     </script>
-
-    <ClientRouter fallback="swap" />
 
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />

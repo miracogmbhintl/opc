@@ -1,7 +1,6 @@
 ---
 import BerichtDateiDetailPage from '../../components/BerichtDateiDetailPage';
 import '../../styles/miraka-portal.css';
-import { ClientRouter } from 'astro:transitions';
 
 const { reportId } = Astro.params;
 ---
@@ -52,8 +51,6 @@ const { reportId } = Astro.params;
       }
     })();
   </script>
-
-  <ClientRouter fallback="swap" />
 
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />

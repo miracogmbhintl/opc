@@ -196,6 +196,25 @@ function chunk<T>(items: T[], size: number) {
   return output;
 }
 
+// OPC_CALENDAR_VISIBLE_RANGE_V1
+function resolveCalendarWindow(request: Request) {
+  const url = new URL(request.url);
+  const now = new Date();
+  const defaultStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  defaultStart.setDate(defaultStart.getDate() - 7);
+  const defaultEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  defaultEnd.setDate(defaultEnd.getDate() + 7);
+
+  const requestedStart = new Date(url.searchParams.get('start') || defaultStart.toISOString());
+  const requestedEnd = new Date(url.searchParams.get('end') || defaultEnd.toISOString());
+  const start = Number.isFinite(requestedStart.getTime()) ? requestedStart : defaultStart;
+  const end = Number.isFinite(requestedEnd.getTime()) ? requestedEnd : defaultEnd;
+  const maxEnd = new Date(start.getTime() + 62 * 24 * 60 * 60 * 1000);
+  const safeEnd = end > start && end <= maxEnd ? end : maxEnd;
+
+  return { timeMin: start.toISOString(), timeMax: safeEnd.toISOString() };
+}
+
 async function fetchAllRows(
   serviceSupabase: ReturnType<typeof createClient>,
   tableName: string,
@@ -361,8 +380,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const context = await resolveCurrentUserContext(serviceSupabase, user.id);
     const currentRole = context.currentRole;
     const normalizedCurrentRole = normalizeRole(currentRole);
-    const timeMin = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString();
-    const timeMax = new Date(Date.now() + 1000 * 60 * 60 * 24 * 400).toISOString();
+    const { timeMin, timeMax } = resolveCalendarWindow(request);
 
     let assignedJobIds = new Set<string>();
 
@@ -406,7 +424,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
           ].join(',')
         )
         .order('created_at', { ascending: false })
-        .limit(50),
+        .limit(20),
     ]);
 
     if (calendarsResult.error) throw calendarsResult.error;
@@ -437,19 +455,17 @@ export const GET: APIRoute = async ({ request, locals }) => {
     let attendees: AnyRow[] = [];
 
     if (visibleCalendarIds.length > 0) {
-      const rawEvents = await fetchAllRows(
-        serviceSupabase,
-        'opc_calendar_events',
-        (from, to) =>
-          serviceSupabase
-            .from('opc_calendar_events')
-            .select('*')
-            .in('calendar_id', visibleCalendarIds)
-            .gte('ends_at', timeMin)
-            .lte('starts_at', timeMax)
-            .order('starts_at', { ascending: true })
-            .range(from, to)
-      );
+      const eventResult = await serviceSupabase
+        .from('opc_calendar_events')
+        .select('*')
+        .in('calendar_id', visibleCalendarIds)
+        .gte('ends_at', timeMin)
+        .lte('starts_at', timeMax)
+        .order('starts_at', { ascending: true })
+        .limit(500);
+
+      if (eventResult.error) throw eventResult.error;
+      const rawEvents = eventResult.data || [];
 
       events =
         context.canViewAllJobs || isAdminRole(currentRole)
@@ -458,16 +474,16 @@ export const GET: APIRoute = async ({ request, locals }) => {
               canEmployeeSeeEvent(event, calendarById, assignedJobIds, context, user.id)
             );
 
-      attendees = await fetchAllRows(
-        serviceSupabase,
-        'opc_calendar_event_attendees',
-        (from, to) =>
-          serviceSupabase
-            .from('opc_calendar_event_attendees')
-            .select('*')
-            .order('created_at', { ascending: true })
-            .range(from, to)
-      );
+      const visibleEventIds = events.map((event: AnyRow) => String(event.id)).filter(Boolean);
+      for (const eventIds of chunk(visibleEventIds, 200)) {
+        const attendeeResult = await serviceSupabase
+          .from('opc_calendar_event_attendees')
+          .select('*')
+          .in('event_id', eventIds)
+          .order('created_at', { ascending: true });
+        if (attendeeResult.error) throw attendeeResult.error;
+        attendees.push(...(attendeeResult.data || []));
+      }
     }
 
     const eventsWithAttendees = events.map((event: AnyRow) => ({

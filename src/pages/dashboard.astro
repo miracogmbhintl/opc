@@ -1,9 +1,7 @@
 ---
-import MirakaDashboardShell from '../components/MirakaDashboardShell';
-import DashboardHomeRouter from '../components/DashboardHomeRouter';
+import DashboardPageApp from '../components/DashboardPageApp';
 import '../styles/miraka-portal.css';
 import '../styles/miraka-dashboard.css';
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -52,7 +50,6 @@ import { ClientRouter } from 'astro:transitions';
       }
     })();
   </script>
-  <ClientRouter fallback="swap" />
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
@@ -78,14 +75,6 @@ import { ClientRouter } from 'astro:transitions';
 </head>
 
 <body>
-  <MirakaDashboardShell
-    client:only="react"
-    title="Orange Pro Clean Dashboard"
-    requiredRole={['owner', 'admin', 'dispatch', 'employee']}
-    currentPath="/dashboard"
-    hideTopBar={true}
-  >
-    <DashboardHomeRouter client:only="react" />
-  </MirakaDashboardShell>
+  <DashboardPageApp client:only="react" />
 </body>
 </html>

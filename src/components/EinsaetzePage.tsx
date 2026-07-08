@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { loadOpcAuthProfile } from '../lib/opc-auth-cache';
 import MirakaDashboardShell from './MirakaDashboardShell';
 
 interface RawJob {
@@ -65,6 +66,11 @@ const BRAND = {
   amber: '#92400E',
   blue: '#155E75',
 };
+
+// OPC_JOBS_PROGRESSIVE_LOAD_V1
+const JOBS_INITIAL_LIMIT = 100;
+const JOBS_HISTORY_PAGE_SIZE = 25;
+const JOBS_CLOSED_FILTER = '(completed,cancelled,report_approved,approved,sent_to_client,rejected,inactive)';
 
 const closedStatuses = new Set([
   'completed',
@@ -294,14 +300,22 @@ function isSameLocalDay(value: string | null | undefined, referenceDate: Date) {
   return date >= startOfDay(referenceDate) && date <= endOfDay(referenceDate);
 }
 
+function startOfCalendarWeek(referenceDate: Date) {
+  const start = startOfDay(referenceDate);
+  const weekday = start.getDay();
+  start.setDate(start.getDate() + (weekday === 0 ? -6 : 1 - weekday));
+  return start;
+}
+
+function endOfCalendarWeek(referenceDate: Date) {
+  return endOfDay(addDays(startOfCalendarWeek(referenceDate), 6));
+}
+
 function isWithinWeek(value: string | null | undefined, referenceDate: Date) {
   if (!value) return false;
-
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return false;
-
-  return date >= startOfDay(referenceDate) && date <= endOfDay(addDays(referenceDate, 7));
+  return date >= startOfCalendarWeek(referenceDate) && date <= endOfCalendarWeek(referenceDate);
 }
 
 function isWithinCustomDateRange(value: string | null | undefined, startValue: string, endValue: string) {
@@ -538,15 +552,19 @@ function EinsaetzeOverview() {
   const [errorMessage, setErrorMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState<JobDateFilter>('today');
+  const [dateFilter, setDateFilter] = useState<JobDateFilter>('week');
   const [customDateStart, setCustomDateStart] = useState('');
   const [customDateEnd, setCustomDateEnd] = useState('');
   const [jobTypeFilter, setJobTypeFilter] = useState<JobTypeFilter>('all');
   const [showDatePopover, setShowDatePopover] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [viewerRole, setViewerRole] = useState<ViewerRole>('');
+  const [hasMoreJobs, setHasMoreJobs] = useState(false);
+  const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
   const didLoadViewerRef = useRef(false);
   const lastJobsLoadRoleRef = useRef<ViewerRole | ''>('');
+  const jobsSourceRef = useRef('opc_my_portal_job_feed');
+  const historyCursorRef = useRef('');
 
   const employeeMode = viewerRole === 'employee';
   const canPlanJobs = isManagerRole(viewerRole);
@@ -575,41 +593,8 @@ function EinsaetzeOverview() {
 
   async function loadViewer() {
     try {
-      const { data: authData } = await supabase.auth.getUser();
-      const authUser = authData?.user || null;
-
-      if (!authUser) {
-        setViewerRole('client');
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('role,opc_staff_role,staff_role')
-        .eq('id', authUser.id)
-        .maybeSingle();
-
-      let role = normalizeRole(profile?.role || profile?.opc_staff_role || profile?.staff_role);
-
-      const { data: staff } = await supabase
-        .from('opc_staff_roles')
-        .select('role,can_manage_jobs,can_view_all_jobs')
-        .eq('user_id', authUser.id)
-        .maybeSingle();
-
-      if (staff?.role) {
-        role = normalizeRole(staff.role);
-      }
-
-      if (
-        role !== 'employee' &&
-        !isManagerRole(role) &&
-        (staff?.can_manage_jobs === true || staff?.can_view_all_jobs === true)
-      ) {
-        role = 'dispatch';
-      }
-
-      setViewerRole(role || 'client');
+      const profile = await loadOpcAuthProfile();
+      setViewerRole(normalizeRole(profile?.role) || 'client');
     } catch {
       setViewerRole('client');
     }
@@ -620,41 +605,50 @@ function EinsaetzeOverview() {
     setErrorMessage('');
 
     try {
-      const managerMode = isManagerRole(roleOverride);
-      let data: any[] | null = null;
-      let error: any = null;
+      const sources = isManagerRole(roleOverride)
+        ? ['opc_job_detail_view', 'opc_service_jobs']
+        : ['opc_my_portal_job_feed'];
+      const weekStart = startOfCalendarWeek(new Date());
+      const weekEnd = endOfCalendarWeek(new Date());
+      let finalRows: RawJob[] = [];
+      let selectedSource = '';
+      let lastError: any = null;
 
-      if (managerMode) {
-        const detailResponse = await supabase
-          .from('opc_job_detail_view')
-          .select('*')
-          .limit(2000);
-
-        data = detailResponse.data || null;
-        error = detailResponse.error;
-
-        if (error) {
-          const fallbackResponse = await supabase
-            .from('opc_service_jobs')
+      for (const source of sources) {
+        const [weekResponse, openResponse] = await Promise.all([
+          supabase
+            .from(source)
             .select('*')
-            .limit(2000);
+            .gte('planned_start', weekStart.toISOString())
+            .lte('planned_start', weekEnd.toISOString())
+            .order('planned_start', { ascending: true })
+            .limit(JOBS_INITIAL_LIMIT),
+          supabase
+            .from(source)
+            .select('*')
+            .or(`status.is.null,status.not.in.${JOBS_CLOSED_FILTER}`)
+            .order('planned_start', { ascending: true, nullsFirst: false })
+            .limit(JOBS_INITIAL_LIMIT),
+        ]);
 
-          data = fallbackResponse.data || null;
-          error = fallbackResponse.error;
+        if (weekResponse.error || openResponse.error) {
+          lastError = weekResponse.error || openResponse.error;
+          continue;
         }
-      } else {
-        const response = await supabase
-          .from('opc_my_portal_job_feed')
-          .select('*')
-          .limit(500);
 
-        data = response.data || null;
-        error = response.error;
+        const byId = new Map<string, RawJob>();
+        [...(weekResponse.data || []), ...(openResponse.data || [])].forEach((row: RawJob, index) => {
+          const key = getFirstValue(row, ['job_id', 'id', 'project_id'], `row-${index}`);
+          byId.set(key, row);
+        });
+        finalRows = Array.from(byId.values());
+        selectedSource = source;
+        break;
       }
 
-      if (error) throw error;
+      if (!selectedSource) throw lastError || new Error('Keine Einsatzquelle verfügbar.');
 
-      const mappedJobs = (data || [])
+      const mappedJobs = finalRows
         .map(mapJob)
         .filter((job) => job.id)
         .sort((a, b) => {
@@ -663,11 +657,52 @@ function EinsaetzeOverview() {
           return aTime - bTime;
         });
 
+      jobsSourceRef.current = selectedSource;
+      historyCursorRef.current = weekStart.toISOString();
+      setHasMoreJobs(true);
       setJobs(mappedJobs);
     } catch (error: any) {
       setErrorMessage(error?.message || 'Einsätze konnten nicht geladen werden.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadMoreJobs() {
+    if (loadingMoreJobs || !hasMoreJobs || !historyCursorRef.current) return;
+    setLoadingMoreJobs(true);
+    setErrorMessage('');
+
+    try {
+      const response = await supabase
+        .from(jobsSourceRef.current)
+        .select('*')
+        .lt('planned_start', historyCursorRef.current)
+        .order('planned_start', { ascending: false })
+        .limit(JOBS_HISTORY_PAGE_SIZE + 1);
+      if (response.error) throw response.error;
+
+      const pageRows = (response.data || []) as RawJob[];
+      const visibleRows = pageRows.slice(0, JOBS_HISTORY_PAGE_SIZE);
+      const pageJobs = visibleRows.map(mapJob).filter((job) => job.id);
+      const byId = new Map(jobs.map((job) => [job.id, job]));
+      pageJobs.forEach((job) => byId.set(job.id, job));
+      const merged = Array.from(byId.values()).sort((a, b) => {
+        const aTime = a.plannedStart ? new Date(a.plannedStart).getTime() : 0;
+        const bTime = b.plannedStart ? new Date(b.plannedStart).getTime() : 0;
+        return aTime - bTime;
+      });
+
+      const last = visibleRows[visibleRows.length - 1];
+      const nextCursor = last ? getFirstValue(last, ['planned_start', 'start_time', 'scheduled_at']) : '';
+      if (nextCursor) historyCursorRef.current = nextCursor;
+      setJobs(merged);
+      setDateFilter('all');
+      setHasMoreJobs(pageRows.length > JOBS_HISTORY_PAGE_SIZE && Boolean(nextCursor));
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Frühere Einsätze konnten nicht geladen werden.');
+    } finally {
+      setLoadingMoreJobs(false);
     }
   }
 
@@ -933,6 +968,17 @@ function EinsaetzeOverview() {
             ))}
           </div>
         )}
+
+        {hasMoreJobs ? (
+          <button
+            type="button"
+            className="opc-jobs-load-more"
+            onClick={() => void loadMoreJobs()}
+            disabled={loadingMoreJobs}
+          >
+            {loadingMoreJobs ? 'Frühere Einsätze werden geladen…' : '25 frühere Einsätze laden'}
+          </button>
+        ) : null}
       </div>
 
       <style>{`
@@ -1131,6 +1177,25 @@ function EinsaetzeOverview() {
           display: flex;
           flex-direction: column;
           gap: 12px;
+        }
+
+        .opc-jobs-load-more {
+          width: 100%;
+          min-height: 48px;
+          margin-top: 14px;
+          border-radius: 14px;
+          border: 1px solid ${BRAND.black};
+          background: ${BRAND.black};
+          color: #FFFFFF;
+          font-family: ${pageFont};
+          font-size: 14px;
+          font-weight: 820;
+          cursor: pointer;
+        }
+
+        .opc-jobs-load-more:disabled {
+          opacity: 0.62;
+          cursor: wait;
         }
 
         .opc-job-card {

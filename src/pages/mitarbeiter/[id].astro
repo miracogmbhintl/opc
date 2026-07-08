@@ -1,7 +1,6 @@
 ---
 import EmployeeDetailPage from '../../components/EmployeeDetailPage';
 import '../../styles/miraka-portal.css';
-import { ClientRouter } from 'astro:transitions';
 const { id } = Astro.params;
 ---
 
@@ -27,7 +26,6 @@ const { id } = Astro.params;
       } catch { document.startViewTransition = noMotionTransition; }
     })();
   </script>
-  <ClientRouter fallback="swap" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />

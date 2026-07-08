@@ -29,7 +29,7 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
 
   const handleLogout = async () => {
     try {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' });
       window.location.href = `${baseUrl}/`;
     } catch (error) {
       console.error('Logout error:', error);

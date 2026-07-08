@@ -1,7 +1,6 @@
 ---
 import EinsaetzePage from '../components/EinsaetzePage';
 import '../styles/miraka-portal.css';
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -51,7 +50,6 @@ import { ClientRouter } from 'astro:transitions';
     })();
   </script>
   <script is:inline src="/opc-jobs-feed-bridge.js?v=20260705-2"></script>
-  <ClientRouter fallback="swap" />
   
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />

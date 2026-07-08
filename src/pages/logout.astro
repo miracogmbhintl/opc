@@ -40,7 +40,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
         
         const supabase = createClient(supabaseUrl, supabaseAnonKey);
         
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'local' });
         
         // Small delay to ensure signout completes
         setTimeout(() => {

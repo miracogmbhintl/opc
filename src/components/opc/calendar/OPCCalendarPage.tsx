@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import CalendarEventModal from './CalendarEventModal';
 import CalendarInvitePanel from './CalendarInvitePanel';
+import { readOpcPageCache, writeOpcPageCache } from '../../../lib/opc-page-cache';
 
 type CalendarRow = {
   id: string;
@@ -113,6 +114,12 @@ type ModalState =
   | null;
 
 type CalendarViewFilter = 'all' | 'employee' | 'admin' | 'team';
+type CalendarVisibleRange = { start: string; end: string };
+// OPC_CALENDAR_RANGE_CACHE_V1
+const CALENDAR_RANGE_CACHE_TTL_MS = 2 * 60 * 1000;
+function calendarRangeCacheKey(range: CalendarVisibleRange) {
+  return `opc:page-cache:calendar:${range.start.slice(0, 10)}:${range.end.slice(0, 10)}`;
+}
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'done';
 
 const BRAND = {
@@ -1554,6 +1561,9 @@ function getInitialCalendarScrollTime() {
 
 export default function OPCCalendarPage() {
   const calendarRef = useRef<FullCalendar | null>(null);
+  const visibleRangeRef = useRef<CalendarVisibleRange | null>(null);
+  const loadedRangeKeyRef = useRef('');
+  const calendarLoadInFlightRef = useRef<Promise<void> | null>(null);
   const initialCalendarScrollTime = getInitialCalendarScrollTime();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -1684,28 +1694,56 @@ export default function OPCCalendarPage() {
       .slice(0, 4);
   }, [filteredEvents]);
 
-  const loadCalendarData = useCallback(async () => {
+  const loadCalendarData = useCallback(async (
+    rangeOverride?: CalendarVisibleRange | null,
+    force = false,
+  ) => {
+    const range = rangeOverride || visibleRangeRef.current;
+    if (!range) return;
+    const cacheKey = calendarRangeCacheKey(range);
+
+    if (!force) {
+      const cached = readOpcPageCache<ApiPayload>(cacheKey, CALENDAR_RANGE_CACHE_TTL_MS);
+      if (cached) {
+        setCalendars(cached.calendars || []);
+        setEvents(cached.events || []);
+        setStaff(cached.staff || []);
+        setCurrentUserId(cached.currentUserId || '');
+        setCurrentRole(cached.currentRole || 'client');
+        loadedRangeKeyRef.current = cacheKey;
+        return;
+      }
+    }
+
+    if (calendarLoadInFlightRef.current && loadedRangeKeyRef.current === cacheKey) {
+      return calendarLoadInFlightRef.current;
+    }
+
     setIsRefreshing(true);
     setErrorMessage('');
+    loadedRangeKeyRef.current = cacheKey;
 
-    try {
-      const data = await apiFetch<ApiPayload>('/api/opc/calendar/events');
+    const task = (async () => {
+      try {
+        const params = new URLSearchParams({ start: range.start, end: range.end });
+        const data = await apiFetch<ApiPayload>(`/api/opc/calendar/events?${params.toString()}`);
+        setCalendars(data.calendars || []);
+        setEvents(data.events || []);
+        setStaff(data.staff || []);
+        setCurrentUserId(data.currentUserId || '');
+        setCurrentRole(data.currentRole || 'client');
+        writeOpcPageCache(cacheKey, data);
+      } catch (error: any) {
+        setErrorMessage(error?.message || 'Kalender konnte nicht geladen werden.');
+      } finally {
+        setIsRefreshing(false);
+        calendarLoadInFlightRef.current = null;
+      }
+    })();
 
-      setCalendars(data.calendars || []);
-      setEvents(data.events || []);
-      setStaff(data.staff || []);
-      setCurrentUserId(data.currentUserId || '');
-      setCurrentRole(data.currentRole || 'client');
-    } catch (error: any) {
-      setErrorMessage(error?.message || 'Kalender konnte nicht geladen werden.');
-    } finally {
-      setIsRefreshing(false);
-    }
+    calendarLoadInFlightRef.current = task;
+    return task;
   }, []);
-
-  useEffect(() => {
-    void loadCalendarData();
-  }, [loadCalendarData]);
 
   async function handleCreateOrUpdate(payload: {
     id?: string;
@@ -1755,7 +1793,7 @@ export default function OPCCalendarPage() {
 
       setModal(null);
       setQuickViewEvent(null);
-      await loadCalendarData();
+      await loadCalendarData(visibleRangeRef.current, true);
     } catch (error: any) {
       const message = error?.message || 'Kalendereintrag konnte nicht gespeichert werden.';
       setErrorMessage(message);
@@ -1837,7 +1875,7 @@ export default function OPCCalendarPage() {
       setQuickMeetModalOpen(false);
       setQuickViewEvent(event);
 
-      await loadCalendarData();
+      await loadCalendarData(visibleRangeRef.current, true);
     } catch (error: any) {
       setErrorMessage(error?.message || 'Google Meet konnte nicht erstellt werden.');
       throw error;
@@ -1859,7 +1897,7 @@ export default function OPCCalendarPage() {
         }),
       });
 
-      await loadCalendarData();
+      await loadCalendarData(visibleRangeRef.current, true);
     } catch (error: any) {
       setErrorMessage(error?.message || 'Antwort konnte nicht gespeichert werden.');
     } finally {
@@ -2030,7 +2068,7 @@ export default function OPCCalendarPage() {
             type="button"
             className="opc-calendar-refresh-button"
             disabled={isRefreshing}
-            onClick={() => void loadCalendarData()}
+            onClick={() => void loadCalendarData(visibleRangeRef.current, true)}
             style={{
               ...secondaryButtonStyle,
               opacity: isRefreshing ? 0.72 : 1,
@@ -2144,6 +2182,12 @@ export default function OPCCalendarPage() {
             datesSet={(arg) => {
               setViewMode(arg.view.type);
               setCalendarTitle(arg.view.title);
+              const range = {
+                start: arg.start.toISOString(),
+                end: arg.end.toISOString(),
+              };
+              visibleRangeRef.current = range;
+              void loadCalendarData(range);
             }}
             eventContent={(arg) => {
               const raw = arg.event.extendedProps.raw as CalendarEvent;

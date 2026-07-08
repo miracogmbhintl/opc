@@ -121,7 +121,7 @@ export async function secureLogout(redirectTo: string = '/') {
   }
 
   try {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
   } catch {
     // Ignore logout network failures and clear local state anyway.
   }
@@ -159,13 +159,13 @@ export async function checkSessionBeforeRender(): Promise<boolean> {
     if (data?.session) return true;
 
     return Boolean(
-      window.localStorage.getItem('opc:auth-profile-cache:v4:persistent') ||
+      window.localStorage.getItem('opc:auth-profile-cache:v5:persistent') ||
       window.localStorage.getItem('mco_user_data') ||
       window.localStorage.getItem('mco_auth')
     );
   } catch {
     return Boolean(
-      window.localStorage.getItem('opc:auth-profile-cache:v4:persistent') ||
+      window.localStorage.getItem('opc:auth-profile-cache:v5:persistent') ||
       window.localStorage.getItem('mco_user_data') ||
       window.localStorage.getItem('mco_auth')
     );

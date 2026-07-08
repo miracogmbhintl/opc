@@ -1,6 +1,5 @@
 ---
 import NewQuotePage from '../../components/NewQuotePage';
-import { ClientRouter } from 'astro:transitions';
 ---
 
 <!DOCTYPE html>
@@ -25,7 +24,6 @@ import { ClientRouter } from 'astro:transitions';
       })();
     </script>
     <script is:inline src="/opc-owner-finance-guard.js"></script>
-    <ClientRouter fallback="swap" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
     <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
