@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import OwnerBillingReadyWidget from './OwnerBillingReadyWidget';
 import {
   AlertCircle,
   Clock,
@@ -426,6 +427,8 @@ export default function AdminDashboardHome() {
           {stats.activeJobs} aktive Einsätze • {stats.openReports} offene Berichte • {attentionCount} benötigen Aufmerksamkeit
         </p>
       </div>
+
+      <OwnerBillingReadyWidget />
 
       {urgentItems.length > 0 && (
         <div

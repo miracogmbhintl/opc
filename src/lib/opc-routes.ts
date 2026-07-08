@@ -30,6 +30,8 @@ export const OPC_ROUTES = {
   createDocument: '/dokumente/neu',
   tickets: '/anfragen-schaeden',
   qrCodes: '/qr-codes',
+  finance: '/finanzen',
+  automations: '/rechnungsautomationen',
   settings: '/einstellungen',
   logout: '/logout',
 
@@ -93,6 +95,8 @@ export function legacyRouteToOpc(path: string): string {
     [/^\/dokumente$/, OPC_ROUTES.documents],
     [/^\/dokumente\/neu$/, OPC_ROUTES.createDocument],
     [/^\/qr-codes$/, OPC_ROUTES.qrCodes],
+    [/^\/finanzen$/, OPC_ROUTES.finance],
+    [/^\/rechnungsautomationen$/, OPC_ROUTES.automations],
     [/^\/einstellungen$/, OPC_ROUTES.settings],
     [/^\/logout$/, OPC_ROUTES.logout],
 

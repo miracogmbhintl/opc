@@ -28,6 +28,7 @@ import {
   Users,
   UsersRound,
   WalletCards,
+  Workflow,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { safeNavigate } from '../lib/opc-navigation-guard';
@@ -174,6 +175,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       files: routeFor('files', '/berichte-dateien'),
       finance: routeFor('finance', '/finanzen'),
+      automations: routeFor('automations', '/rechnungsautomationen'),
       tickets: routeFor('tickets', '/anfragen-schaeden'),
       qrCodes: routeFor('qrCodes', '/qr-codes'),
       settings: routeFor('settings', '/einstellungen'),
@@ -431,6 +433,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
               icon: WalletCards,
               key: 'finance',
               match: [routes.finance, '/finanzen', '/finance', '/dashboard/finanzen'],
+            },
+            {
+              href: buildUrl(routes.automations),
+              label: 'Automationen',
+              icon: Workflow,
+              key: 'automations',
+              match: [routes.automations, '/rechnungsautomationen'],
             },
           ]
         : []),

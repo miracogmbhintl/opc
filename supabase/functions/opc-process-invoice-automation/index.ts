@@ -6,17 +6,27 @@ const JSON_HEADERS = {
 };
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: JSON_HEADERS,
+  });
 }
 
 function clean(value: unknown) {
   return String(value ?? '').trim();
 }
 
+function automationEnabled() {
+  return ['1', 'true', 'yes', 'on'].includes(
+    clean(Deno.env.get('OPC_INVOICE_AUTOMATION_ENABLED')).toLowerCase(),
+  );
+}
+
 function constantTimeEqual(left: string, right: string) {
   if (!left || !right || left.length !== right.length) return false;
 
   let result = 0;
+
   for (let index = 0; index < left.length; index += 1) {
     result |= left.charCodeAt(index) ^ right.charCodeAt(index);
   }
@@ -30,6 +40,8 @@ Deno.serve(async (request) => {
       ok: true,
       service: 'opc-process-invoice-automation',
       runtime: 'supabase-edge-function',
+      enabled: automationEnabled(),
+      mode: automationEnabled() ? 'automatic' : 'manual-approval',
     });
   }
 
@@ -45,7 +57,8 @@ Deno.serve(async (request) => {
       return json(
         {
           ok: false,
-          error: 'OPC_AUTOMATION_SECRET ist in den Supabase Function Secrets nicht konfiguriert.',
+          error:
+            'OPC_AUTOMATION_SECRET ist in den Supabase Function Secrets nicht konfiguriert.',
         },
         500,
       );
@@ -55,7 +68,23 @@ Deno.serve(async (request) => {
       return json({ ok: false, error: 'Nicht autorisiert.' }, 401);
     }
 
-    const body = await request.json().catch(() => ({})) as Record<string, unknown>;
+    if (!automationEnabled()) {
+      return json({
+        ok: true,
+        disabled: true,
+        mode: 'manual-approval',
+        claimed: 0,
+        completed: 0,
+        manualReview: 0,
+        failed: 0,
+        results: [],
+      });
+    }
+
+    const body = await request
+      .json()
+      .catch(() => ({})) as Record<string, unknown>;
+
     const requestedLimit = Number(body.limit || 10);
     const limit = Math.max(
       1,
@@ -69,13 +98,25 @@ Deno.serve(async (request) => {
     });
 
     console.log('[opc-process-invoice-automation] completed', summary);
-    return json({ ok: true, ...summary });
+
+    return json({
+      ok: true,
+      ...summary,
+    });
   } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : 'Rechnungsautomatisierung ist fehlgeschlagen.';
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Rechnungsautomatisierung ist fehlgeschlagen.';
 
     console.error('[opc-process-invoice-automation] failed', error);
-    return json({ ok: false, error: message }, 500);
+
+    return json(
+      {
+        ok: false,
+        error: message,
+      },
+      500,
+    );
   }
 });

@@ -26,6 +26,7 @@ import {
 import CalendarEventModal from './CalendarEventModal';
 import CalendarInvitePanel from './CalendarInvitePanel';
 import { readOpcPageCache, writeOpcPageCache } from '../../../lib/opc-page-cache';
+import { baseUrl } from '../../../lib/base-url';
 
 type CalendarRow = {
   id: string;
@@ -60,6 +61,7 @@ type CalendarAttendee = {
 type CalendarEvent = {
   id: string;
   calendar_id: string;
+  job_id?: string | null;
   create_google_meet?: boolean;
   sync_google_calendar?: boolean;
   event_type:
@@ -1576,7 +1578,7 @@ export default function OPCCalendarPage() {
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentRole, setCurrentRole] = useState('client');
 
-  const [activeTab, setActiveTab] = useState<CalendarViewFilter>('all');
+  const [activeTab, setActiveTab] = useState<CalendarViewFilter>('team');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [staffFilter, setStaffFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1677,7 +1679,7 @@ export default function OPCCalendarPage() {
     const teamCalendar = calendars.find((calendar) => calendar.calendar_type === 'team');
     const employeeCalendar = calendars.find((calendar) => calendar.calendar_type === 'employee');
 
-    return ownCalendar?.id || teamCalendar?.id || employeeCalendar?.id || calendars[0]?.id || '';
+    return teamCalendar?.id || ownCalendar?.id || employeeCalendar?.id || calendars[0]?.id || '';
   }, [calendars, currentUserId]);
 
   const focusEvents = useMemo(() => {
@@ -1966,11 +1968,35 @@ export default function OPCCalendarPage() {
     });
   }
 
+  function openCalendarEvent(event: CalendarEvent) {
+    const jobId = String(
+      event.job_id ||
+        event.metadata?.job_id ||
+        event.metadata?.source_job_id ||
+        '',
+    ).trim();
+
+    if (jobId) {
+      const query = new URLSearchParams({
+        from: 'kalender',
+        calendarEventId: event.id,
+      });
+
+      window.location.assign(
+        `${baseUrl}/einsatz/${encodeURIComponent(jobId)}?${query.toString()}`,
+      );
+      return;
+    }
+
+    setQuickViewEvent(event);
+  }
+
   function handleEventClick(arg: EventClickArg) {
     const event = arg.event.extendedProps.raw as CalendarEvent | undefined;
     if (!event) return;
 
-    setQuickViewEvent(event);
+    arg.jsEvent.preventDefault();
+    openCalendarEvent(event);
   }
 
   function changeView(nextView: string) {
@@ -2115,7 +2141,7 @@ export default function OPCCalendarPage() {
       {focusEvents.length > 0 && (
         <section className="opc-calendar-focus-strip">
           {focusEvents.map((event) => (
-            <button key={event.id} type="button" onClick={() => setQuickViewEvent(event)} className="opc-calendar-focus-card">
+            <button key={event.id} type="button" onClick={() => openCalendarEvent(event)} className="opc-calendar-focus-card">
               <span className="opc-focus-label">{getFocusLabel(event)}</span>
               <span className="opc-focus-title">{event.title}</span>
               <span className="opc-focus-meta">{formatTimeRange(event.starts_at, event.ends_at)}</span>
