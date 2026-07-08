@@ -1,0 +1,44 @@
+name: Apply manual billing patches
+
+on:
+  push:
+    branches:
+      - agent/manual-billing-approval
+    paths:
+      - '.github/workflows/apply-manual-billing-patches.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[manual-billing-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/manual-billing-approval
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Apply targeted update
+        run: python3 scripts/apply_manual_billing_patches.py
+
+      - name: Install dependencies
+        run: npm ci --silent
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit validated changes
+        shell: bash
+        run: |
+          git config user.name "opc-automation-bot"
+          git config user.email "automation@orangeproclean.ch"
+          git add -A
+          git commit -m "Add manual billing approval workflow [manual-billing-applied]"
+          git push origin HEAD:agent/manual-billing-approval
