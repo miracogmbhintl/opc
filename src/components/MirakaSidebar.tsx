@@ -109,6 +109,13 @@ function normalizeRole(role: string): NormalizedRole {
   return 'client';
 }
 
+function isSaraSpecialAdmin(user: UserProfile | null) {
+  const profile = user as any;
+  const email = String(profile?.email || '').trim().toLowerCase();
+
+  return email === 's.batista@orangeproclean.ch';
+}
+
 function getRoleLabel(role: string) {
   const normalizedRole = normalizeRole(role);
 
@@ -523,7 +530,34 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       },
     ];
 
-    if (normalizedRole === 'owner' || normalizedRole === 'admin' || normalizedRole === 'dispatch') {
+    if (normalizedRole === 'owner') {
+      return ownerAdminDispatchItems;
+    }
+
+    if (normalizedRole === 'admin') {
+      const adminAllowedKeys = new Set([
+        'overview',
+        'clients',
+        'inquiries',
+        'inspections',
+        'calendar',
+        'zeiterfassung',
+        'settings',
+      ]);
+
+      if (isSaraSpecialAdmin(user)) {
+        [
+          'employees',
+          'jobs',
+          'tickets',
+          'files',
+        ].forEach((key) => adminAllowedKeys.add(key));
+      }
+
+      return ownerAdminDispatchItems.filter((item) => adminAllowedKeys.has(item.key));
+    }
+
+    if (normalizedRole === 'dispatch') {
       return ownerAdminDispatchItems;
     }
 
@@ -556,7 +590,11 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       ? ['overview', 'jobs', 'tickets', 'settings']
       : normalizedRole === 'employee'
         ? ['overview', 'zeiterfassung', 'jobs', 'calendar', 'settings']
-        : ['overview', 'zeiterfassung', 'jobs', 'settings'];
+        : normalizedRole === 'admin'
+          ? isSaraSpecialAdmin(user)
+            ? ['overview', 'inquiries', 'jobs', 'settings']
+            : ['overview', 'clients', 'inquiries', 'settings']
+          : ['overview', 'zeiterfassung', 'jobs', 'settings'];
 
   function toggleMobileNav() {
     setIsMobileExpanded(!isMobileExpanded);
