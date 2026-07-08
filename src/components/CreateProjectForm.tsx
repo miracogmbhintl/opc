@@ -390,6 +390,7 @@ export default function CreateProjectForm() {
   const [databaseError, setDatabaseError] = useState<string | null>(null);
   const [successJobId, setSuccessJobId] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState<number>(0);
+  const [successWarnings, setSuccessWarnings] = useState<string[]>([]);
   const [endTimeTouched, setEndTimeTouched] = useState(false);
   const [sourceQuoteId, setSourceQuoteId] = useState('');
   const [sourceQuoteNumber, setSourceQuoteNumber] = useState('');
@@ -709,6 +710,7 @@ export default function CreateProjectForm() {
     setDatabaseError(null);
     setSuccessJobId(null);
     setSuccessCount(0);
+    setSuccessWarnings([]);
 
     const validationError = validateForm();
 
@@ -813,6 +815,18 @@ export default function CreateProjectForm() {
         job_id?: string;
         job_ids?: string[];
         created_count?: number;
+        assigned_employee_count?: number;
+        warnings?: string[];
+        assignment_sync?: {
+          requested_employee_count?: number;
+          created?: number;
+          failed?: number;
+          errors?: Array<{ error?: string }>;
+        };
+        calendar_sync?: {
+          failed?: number;
+          errors?: Array<{ error?: string }>;
+        };
       };
 
       if (!response.ok) {
@@ -827,6 +841,11 @@ export default function CreateProjectForm() {
 
       setSuccessJobId(jobId);
       setSuccessCount(result.created_count || result.job_ids?.length || 1);
+      setSuccessWarnings(
+        Array.isArray(result.warnings)
+          ? result.warnings.map(String).filter(Boolean)
+          : [],
+      );
 
       try {
         window.localStorage.removeItem('opc_quote_job_prefill');
@@ -883,6 +902,21 @@ export default function CreateProjectForm() {
             <a href={`${baseUrl}/einsatz/${successJobId}`}>
               Ersten Einsatz öffnen
             </a>
+
+            {successWarnings.length > 0 ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  color: '#92400E',
+                  fontSize: 13,
+                  fontWeight: 650,
+                }}
+              >
+                {successWarnings.map((warning) => (
+                  <div key={warning}>{warning}</div>
+                ))}
+              </div>
+            ) : null}
           </div>
         )}
 

@@ -127,6 +127,19 @@ function profileFromLegacyLocalStorage(): UserProfile | null {
       email: cached.email || '',
       full_name: cached.full_name || cached.name || cached.username || cached.email || 'User',
       role: normalizeRole(cachedRole),
+      opc_staff_role_id:
+        cached.opc_staff_role_id ||
+        cached.staff_id ||
+        null,
+      employee_id:
+        cached.employee_id ||
+        null,
+      can_manage_jobs:
+        cached.can_manage_jobs === true,
+      can_view_all_jobs:
+        cached.can_view_all_jobs === true,
+      can_manage_calendar:
+        cached.can_manage_calendar === true,
       created_at: cached.created_at || '',
       updated_at: cached.updated_at || '',
     } as UserProfile;
@@ -197,6 +210,13 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
         name: profile.full_name,
         full_name: profile.full_name,
         username: profile.full_name || profile.email || 'User',
+        role: profile.role,
+        opc_staff_role_id: profile.opc_staff_role_id || null,
+        staff_id: profile.opc_staff_role_id || null,
+        employee_id: profile.employee_id || null,
+        can_manage_jobs: profile.can_manage_jobs === true,
+        can_view_all_jobs: profile.can_view_all_jobs === true,
+        can_manage_calendar: profile.can_manage_calendar === true,
       }),
     );
     window.localStorage.setItem(
@@ -207,6 +227,13 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
         name: profile.full_name,
         full_name: profile.full_name,
         username: profile.full_name || profile.email || 'User',
+        role: profile.role,
+        opc_staff_role_id: profile.opc_staff_role_id || null,
+        staff_id: profile.opc_staff_role_id || null,
+        employee_id: profile.employee_id || null,
+        can_manage_jobs: profile.can_manage_jobs === true,
+        can_view_all_jobs: profile.can_view_all_jobs === true,
+        can_manage_calendar: profile.can_manage_calendar === true,
       }),
     );
   } catch {
@@ -431,6 +458,14 @@ async function fetchLiveOpcAuthProfile(
         user.email ||
         'User',
       role: normalizeStaffRole(staffRole, legacyRole),
+      opc_staff_role_id: staffRole.id || null,
+      employee_id: staffRole.employee_id || null,
+      can_manage_jobs:
+        staffRole.can_manage_jobs === true,
+      can_view_all_jobs:
+        staffRole.can_view_all_jobs === true,
+      can_manage_calendar:
+        (staffRole as any).can_manage_calendar === true,
       created_at: '',
       updated_at: '',
     };

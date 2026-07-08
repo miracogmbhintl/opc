@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Trash2, Users, X } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
 import { baseUrl } from '../../../lib/base-url';
+import { loadOpcAuthProfile, readCachedOpcAuthProfile } from '../../../lib/opc-auth-cache';
+import { readOpcAccessToken } from '../../../lib/opc-browser-session';
 
 type AnyRow = Record<string, any>;
 
@@ -32,7 +34,7 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
   const [allowed, setAllowed] = useState(false);
   const [assignments, setAssignments] = useState<AnyRow[]>([]);
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
@@ -43,81 +45,25 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
     setError('');
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.user) {
-        setAllowed(false);
-        return;
-      }
-
-      const { data: staffRows, error: staffError } = await supabase
-        .from('opc_staff_roles')
+      // OPC_ASSIGNMENT_MANAGER_LAZY_LOAD_V1
+      // Permission comes from the shared profile cache. Database rows are
+      // loaded only after the manager is opened.
+      // OPC_ASSIGNMENT_MANAGER_ONE_VIEW_READ_V1
+      // Reuse the same bulk job-detail view as the page itself. The shell's
+      // short-lived GET cache can return the already loaded response.
+      const directResult = await supabase
+        .from('opc_job_detail_view')
         .select('*')
-        .eq('user_id', session.user.id)
-        .eq('status', 'active');
+        .eq('job_id', jobId)
+        .single();
 
-      if (staffError) throw staffError;
+      if (directResult.error) throw directResult.error;
 
-      const canManage = (staffRows || []).some((row: AnyRow) => {
-        const role = normalizeRole(row.role);
-        return ['owner', 'admin', 'dispatch'].includes(role) || row.can_manage_jobs === true;
-      });
+      const rows = Array.isArray(directResult.data?.assignments)
+        ? directResult.data.assignments
+        : [];
 
-      setAllowed(canManage);
-      if (!canManage) return;
-
-      let rows: AnyRow[] = [];
-      const rpcResult = await supabase.rpc('opc_get_job_assignments', { p_job_id: jobId });
-
-      if (!rpcResult.error && Array.isArray(rpcResult.data)) {
-        rows = rpcResult.data;
-      } else {
-        const directResult = await supabase
-          .from('opc_job_assignments')
-          .select('*')
-          .eq('job_id', jobId)
-          .order('created_at', { ascending: true });
-
-        if (directResult.error) throw directResult.error;
-        rows = directResult.data || [];
-      }
-
-      const { data: employees } = await supabase
-        .from('opc_staff_roles')
-        .select('id,user_id,employee_id,display_name,email,phone_e164,phone_raw')
-        .limit(2000);
-
-      const staff = employees || [];
-      const hydrated = rows.map((assignment: AnyRow) => {
-        const identifiers = new Set(
-          [
-            assignment.staff_role_id,
-            assignment.staff_id,
-            assignment.employee_id,
-            assignment.user_id,
-            assignment.employee_user_id,
-            assignment.assigned_to,
-          ]
-            .filter(Boolean)
-            .map(String),
-        );
-        const employee = staff.find((candidate: AnyRow) =>
-          [candidate.id, candidate.user_id, candidate.employee_id]
-            .filter(Boolean)
-            .map(String)
-            .some((id) => identifiers.has(id)),
-        );
-
-        return {
-          ...assignment,
-          employee_name: assignmentName({ ...employee, ...assignment }),
-          email: assignment.email || assignment.employee_email || employee?.email || null,
-        };
-      });
-
-      setAssignments(hydrated);
+      setAssignments(rows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Zuweisungen konnten nicht geladen werden.');
     } finally {
@@ -126,8 +72,22 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
   }, [jobId]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    const applyProfile = (profile: ReturnType<typeof readCachedOpcAuthProfile>) => {
+      const role = normalizeRole(profile?.role);
+
+      setAllowed(
+        ['owner', 'admin', 'dispatch'].includes(role) ||
+        profile?.can_manage_jobs === true,
+      );
+    };
+
+    const cached = readCachedOpcAuthProfile();
+    applyProfile(cached);
+
+    if (!cached) {
+      void loadOpcAuthProfile().then(applyProfile);
+    }
+  }, []);
 
   const activeAssignments = useMemo(
     () =>
@@ -152,12 +112,9 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
     setError('');
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = readOpcAccessToken();
 
-      if (!token) throw new Error('Keine aktive Sitzung für Kalender-Synchronisation.');
+      if (!token) throw new Error('Keine aktive Sitzung für Zuweisungsänderung.');
 
       const response = await fetch(`${baseUrl}/api/opc/calendar/sync-job-assignment`, {
         method: 'POST',
@@ -176,8 +133,11 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
         throw new Error(result?.error || 'Zuweisung und Kalender konnten nicht aktualisiert werden.');
       }
 
-      await load();
-      window.location.reload();
+      setAssignments((current) =>
+        current.filter((row) =>
+          String(row.id || row.assignment_id || '') !== assignmentId
+        ),
+      );
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : 'Zuweisung konnte nicht entfernt werden.');
     } finally {
@@ -191,7 +151,10 @@ export default function JobAssignmentCalendarManager({ jobId }: Props) {
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setOpen(true);
+          void load();
+        }}
         style={{
           position: 'fixed',
           right: 18,

@@ -29,6 +29,8 @@ import {
 import MirakaDashboardShell from './MirakaDashboardShell';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { readOpcAccessToken } from '../lib/opc-browser-session';
+import { readCachedOpcAuthProfile, refreshOpcAuthProfile } from '../lib/opc-auth-cache';
 import {
   createOfflineUuid,
   enqueueOpcOfflineMutation,
@@ -756,42 +758,24 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
     return { id: jobId, queued: true };
   }
 
-  const attempts = [
-    { table: 'opc_service_jobs', column: 'id' },
-    { table: 'opc_service_jobs', column: 'job_id' },
-    { table: 'opc_jobs', column: 'id' },
-    { table: 'opc_jobs', column: 'job_id' },
-  ];
+  // OPC_CANONICAL_JOB_UPDATE_V1
+  // The canonical job table/key is known. Do not probe four alternatives.
+  const response = await supabase
+    .from('opc_service_jobs')
+    .update(clean)
+    .eq('id', jobId)
+    .select('id')
+    .limit(1);
 
-  let lastError: any = null;
-  let sawWritableTable = false;
-
-  for (const attempt of attempts) {
-    try {
-      const response = await supabase
-        .from(attempt.table)
-        .update(clean)
-        .eq(attempt.column, jobId)
-        .select('id')
-        .limit(1);
-
-      if (!response.error && Array.isArray(response.data) && response.data.length > 0) {
-        return response.data[0];
-      }
-
-      if (!response.error) {
-        sawWritableTable = true;
-        lastError = new Error(`${attempt.table}: Keine Zeile mit ${attempt.column}=${jobId} aktualisiert.`);
-        continue;
-      }
-
-      lastError = response.error;
-    } catch (error) {
-      lastError = error;
-    }
+  if (
+    !response.error &&
+    Array.isArray(response.data) &&
+    response.data.length > 0
+  ) {
+    return response.data[0];
   }
 
-  if (isProbablyNetworkError(lastError)) {
+  if (isProbablyNetworkError(response.error)) {
     enqueueOpcOfflineMutation({
       operation: 'update',
       table: 'opc_service_jobs',
@@ -801,20 +785,20 @@ async function tryUpdateJobById(jobId: string, payload: JsonRecord) {
       meta: {
         reason: 'network_error_job_update',
         queued_at: new Date().toISOString(),
-        last_error: String(lastError?.message || lastError || ''),
+        last_error: String(response.error?.message || response.error || ''),
       },
     });
 
     return { id: jobId, queued: true };
   }
 
-  if (sawWritableTable) {
+  if (!response.error) {
     throw new Error(
-      `Einsatz konnte nicht aktualisiert werden. Es wurde keine passende Zeile für diese Einsatz-ID gefunden: ${jobId}.`,
+      `Einsatz konnte nicht aktualisiert werden. Keine Zeile gefunden: ${jobId}.`,
     );
   }
 
-  throw new Error(lastError?.message || 'Einsatz konnte nicht aktualisiert werden.');
+  throw new Error(response.error.message || 'Einsatz konnte nicht aktualisiert werden.');
 }
 
 function getAssignmentEmployeeId(assignment: JsonRecord) {
@@ -1207,75 +1191,24 @@ function buildAssignmentPayloadVariants({
   assignedByUserId?: string | null;
   assignedByStaffId?: string | null;
 }) {
-  const now = new Date().toISOString();
-  const assignedBy = assignedByStaffId || assignedByUserId || null;
-  const staffRoleId =
-    employee.staff_role_id ||
-    (employee.source === 'staff' ? employee.id : null);
   const employeeId =
     employee.employee_id ||
     (employee.source !== 'staff' ? employee.id : null);
-  const userId = employee.user_id || null;
 
+  if (!employeeId) return [];
+
+  // OPC_ASSIGNMENT_CANONICAL_PAYLOAD_V1
   return [
     {
       job_id: jobId,
-      staff_role_id: staffRoleId,
-      user_id: userId,
-      employee_id: employeeId,
-      employee_name: employee.display_name || employee.email || 'Mitarbeiter',
-      employee_email: employee.email || null,
-      employee_phone: employee.phone_e164 || employee.phone_raw || null,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
-      employee_id: employeeId,
-      user_id: userId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
-      staff_role_id: staffRoleId,
-      user_id: userId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
       employee_id: employeeId,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
+      assigned_by: assignedByStaffId || assignedByUserId || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
     },
-    {
-      job_id: jobId,
-      user_id: userId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-  ].filter(
-    (payload) =>
-      Boolean(payload.staff_role_id) ||
-      Boolean(payload.employee_id) ||
-      Boolean(payload.user_id),
-  );
+  ];
 }
 
 function buildMediaPayloadVariants({
@@ -1511,18 +1444,20 @@ async function hydrateJobAssignments(sourceJob: JobDetail): Promise<JobDetail> {
   }
 
   try {
-    const { data, error } = await supabase.rpc('opc_get_job_assignments', {
-      p_job_id: sourceJob.job_id,
-    });
+    const { data, error } = await supabase
+      .from('opc_job_assignments')
+      .select('*')
+      .eq('job_id', sourceJob.job_id)
+      .order('created_at', { ascending: true });
 
     if (!error && Array.isArray(data)) {
-      return {
+      sourceJob = {
         ...sourceJob,
         assignments: data as JsonArray,
       };
     }
   } catch {
-    // Fall through to the client-side resolver.
+    // Die vorhandenen View-Daten bleiben als Fallback erhalten.
   }
 
   const existingAssignments = asArray(sourceJob.assignments);
@@ -2097,122 +2032,6 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
   }, []);
 
   const getAccessForJob = useCallback(async (sourceJob: JobDetail): Promise<AccessState> => {
-    // OPC_JOB_MANAGER_ACCESS_CACHE_20260706_V3
-    if (typeof window !== 'undefined') {
-      try {
-        const cachedUserData =
-          JSON.parse(
-            window.localStorage.getItem(
-              'mco_user_data',
-            ) || '{}',
-          );
-
-        const cachedSessionProfile =
-          JSON.parse(
-            window.sessionStorage.getItem(
-              '__opc_verified_auth_profile_session_v1__',
-            ) || '{}',
-          );
-
-        const cachedRole =
-          roleKey(
-            window.localStorage.getItem(
-              'mco_user_role',
-            ) ||
-            cachedSessionProfile.role ||
-            cachedUserData.role,
-          );
-
-        if (
-          isManagerRole(cachedRole)
-        ) {
-          const cachedUserId =
-            cachedSessionProfile.id ||
-            cachedSessionProfile.user_id ||
-            cachedUserData.id ||
-            cachedUserData.user_id ||
-            null;
-
-          const cachedStaffId =
-            cachedSessionProfile.staff_id ||
-            cachedSessionProfile.opc_staff_role_id ||
-            cachedUserData.staff_id ||
-            null;
-
-          const cachedEmployeeId =
-            cachedSessionProfile.employee_id ||
-            cachedUserData.employee_id ||
-            null;
-
-          const ownIds = [
-            cachedStaffId,
-            cachedUserId,
-            cachedEmployeeId,
-          ]
-            .filter(Boolean)
-            .map(String);
-
-          const assignedIds =
-            asArray(
-              sourceJob.assignments,
-            )
-              .map((assignment) =>
-                String(
-                  getAssignmentEmployeeId(
-                    assignment,
-                  ) || '',
-                ),
-              )
-              .filter(Boolean);
-
-          return {
-            loading: false,
-            userId:
-              cachedUserId
-                ? String(cachedUserId)
-                : null,
-            staffId:
-              cachedStaffId
-                ? String(cachedStaffId)
-                : null,
-            employeeId:
-              cachedEmployeeId
-                ? String(
-                    cachedEmployeeId,
-                  )
-                : null,
-            email:
-              cachedSessionProfile.email ||
-              cachedUserData.email ||
-              null,
-            displayName:
-              cachedSessionProfile
-                .display_name ||
-              cachedSessionProfile
-                .full_name ||
-              cachedUserData
-                .display_name ||
-              cachedUserData
-                .full_name ||
-              cachedUserData.email ||
-              null,
-            role: cachedRole,
-            canEdit: true,
-            isAssigned:
-              ownIds.some((id) =>
-                assignedIds.includes(id),
-              ),
-          };
-        }
-      } catch {
-        /*
-         * Bei fehlendem Cache wird die
-         * bestehende servergestützte Prüfung
-         * weiterverwendet.
-         */
-      }
-    }
-
     const fallback: AccessState = {
       loading: false,
       userId: null,
@@ -2225,94 +2044,47 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       isAssigned: false,
     };
 
-    const { data: authData } = await supabase.auth.getUser();
-    const user = authData?.user || null;
+    let profile = readCachedOpcAuthProfile();
 
-    if (!user) return fallback;
-
-    let profileRole = '';
-
-    try {
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('role,opc_staff_role,staff_role')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      profileRole = String(profile?.role || profile?.opc_staff_role || profile?.staff_role || '').toLowerCase();
-    } catch {
-      profileRole = '';
+    if (
+      !profile ||
+      (!profile.opc_staff_role_id && !profile.employee_id)
+    ) {
+      profile = await refreshOpcAuthProfile(true);
     }
 
-    const metadataRole = String(
-      user.user_metadata?.role || user.app_metadata?.role || user.user_metadata?.portal_role || '',
-    ).toLowerCase();
+    if (!profile) return fallback;
 
-    let staffRow: JsonRecord | null = null;
+    const role = roleKey(profile.role);
+    const userId = profile.id ? String(profile.id) : null;
+    const staffId = profile.opc_staff_role_id
+      ? String(profile.opc_staff_role_id)
+      : null;
+    const employeeId = profile.employee_id
+      ? String(profile.employee_id)
+      : null;
 
-    try {
-      const { data, error } = await supabase
-        .from('opc_staff_roles')
-        .select('id,user_id,employee_id,role,status,can_manage_jobs,can_view_all_jobs,email,display_name')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
+    const ownIds = [staffId, userId, employeeId]
+      .filter(Boolean)
+      .map(String);
 
-      if (!error && Array.isArray(data) && data.length > 0) {
-        staffRow = data[0] as JsonRecord;
-      }
-    } catch {
-      staffRow = null;
-    }
-
-    if (!staffRow && user.email) {
-      try {
-        const { data, error } = await supabase
-          .from('opc_staff_roles')
-          .select('id,user_id,employee_id,role,status,can_manage_jobs,can_view_all_jobs,email,display_name')
-          .ilike('email', String(user.email))
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        if (!error && Array.isArray(data) && data.length > 0) {
-          staffRow = data[0] as JsonRecord;
-        }
-      } catch {
-        staffRow = null;
-      }
-    }
-
-    const role = String(staffRow?.role || profileRole || metadataRole || '').toLowerCase();
-    const staffId = staffRow?.id ? String(staffRow.id) : null;
-    const employeeId = staffRow?.employee_id ? String(staffRow.employee_id) : null;
-
-    const assignedIds = asArray(sourceJob.assignments).map((assignment) =>
-      String(getAssignmentEmployeeId(assignment) || ''),
-    );
-
-    const ownIds = [staffId, user.id, employeeId].filter(Boolean).map(String);
-    const isAssigned = ownIds.some((id) => assignedIds.includes(id));
-
-    const canEdit =
-      isManagerRole(role) ||
-      staffRow?.can_manage_jobs === true ||
-      staffRow?.can_view_all_jobs === true;
+    const assignedIds = asArray(sourceJob.assignments)
+      .map((assignment) => String(getAssignmentEmployeeId(assignment) || ''))
+      .filter(Boolean);
 
     return {
       loading: false,
-      userId: user.id,
+      userId,
       staffId,
       employeeId,
-      email: user.email || (staffRow?.email ? String(staffRow.email) : null),
-      displayName:
-        (staffRow?.display_name ? String(staffRow.display_name) : null) ||
-        user.user_metadata?.display_name ||
-        user.user_metadata?.full_name ||
-        user.email ||
-        null,
+      email: profile.email || null,
+      displayName: profile.full_name || profile.email || null,
       role: role || null,
-      canEdit,
-      isAssigned,
+      canEdit:
+        isManagerRole(role) ||
+        profile.can_manage_jobs === true ||
+        profile.can_view_all_jobs === true,
+      isAssigned: ownIds.some((id) => assignedIds.includes(id)),
     };
   }, []);
 
@@ -2414,12 +2186,9 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     if (employeesLoaded || !access.canEdit) return;
 
     try {
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
+      const token = readOpcAccessToken();
 
-      if (sessionError || !session?.access_token) {
+      if (!token) {
         throw new Error('Sitzung ist abgelaufen.');
       }
 
@@ -2427,7 +2196,7 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         `${baseUrl}/api/opc/assignment-candidates`,
         {
           headers: {
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${token}`,
           },
           cache: 'no-store',
         },
@@ -2714,11 +2483,48 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         }
       }
 
-      const { error: rpcError } = await supabase.rpc('opc_delete_service_job', {
-        p_job_id: job.job_id,
-      });
+      // OPC_DELETE_SERVICE_JOB_V2
+      // The job is deleted in the source table. The calendar is a projection of
+      // opc_service_jobs and therefore needs no separate calendar mutation.
+      const { error: rpcError } = await supabase.rpc(
+        'opc_delete_service_job_v2',
+        {
+          p_job_id: job.job_id,
+        },
+      );
 
       if (rpcError) throw rpcError;
+
+      try {
+        const nextVersion = String(Date.now());
+        window.localStorage.setItem(
+          'opc:calendar:data-version',
+          nextVersion,
+        );
+
+        for (
+          let index = window.sessionStorage.length - 1;
+          index >= 0;
+          index -= 1
+        ) {
+          const key = window.sessionStorage.key(index);
+
+          if (key?.startsWith('opc:page-cache:calendar:')) {
+            window.sessionStorage.removeItem(key);
+          }
+        }
+
+        window.dispatchEvent(
+          new CustomEvent('opc:calendar-invalidated', {
+            detail: {
+              jobId: job.job_id,
+              reason: 'job_deleted',
+            },
+          }),
+        );
+      } catch {
+        // Cache invalidation must not turn a successful deletion into an error.
+      }
 
       setActionMessage('Einsatz wurde gelöscht.');
       window.setTimeout(() => {
@@ -2732,60 +2538,6 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     }
   }
 
-  const syncAssignmentToCalendar = async (employee: EmployeeOption, assignmentId?: string | null) => {
-    if (!job || !job.planned_start) return;
-
-    const title = job.title || `${job.service_category || 'Einsatz'} · ${getDisplayName(job)}`;
-    const start = job.planned_start;
-    const end =
-      job.planned_end ||
-      new Date(
-        new Date(job.planned_start).getTime() + Number(job.estimated_hours || 2) * 60 * 60 * 1000,
-      ).toISOString();
-
-    const location = joinAddress(job);
-    const description = [
-      `Kunde: ${getDisplayName(job)}`,
-      job.service_category ? `Service: ${job.service_category}` : '',
-      job.service_description ? `Beschreibung: ${job.service_description}` : '',
-      assignmentNote.trim() ? `Zuweisungsnotiz: ${assignmentNote.trim()}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const apiPayload = {
-      job_id: job.job_id,
-      assignment_id: assignmentId || null,
-      employee_staff_role_id: employee.staff_role_id || null,
-      employee_id: employee.employee_id || employee.id,
-      employee_user_id: employee.user_id || null,
-      title,
-      start_time: start,
-      end_time: end,
-      location,
-      description,
-    };
-
-    const endpointCandidates = [
-      `${baseUrl}/api/opc/calendar/sync-job-assignment`,
-      `${baseUrl}/api/opc/calendar/create-job-event`,
-      `${baseUrl}/api/opc/google-calendar/sync-job`,
-    ];
-
-    for (const endpoint of endpointCandidates) {
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(apiPayload),
-        });
-
-        if (response.ok) return;
-      } catch {
-        // Calendar sync is best effort.
-      }
-    }
-  };
 
 
   function assignmentIdOf(
@@ -3070,71 +2822,34 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       return false;
     }
 
-    let removedByApi = false;
-    let apiErrorMessage = '';
+    const token = readOpcAccessToken();
 
-    try {
-      const response = await fetch(
-        `${baseUrl}/api/opc/calendar/sync-job-assignment`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type':
-              'application/json',
-          },
-          body: JSON.stringify({
-            job_id: job.job_id,
-            assignment_id:
-              assignmentId,
-            remove_assignment_id:
-              assignmentId,
-          }),
-        },
-      );
-
-      if (response.ok) {
-        removedByApi = true;
-      } else {
-        const responseText =
-          await response.text();
-
-        apiErrorMessage =
-          responseText ||
-          `HTTP ${response.status}`;
-      }
-    } catch (error) {
-      apiErrorMessage =
-        error instanceof Error
-          ? error.message
-          : 'Kalender-API nicht erreichbar';
+    if (!token) {
+      throw new Error('Keine aktive Sitzung für Zuweisungsänderung.');
     }
 
-    if (!removedByApi) {
-      const {
-        data,
-        error,
-      } = await supabase
-        .from('opc_job_assignments')
-        .delete()
-        .eq('id', assignmentId)
-        .select('id');
+    const response = await fetch(
+      `${baseUrl}/api/opc/calendar/sync-job-assignment`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          job_id: job.job_id,
+          remove_assignment_id: assignmentId,
+        }),
+      },
+    );
 
-      if (error) {
-        throw new Error(
-          apiErrorMessage
-            ? `${error.message} – ${apiErrorMessage}`
-            : error.message,
-        );
-      }
+    const result = await response.json().catch(() => null);
 
-      if (
-        Array.isArray(data) &&
-        data.length === 0
-      ) {
-        throw new Error(
-          'Die Zuweisung wurde nicht gefunden oder konnte nicht entfernt werden.',
-        );
-      }
+    if (!response.ok) {
+      throw new Error(
+        result?.error ||
+        `Zuweisung konnte nicht entfernt werden (HTTP ${response.status}).`,
+      );
     }
 
     setJob((current) => {
@@ -3153,10 +2868,6 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         ),
       };
     });
-
-    if (!options.suppressReload) {
-      await loadJob(false);
-    }
 
     return true;
   }
@@ -3251,7 +2962,14 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
           employee.id === employeeId,
       );
 
-    if (!selected) {
+    if (!selected) return;
+
+    const operationalEmployeeId =
+      selected.employee_id ||
+      (selected.source !== 'staff' ? selected.id : null);
+
+    if (!operationalEmployeeId) {
+      setActionError('Dieser Mitarbeiter besitzt keine gültige Mitarbeiter-ID.');
       return;
     }
 
@@ -3259,126 +2977,121 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
     setActionMessage(null);
     setActionError(null);
 
-    let insertedAssignmentId = '';
-
     try {
-      const variants =
-        buildAssignmentPayloadVariants({
-          jobId:
-            job.job_id,
+      const token = readOpcAccessToken();
 
-          employee:
-            selected,
+      if (!token) {
+        throw new Error('Keine aktive Sitzung für Zuweisungsänderung.');
+      }
 
-          note:
-            cleanNullable(
-              assignmentNote,
-            ),
+      const response = await fetch(
+        `${baseUrl}/api/opc/calendar/sync-job-assignment`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            job_id: job.job_id,
+            add_employee_id: operationalEmployeeId,
+            replace_assignment_id:
+              assignmentToReplace
+                ? assignmentIdOf(assignmentToReplace)
+                : null,
+            assignment_note: cleanNullable(assignmentNote),
+          }),
+        },
+      );
 
-          assignedByUserId:
-            access.userId,
+      const result = await response.json().catch(() => null);
 
-          assignedByStaffId:
-            access.staffId,
-        });
-
-      const inserted =
-        await tryInsertOne(
-          'opc_job_assignments',
-          variants,
+      if (!response.ok) {
+        throw new Error(
+          result?.error ||
+          `Zuweisung konnte nicht gespeichert werden (HTTP ${response.status}).`,
         );
+      }
 
-      insertedAssignmentId =
-        String(
-          inserted.data?.id ||
-          inserted.data
-            ?.assignment_id ||
-          '',
-        );
+      const returnedAssignment =
+        result?.assignment &&
+        typeof result.assignment === 'object'
+          ? result.assignment
+          : {};
 
-      if (assignmentToReplace) {
-        try {
-          await removeAssignmentRecord(
-            assignmentToReplace,
-            {
-              skipConfirm: true,
-              suppressReload: true,
-            },
-          );
-        } catch (replaceError) {
-          /*
-           * Falls die alte Zuweisung nicht
-           * entfernt werden kann, wird die neue
-           * Zuweisung wieder aufgeräumt.
-           */
-          if (insertedAssignmentId) {
-            try {
-              await fetch(
-                `${baseUrl}/api/opc/calendar/sync-job-assignment`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type':
-                      'application/json',
-                  },
-                  body: JSON.stringify({
-                    job_id:
-                      job.job_id,
-                    assignment_id:
-                      insertedAssignmentId,
-                    remove_assignment_id:
-                      insertedAssignmentId,
-                  }),
-                },
-              );
-            } catch {
-              // Cleanup best effort.
-            }
+      const hydratedAssignment: JsonRecord = {
+        ...returnedAssignment,
+        employee_id: operationalEmployeeId,
+        staff_role_id:
+          returnedAssignment.staff_role_id ||
+          selected.staff_role_id ||
+          null,
+        user_id:
+          returnedAssignment.user_id ||
+          selected.user_id ||
+          null,
+        employee_name:
+          returnedAssignment.employee_name ||
+          selected.display_name ||
+          selected.email ||
+          'Mitarbeiter',
+        display_name:
+          returnedAssignment.display_name ||
+          selected.display_name ||
+          selected.email ||
+          'Mitarbeiter',
+        email:
+          returnedAssignment.email ||
+          returnedAssignment.employee_email ||
+          selected.email ||
+          null,
+        phone_e164:
+          returnedAssignment.phone_e164 ||
+          selected.phone_e164 ||
+          null,
+        phone_raw:
+          returnedAssignment.phone_raw ||
+          selected.phone_raw ||
+          null,
+        status:
+          returnedAssignment.status ||
+          'assigned',
+      };
 
-            try {
-              await supabase
-                .from(
-                  'opc_job_assignments',
-                )
-                .delete()
-                .eq(
-                  'id',
-                  insertedAssignmentId,
-                );
-            } catch {
-              // Cleanup best effort.
-            }
+      const replacedId =
+        assignmentToReplace
+          ? assignmentIdOf(assignmentToReplace)
+          : '';
+
+      setJob((current) => {
+        if (!current) return current;
+
+        const remaining = asArray(current.assignments).filter((assignment) => {
+          if (
+            replacedId &&
+            assignmentIdOf(assignment) === replacedId
+          ) {
+            return false;
           }
 
-          throw replaceError;
-        }
-      }
+          return String(
+            getAssignmentEmployeeId(assignment) || '',
+          ) !== String(operationalEmployeeId);
+        });
 
-      try {
-        await tryUpdateJobById(
-          job.job_id,
-          {
-            status: 'assigned',
-          },
-        );
-      } catch {
-        /*
-         * Die Zuweisung wurde gespeichert.
-         * Ein Status-Fallback darf die Aktion
-         * nicht blockieren.
-         */
-      }
-
-      void syncAssignmentToCalendar(
-        selected,
-        insertedAssignmentId || null,
-      ).catch(() => undefined);
+        return {
+          ...current,
+          status: 'assigned',
+          assignments: [
+            ...remaining,
+            hydratedAssignment,
+          ],
+        };
+      });
 
       const previousName =
         assignmentToReplace
-          ? assignmentNameOf(
-              assignmentToReplace,
-            )
+          ? assignmentNameOf(assignmentToReplace)
           : '';
 
       setSelectedEmployeeId('');
@@ -3387,12 +3100,10 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
       setEmployeeSearch('');
       setAssignmentToReplace(null);
 
-      await loadJob(false);
-
       setActionMessage(
         previousName
           ? `${previousName} wurde durch ${selected.display_name || selected.email || 'den neuen Mitarbeiter'} ersetzt.`
-          : 'Mitarbeiter wurde zugewiesen. Kalender-Sync wurde ausgelöst.',
+          : 'Mitarbeiter wurde zugewiesen.',
       );
     } catch (error) {
       const message =

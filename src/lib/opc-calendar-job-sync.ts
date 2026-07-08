@@ -381,22 +381,9 @@ export async function syncJobCalendarState(params: {
     if (attendeeError) throw attendeeError;
   }
 
-  const personalCalendarIds: string[] = [];
-
-  for (const staff of assignedStaff) {
-    const personalCalendar = await findOrCreatePersonalCalendar(supabase, staff, actorUserId);
-    personalCalendarIds.push(String(personalCalendar.id));
-
-    await upsertJobEvent(supabase, {
-      calendarId: String(personalCalendar.id),
-      job,
-      site,
-      actorUserId,
-      scope: 'employee',
-      staffRoleId: String(staff.id),
-    });
-  }
-
+  // OPC_SINGLE_CALENDAR_EVENT_PER_JOB_V1
+  // Ein Einsatz besitzt systemweit exakt einen sichtbaren Kalenderdatensatz:
+  // den kanonischen Eintrag im allgemeinen Teamkalender.
   const { data: allJobEvents, error: allJobEventsError } = await supabase
     .from('opc_calendar_events')
     .select('*')
@@ -404,21 +391,25 @@ export async function syncJobCalendarState(params: {
 
   if (allJobEventsError) throw allJobEventsError;
 
-  const allowedCalendarIds = new Set([String(teamCalendar.id), ...personalCalendarIds]);
-  const staleIds = (allJobEvents || [])
-    .filter((event: AnyRow) => {
-      if (allowedCalendarIds.has(String(event.calendar_id))) return false;
-      return isGeneratedPersonalEvent(event);
-    })
+  const duplicateIds = (allJobEvents || [])
+    .filter((event: AnyRow) => String(event.id) !== String(teamEvent.id))
     .map((event: AnyRow) => event.id)
     .filter(Boolean);
 
-  if (staleIds.length > 0) {
-    const { error: staleDeleteError } = await supabase
+  if (duplicateIds.length > 0) {
+    const { error: duplicateAttendeeDeleteError } = await supabase
+      .from('opc_calendar_event_attendees')
+      .delete()
+      .in('event_id', duplicateIds);
+
+    if (duplicateAttendeeDeleteError) throw duplicateAttendeeDeleteError;
+
+    const { error: duplicateDeleteError } = await supabase
       .from('opc_calendar_events')
       .delete()
-      .in('id', staleIds);
-    if (staleDeleteError) throw staleDeleteError;
+      .in('id', duplicateIds);
+
+    if (duplicateDeleteError) throw duplicateDeleteError;
   }
 
   return {
@@ -427,7 +418,7 @@ export async function syncJobCalendarState(params: {
     team_calendar_id: teamCalendar.id,
     team_event_id: teamEvent.id,
     assigned_staff_role_ids: assignedStaff.map((staff) => staff.id),
-    personal_calendar_ids: personalCalendarIds,
-    removed_stale_event_count: staleIds.length,
+    personal_calendar_ids: [],
+    removed_stale_event_count: duplicateIds.length,
   };
 }

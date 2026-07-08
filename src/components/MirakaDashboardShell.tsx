@@ -408,7 +408,7 @@ function installOpcJobRequestDeduper() {
 
       if (
         cached &&
-        Date.now() - cached.at < 2000
+        Date.now() - cached.at < 15_000
       ) {
         return responseFromSnapshot(
           cached,
@@ -459,6 +459,15 @@ function installOpcJobRequestDeduper() {
         } catch {
           // Antwort bleibt trotzdem gültig.
         }
+      }
+
+      if (
+        isManagerProxy &&
+        request.method !== 'GET' &&
+        request.method !== 'HEAD' &&
+        response.ok
+      ) {
+        recentManagerReads.clear();
       }
 
       if (

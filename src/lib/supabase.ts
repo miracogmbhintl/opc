@@ -13,7 +13,7 @@ type OpcRestSnapshot = {
   body: ArrayBuffer;
 };
 
-const OPC_REST_DEDUPE_WINDOW_MS = 1200;
+const OPC_REST_DEDUPE_WINDOW_MS = 15_000;
 const opcRestInFlight = new Map<string, Promise<Response>>();
 const opcRestRecent = new Map<string, OpcRestSnapshot>();
 
@@ -45,6 +45,13 @@ async function opcDedupedFetch(
     url.pathname.includes('/rest/v1/');
 
   if (!isSupabaseRestRead) {
+    if (
+      request.method !== 'GET' &&
+      url.pathname.includes('/rest/v1/')
+    ) {
+      opcRestRecent.clear();
+    }
+
     return globalThis.fetch(request);
   }
 
@@ -157,6 +164,11 @@ export interface UserProfile {
   company?: string;
   phone?: string;
   avatar_url?: string;
+  opc_staff_role_id?: string | null;
+  employee_id?: string | null;
+  can_manage_jobs?: boolean;
+  can_view_all_jobs?: boolean;
+  can_manage_calendar?: boolean;
   created_at: string;
   updated_at: string;
 }

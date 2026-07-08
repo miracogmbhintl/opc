@@ -26,6 +26,7 @@ import {
 import CalendarEventModal from './CalendarEventModal';
 import CalendarInvitePanel from './CalendarInvitePanel';
 import { readOpcPageCache, writeOpcPageCache } from '../../../lib/opc-page-cache';
+import { readOpcAccessToken } from '../../../lib/opc-browser-session';
 import { baseUrl } from '../../../lib/base-url';
 
 type CalendarRow = {
@@ -117,10 +118,22 @@ type ModalState =
 
 type CalendarViewFilter = 'all' | 'employee' | 'admin' | 'team';
 type CalendarVisibleRange = { start: string; end: string };
-// OPC_CALENDAR_RANGE_CACHE_V1
+// OPC_CALENDAR_RANGE_CACHE_V2
 const CALENDAR_RANGE_CACHE_TTL_MS = 2 * 60 * 1000;
+const OPC_CALENDAR_DATA_VERSION_KEY = 'opc:calendar:data-version';
+
+function calendarDataVersion() {
+  if (typeof window === 'undefined') return '0';
+
+  try {
+    return window.localStorage.getItem(OPC_CALENDAR_DATA_VERSION_KEY) || '0';
+  } catch {
+    return '0';
+  }
+}
+
 function calendarRangeCacheKey(range: CalendarVisibleRange) {
-  return `opc:page-cache:calendar:${range.start.slice(0, 10)}:${range.end.slice(0, 10)}`;
+  return `opc:page-cache:calendar:${calendarDataVersion()}:${range.start.slice(0, 10)}:${range.end.slice(0, 10)}`;
 }
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'done';
 
@@ -288,37 +301,8 @@ const errorStyle: CSSProperties = {
   fontWeight: 620,
 };
 
-function getAccessTokenFromStorage(): string | null {
-  if (typeof window === 'undefined') return null;
-
-  const keys = Object.keys(window.localStorage);
-  const supabaseKey = keys.find(
-    (key) =>
-      key.startsWith('sb-') &&
-      key.endsWith('-auth-token') &&
-      window.localStorage.getItem(key)
-  );
-
-  if (!supabaseKey) return null;
-
-  try {
-    const raw = window.localStorage.getItem(supabaseKey);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-
-    if (parsed?.access_token) return parsed.access_token;
-    if (parsed?.currentSession?.access_token) return parsed.currentSession.access_token;
-    if (parsed?.session?.access_token) return parsed.session.access_token;
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const token = getAccessTokenFromStorage();
+  const token = readOpcAccessToken();
   const headers = new Headers(options.headers || {});
 
   headers.set('Content-Type', 'application/json');
@@ -1566,6 +1550,8 @@ export default function OPCCalendarPage() {
   const visibleRangeRef = useRef<CalendarVisibleRange | null>(null);
   const loadedRangeKeyRef = useRef('');
   const calendarLoadInFlightRef = useRef<Promise<void> | null>(null);
+  const calendarRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
+  const calendarRangeTimerRef = useRef<number | null>(null);
   const initialCalendarScrollTime = getInitialCalendarScrollTime();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -1644,6 +1630,11 @@ export default function OPCCalendarPage() {
 
       return {
         id: event.id,
+        editable: !Boolean(
+          event.job_id ||
+          event.metadata?.job_id ||
+          event.metadata?.source_job_id
+        ),
         title:
           attendeeCount > 0
             ? `${event.title} · ${acceptedCount}/${attendeeCount}`
@@ -1721,6 +1712,16 @@ export default function OPCCalendarPage() {
       return calendarLoadInFlightRef.current;
     }
 
+    if (
+      calendarRequestRef.current &&
+      calendarRequestRef.current.key !== cacheKey
+    ) {
+      calendarRequestRef.current.controller.abort();
+    }
+
+    const controller = new AbortController();
+    calendarRequestRef.current = { key: cacheKey, controller };
+
     setIsRefreshing(true);
     setErrorMessage('');
     loadedRangeKeyRef.current = cacheKey;
@@ -1728,7 +1729,13 @@ export default function OPCCalendarPage() {
     const task = (async () => {
       try {
         const params = new URLSearchParams({ start: range.start, end: range.end });
-        const data = await apiFetch<ApiPayload>(`/api/opc/calendar/events?${params.toString()}`);
+        const data = await apiFetch<ApiPayload>(
+          `/api/opc/calendar/events?${params.toString()}`,
+          { signal: controller.signal },
+        );
+
+        if (controller.signal.aborted) return;
+
         setCalendars(data.calendars || []);
         setEvents(data.events || []);
         setStaff(data.staff || []);
@@ -1736,16 +1743,53 @@ export default function OPCCalendarPage() {
         setCurrentRole(data.currentRole || 'client');
         writeOpcPageCache(cacheKey, data);
       } catch (error: any) {
+        if (controller.signal.aborted || error?.name === 'AbortError') return;
         setErrorMessage(error?.message || 'Kalender konnte nicht geladen werden.');
       } finally {
-        setIsRefreshing(false);
-        calendarLoadInFlightRef.current = null;
+        if (calendarRequestRef.current?.controller === controller) {
+          calendarRequestRef.current = null;
+          calendarLoadInFlightRef.current = null;
+          setIsRefreshing(false);
+        }
       }
     })();
 
     calendarLoadInFlightRef.current = task;
     return task;
   }, []);
+
+  useEffect(() => {
+    const reloadAfterCalendarInvalidation = () => {
+      loadedRangeKeyRef.current = '';
+      const range = visibleRangeRef.current;
+      if (range) void loadCalendarData(range, true);
+    };
+
+    const handleStorageInvalidation = (event: StorageEvent) => {
+      if (event.key === OPC_CALENDAR_DATA_VERSION_KEY) {
+        reloadAfterCalendarInvalidation();
+      }
+    };
+
+    window.addEventListener(
+      'opc:calendar-invalidated',
+      reloadAfterCalendarInvalidation,
+    );
+    window.addEventListener('storage', handleStorageInvalidation);
+
+    return () => {
+      window.removeEventListener(
+        'opc:calendar-invalidated',
+        reloadAfterCalendarInvalidation,
+      );
+      window.removeEventListener('storage', handleStorageInvalidation);
+
+      if (calendarRangeTimerRef.current !== null) {
+        window.clearTimeout(calendarRangeTimerRef.current);
+      }
+      calendarRequestRef.current?.controller.abort();
+    };
+  }, [loadCalendarData]);
 
   async function handleCreateOrUpdate(payload: {
     id?: string;
@@ -2213,7 +2257,15 @@ export default function OPCCalendarPage() {
                 end: arg.end.toISOString(),
               };
               visibleRangeRef.current = range;
-              void loadCalendarData(range);
+
+              if (calendarRangeTimerRef.current !== null) {
+                window.clearTimeout(calendarRangeTimerRef.current);
+              }
+
+              calendarRangeTimerRef.current = window.setTimeout(() => {
+                calendarRangeTimerRef.current = null;
+                void loadCalendarData(range);
+              }, 180);
             }}
             eventContent={(arg) => {
               const raw = arg.event.extendedProps.raw as CalendarEvent;

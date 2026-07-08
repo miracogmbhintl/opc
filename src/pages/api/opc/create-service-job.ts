@@ -282,81 +282,24 @@ function buildAssignmentVariants({
   userId?: string | null;
 }) {
   const now = new Date().toISOString();
-  const employeeStaffId = employee.staff_role_id || null;
-  const employeeUserId = employee.user_id || null;
-  const employeeExternalId = employee.employee_id || employee.id || null;
-  const assignedBy = staffRoleId || userId || null;
+  const employeeId = employee.employee_id || employee.id || null;
 
+  if (!employeeId) return [];
+
+  // OPC_ASSIGNMENT_CANONICAL_PAYLOAD_V1
+  // The current schema accepts the operational employee UUID. No trial
+  // inserts with guessed staff/user columns are performed.
   return [
     {
       job_id: jobId,
-      employee_id: employeeExternalId,
-      staff_role_id: employeeStaffId,
-      user_id: employeeUserId,
-      employee_name: employee.display_name || employee.email || 'Mitarbeiter',
-      employee_email: employee.email || null,
-      employee_phone: employee.phone_e164 || employee.phone_raw || null,
+      employee_id: employeeId,
       status: 'assigned',
       notes: note || null,
-      assigned_by: assignedBy,
+      assigned_by: staffRoleId || userId || null,
       created_at: now,
       updated_at: now,
     },
-    {
-      job_id: jobId,
-      employee_id: employeeExternalId,
-      user_id: employeeUserId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
-      staff_role_id: employeeStaffId,
-      user_id: employeeUserId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
-      staff_id: employeeStaffId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
-      user_id: employeeUserId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      job_id: jobId,
-      assigned_to: employeeUserId || employeeExternalId || employeeStaffId,
-      status: 'assigned',
-      notes: note || null,
-      assigned_by: assignedBy,
-      created_at: now,
-      updated_at: now,
-    },
-  ].filter(
-    (payload) =>
-      Boolean(payload.employee_id) ||
-      Boolean(payload.staff_role_id) ||
-      Boolean(payload.staff_id) ||
-      Boolean(payload.user_id) ||
-      Boolean(payload.assigned_to),
-  );
+  ];
 }
 
 
@@ -1059,11 +1002,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     let employeeRows: JsonRecord[] = [];
 
+    const assignmentSync = {
+      requested_employee_count: assignedEmployeeIds.length,
+      resolved_employee_count: 0,
+      attempted: 0,
+      created: 0,
+      failed: 0,
+      errors: [] as Array<{ job_id: string; employee_id: string | null; error: string }>,
+    };
+
     if (assignedEmployeeIds.length > 0) {
       employeeRows = await resolveOpcAssignmentCandidates(
         adminClient,
         assignedEmployeeIds,
       );
+      assignmentSync.resolved_employee_count = employeeRows.length;
 
       if (employeeRows.length !== new Set(assignedEmployeeIds).size) {
         return jsonResponse(
@@ -1076,39 +1029,74 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       const assignmentNote = optionalString(body.assignment_note);
+      const now = new Date().toISOString();
+      const assignmentRows = jobIds.flatMap((jobId) =>
+        employeeRows.map((employee) => ({
+          job_id: jobId,
+          employee_id: employee.employee_id || employee.id,
+          status: 'assigned',
+          notes: assignmentNote,
+          assigned_by: staffRole.id || user.id,
+          created_at: now,
+          updated_at: now,
+        })),
+      );
 
-      for (const jobId of jobIds) {
-        for (const employee of employeeRows) {
-          try {
-            await tryInsertOne(
-              adminClient,
-              'opc_job_assignments',
-              buildAssignmentVariants({
-                jobId,
-                employee,
-                note: assignmentNote,
-                staffRoleId: staffRole.id,
-                userId: user.id,
-              }),
-            );
-          } catch {
-            // Assignment insert must not destroy already-created jobs.
+      assignmentSync.attempted = assignmentRows.length;
+
+      if (assignmentRows.length > 0) {
+        // OPC_CREATE_JOB_ASSIGNMENTS_BULK_V1
+        // All assignments for all newly created jobs are inserted in one request.
+        const { data: insertedAssignments, error: assignmentError } = await adminClient
+          .from('opc_job_assignments')
+          .insert(assignmentRows)
+          .select('job_id,employee_id');
+
+        if (assignmentError) {
+          assignmentSync.failed = assignmentRows.length;
+          assignmentSync.errors.push({
+            job_id: jobIds.join(','),
+            employee_id: null,
+            error: assignmentError.message,
+          });
+
+          const { error: statusCorrectionError } = await adminClient
+            .from('opc_service_jobs')
+            .update({ status: 'scheduled' })
+            .in('id', jobIds);
+
+          if (statusCorrectionError) {
+            assignmentSync.errors.push({
+              job_id: jobIds.join(','),
+              employee_id: null,
+              error: `Statuskorrektur fehlgeschlagen: ${statusCorrectionError.message}`,
+            });
           }
+        } else {
+          assignmentSync.created = insertedAssignments?.length || assignmentRows.length;
         }
       }
     }
 
-    const calendarSync = await createCalendarEntriesForJobs({
-      adminClient,
-      jobIds,
-      jobPayloads,
-      site,
-      employees: employeeRows,
-      createdByUserId: user.id,
-      createdByStaffRoleId: staffRole.id,
-      recurrenceEnabled,
-      recurringSeriesId,
-    });
+    // OPC_JOBS_ARE_CALENDAR_SOURCE_V1
+    // The calendar feed projects opc_service_jobs directly. No mirrored calendar
+    // row or follow-up synchronization is created here.
+    const calendarSync = {
+      attempted: 0,
+      synced: jobIds.length,
+      failed: 0,
+      results: jobIds.map((jobId) => ({
+        job_id: jobId,
+        projected_from_service_jobs: true,
+      })),
+      errors: [] as Array<{ job_id: string; error: string }>,
+    };
+
+    const warnings = [
+      assignmentSync.failed > 0
+        ? `${assignmentSync.failed} Mitarbeiter-Zuweisung(en) konnten nicht gespeichert werden.`
+        : null,
+    ].filter(Boolean);
 
     return jsonResponse({
       success: true,
@@ -1119,8 +1107,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       quote_id: quoteId,
       order_confirmation_id: orderConfirmationId,
       recurrence_enabled: recurrenceEnabled,
-      assigned_employee_count: employeeRows.length,
+      assigned_employee_count: assignmentSync.created,
+      assignment_sync: assignmentSync,
       calendar_sync: calendarSync,
+      warnings,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unbekannter Serverfehler.';
