@@ -57,6 +57,80 @@ async function syncLoginSessionToServer(session: {
   }
 }
 
+// OPC_LOGIN_AUTHORITATIVE_ROLE_V1
+const OPC_JOB_ACCESS_CACHE_KEY = '__opc_jobs_access_response_session_v3__';
+const OPC_AUTH_PROFILE_REFRESH_KEY = 'opc:auth-profile-refresh-at:v1';
+
+function normalizeAuthoritativeRole(value: unknown) {
+  const role = String(value || '').trim().toLowerCase();
+
+  if (role === 'godmode') return 'owner';
+  if (role === 'dispatcher' || role === 'disposition') return 'dispatch';
+  if (role === 'mitarbeiter' || role === 'staff') return 'employee';
+  if (role === 'kunde') return 'client';
+
+  return role;
+}
+
+function clearLoginRoleCaches() {
+  clearCachedOpcAuthProfile();
+
+  try {
+    window.localStorage.removeItem(OPC_AUTH_PROFILE_REFRESH_KEY);
+    window.sessionStorage.removeItem(OPC_JOB_ACCESS_CACHE_KEY);
+    window.localStorage.removeItem('opc_access');
+  } catch {
+    // Cache cleanup must not block login.
+  }
+}
+
+async function writeAuthoritativeLoginProfile(session: {
+  access_token: string;
+  user: {
+    id: string;
+    email?: string | null;
+    user_metadata?: Record<string, any>;
+  };
+}) {
+  const response = await fetch('/api/opc/jobs/access', {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  const result = await response.json().catch(() => null);
+
+  if (!response.ok || !result) {
+    throw new Error(
+      result?.error ||
+        'Das aktuelle Berechtigungsprofil konnte nicht geladen werden.',
+    );
+  }
+
+  const role = normalizeAuthoritativeRole(result.role);
+
+  if (!['owner', 'admin', 'dispatch', 'employee', 'client'].includes(role)) {
+    throw new Error('Das Benutzerkonto besitzt keine gültige Portalrolle.');
+  }
+
+  writeCachedOpcAuthProfile({
+    id: result.userId || session.user.id,
+    email: result.email || session.user.email || '',
+    full_name:
+      result.displayName ||
+      session.user.user_metadata?.full_name ||
+      session.user.user_metadata?.name ||
+      session.user.email ||
+      'User',
+    role: role as any,
+    created_at: '',
+    updated_at: '',
+  });
+}
+
 export default function OPCLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -111,6 +185,12 @@ export default function OPCLogin() {
         );
 
         await syncLoginSessionToServer(session);
+
+        clearLoginRoleCaches();
+        await writeAuthoritativeLoginProfile({
+          access_token: session.access_token,
+          user: session.user,
+        });
 
         if (mounted) {
           safeNavigate('/dashboard', { replace: true });
@@ -175,40 +255,11 @@ export default function OPCLogin() {
       );
 
 
-      clearCachedOpcAuthProfile();
-
-      const rawRole =
-        data.user.user_metadata?.app_role ||
-        data.user.user_metadata?.role ||
-        data.user.app_metadata?.app_role ||
-        data.user.app_metadata?.role;
-
-      const normalizedRole = String(rawRole || '').trim().toLowerCase();
-      const knownRole =
-        normalizedRole === 'godmode'
-          ? 'owner'
-          : normalizedRole === 'dispatcher' || normalizedRole === 'disposition'
-            ? 'dispatch'
-            : normalizedRole === 'mitarbeiter' || normalizedRole === 'staff'
-              ? 'employee'
-              : normalizedRole === 'kunde'
-                ? 'client'
-                : normalizedRole;
-
-      if (['owner', 'admin', 'dispatch', 'employee', 'client'].includes(knownRole)) {
-        writeCachedOpcAuthProfile({
-          id: data.user.id,
-          email: data.user.email || email.trim().toLowerCase(),
-          full_name:
-            data.user.user_metadata?.full_name ||
-            data.user.user_metadata?.name ||
-            data.user.email ||
-            'User',
-          role: knownRole as any,
-          created_at: '',
-          updated_at: '',
-        });
-      }
+      clearLoginRoleCaches();
+      await writeAuthoritativeLoginProfile({
+        access_token: data.session.access_token,
+        user: data.user,
+      });
 
       localStorage.removeItem('mco_logged_out');
       sessionStorage.removeItem('mco_logged_out');
