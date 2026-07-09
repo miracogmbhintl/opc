@@ -2483,17 +2483,39 @@ export default function EinsatzDetailPage({ jobId }: EinsatzDetailPageProps) {
         }
       }
 
-      // OPC_DELETE_SERVICE_JOB_V2
-      // The job is deleted in the source table. The calendar is a projection of
-      // opc_service_jobs and therefore needs no separate calendar mutation.
-      const { error: rpcError } = await supabase.rpc(
-        'opc_delete_service_job_v2',
+      // OPC_SERVER_JOB_DELETE_V1
+      // Deletion is verified server-side and no longer depends on the brittle
+      // database RPC permission chain.
+      const token = readOpcAccessToken();
+
+      if (!token) {
+        throw new Error(
+          'Keine aktive Sitzung für das Löschen des Einsatzes.',
+        );
+      }
+
+      const deleteResponse = await fetch(
+        `${baseUrl}/api/opc/jobs/delete`,
         {
-          p_job_id: job.job_id,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            job_id: job.job_id,
+          }),
         },
       );
 
-      if (rpcError) throw rpcError;
+      const deleteResult = await deleteResponse.json().catch(() => null);
+
+      if (!deleteResponse.ok) {
+        throw new Error(
+          deleteResult?.error ||
+          `Einsatz konnte nicht gelöscht werden (HTTP ${deleteResponse.status}).`,
+        );
+      }
 
       try {
         const nextVersion = String(Date.now());

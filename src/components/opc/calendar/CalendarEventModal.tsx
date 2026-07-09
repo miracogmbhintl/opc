@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { Loader2, Save, X } from 'lucide-react';
+import { Loader2, Save, Trash2, X } from 'lucide-react';
 
 type CalendarRow = {
   id: string;
@@ -87,6 +87,7 @@ type Props = {
     assigned_staff_role_ids: string[];
     requires_acceptance: boolean;
   }) => Promise<void>;
+  onDelete?: (event: CalendarEvent) => Promise<void>;
 };
 
 const BRAND = {
@@ -195,6 +196,12 @@ const secondaryButtonStyle: CSSProperties = {
   cursor: 'pointer',
 };
 
+const dangerButtonStyle: CSSProperties = {
+  ...secondaryButtonStyle,
+  border: '1px solid #FCA5A5',
+  color: BRAND.red,
+};
+
 function addOneHourLocalInput() {
   const date = new Date();
   date.setHours(date.getHours() + 1);
@@ -217,6 +224,7 @@ export default function CalendarEventModal({
   formatDateTimeForInput,
   onClose,
   onSubmit,
+  onDelete,
 }: Props) {
   const editingEvent = modal.mode === 'edit' ? modal.event : null;
 
@@ -338,6 +346,21 @@ export default function CalendarEventModal({
         error instanceof Error
           ? error.message
           : 'Kalendereintrag konnte nicht gespeichert werden.'
+      );
+    }
+  }
+
+  async function deleteEditingEvent() {
+    if (!editingEvent || !isAdmin || !onDelete) return;
+
+    setLocalError('');
+    try {
+      await onDelete(editingEvent);
+    } catch (error) {
+      setLocalError(
+        error instanceof Error
+          ? error.message
+          : 'Kalendereintrag konnte nicht gelöscht werden.',
       );
     }
   }
@@ -693,6 +716,18 @@ export default function CalendarEventModal({
               marginTop: '22px',
             }}
           >
+            {editingEvent && isAdmin && onDelete && (
+              <button
+                type="button"
+                onClick={() => { void deleteEditingEvent(); }}
+                disabled={saving}
+                style={{ ...dangerButtonStyle, marginRight: 'auto', opacity: saving ? 0.6 : 1 }}
+              >
+                <Trash2 size={17} />
+                Eintrag löschen
+              </button>
+            )}
+
             <button type="button" onClick={onClose} disabled={saving} style={secondaryButtonStyle}>
               Schliessen
             </button>

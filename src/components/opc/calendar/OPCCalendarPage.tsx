@@ -20,6 +20,7 @@ import {
   Plus,
   RefreshCcw,
   Search,
+  Trash2,
   Video,
   X,
 } from 'lucide-react';
@@ -134,6 +135,26 @@ function calendarDataVersion() {
 
 function calendarRangeCacheKey(range: CalendarVisibleRange) {
   return `opc:page-cache:calendar:${calendarDataVersion()}:${range.start.slice(0, 10)}:${range.end.slice(0, 10)}`;
+}
+
+function invalidateCalendarPageCache() {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(
+      OPC_CALENDAR_DATA_VERSION_KEY,
+      String(Date.now()),
+    );
+
+    for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+      const key = window.sessionStorage.key(index);
+      if (key?.startsWith('opc:page-cache:calendar:')) {
+        window.sessionStorage.removeItem(key);
+      }
+    }
+  } catch {
+    // A successful deletion must not fail because browser cache storage is unavailable.
+  }
 }
 type StatusFilter = 'all' | 'open' | 'in_progress' | 'done';
 
@@ -1109,6 +1130,15 @@ function getMeetOptions(event: CalendarEvent) {
   return metadata.google_meet_options || {};
 }
 
+function calendarEventJobId(event: CalendarEvent) {
+  return String(
+    event.job_id ||
+    event.metadata?.job_id ||
+    event.metadata?.source_job_id ||
+    '',
+  ).trim();
+}
+
 async function copyTextToClipboard(value: string) {
   if (!value) return;
 
@@ -1131,13 +1161,17 @@ async function copyTextToClipboard(value: string) {
 function EventQuickView({
   event,
   isAdmin,
+  saving,
   onClose,
   onEdit,
+  onDelete,
 }: {
   event: CalendarEvent;
   isAdmin: boolean;
+  saving: boolean;
   onClose: () => void;
   onEdit: () => void;
+  onDelete?: () => Promise<void>;
 }) {
   const guestEmails = getGuestEmails(event);
   const meetOptions = getMeetOptions(event);
@@ -1517,12 +1551,44 @@ function EventQuickView({
               paddingTop: '4px',
             }}
           >
-            <button type="button" onClick={onClose} style={{ ...compactButtonStyle, height: '42px' }}>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              style={{ ...compactButtonStyle, height: '42px' }}
+            >
               Schliessen
             </button>
 
+            {isAdmin && onDelete && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  void onDelete().catch(() => {
+                    // Parent page shows the concrete error.
+                  });
+                }}
+                style={{
+                  ...compactButtonStyle,
+                  height: '42px',
+                  color: BRAND.red,
+                  borderColor: '#FCA5A5',
+                  opacity: saving ? 0.6 : 1,
+                }}
+              >
+                <Trash2 size={15} />
+                Löschen
+              </button>
+            )}
+
             {isAdmin && (
-              <button type="button" onClick={onEdit} style={{ ...compactBlackButtonStyle, height: '42px' }}>
+              <button
+                type="button"
+                onClick={onEdit}
+                disabled={saving}
+                style={{ ...compactBlackButtonStyle, height: '42px', opacity: saving ? 0.6 : 1 }}
+              >
                 <Pencil size={15} />
                 Bearbeiten
               </button>
@@ -1930,6 +1996,49 @@ export default function OPCCalendarPage() {
     }
   }
 
+  async function handleDeleteCalendarEvent(event: CalendarEvent) {
+    if (!isAdmin) {
+      throw new Error('Keine Berechtigung zum Löschen dieses Kalendereintrags.');
+    }
+
+    const jobId = calendarEventJobId(event);
+    if (jobId) {
+      throw new Error('Dieser Kalendereintrag gehört zu einem Einsatz. Bitte den Einsatz auf der Einsatzseite löschen.');
+    }
+
+    const confirmed = window.confirm(
+      `Diesen Kalendereintrag wirklich löschen?\n\n${event.title}\n${formatTimeRange(event.starts_at, event.ends_at)}`,
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setErrorMessage('');
+
+    try {
+      const result = await apiFetch<{ deleted: boolean; warning?: string | null }>(
+        '/api/opc/calendar/delete-event',
+        {
+          method: 'POST',
+          body: JSON.stringify({ event_id: event.id }),
+        },
+      );
+
+      invalidateCalendarPageCache();
+      setEvents((current) => current.filter((item) => item.id !== event.id));
+      setQuickViewEvent(null);
+      setModal(null);
+
+      if (result.warning) setErrorMessage(result.warning);
+      await loadCalendarData(visibleRangeRef.current, true);
+    } catch (error: any) {
+      const message = error?.message || 'Kalendereintrag konnte nicht gelöscht werden.';
+      setErrorMessage(message);
+      throw new Error(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleRespondInvite(attendeeId: string, status: CalendarAttendee['status']) {
     setSaving(true);
     setErrorMessage('');
@@ -2294,6 +2403,12 @@ export default function OPCCalendarPage() {
         <EventQuickView
           event={quickViewEvent}
           isAdmin={isAdmin}
+          saving={saving}
+          onDelete={
+            calendarEventJobId(quickViewEvent)
+              ? undefined
+              : () => handleDeleteCalendarEvent(quickViewEvent)
+          }
           onClose={() => setQuickViewEvent(null)}
           onEdit={() => {
             setModal({ mode: 'edit', event: quickViewEvent });
@@ -2326,6 +2441,7 @@ export default function OPCCalendarPage() {
           formatDateTimeForInput={formatDateTimeForInput}
           onClose={() => setModal(null)}
           onSubmit={handleCreateOrUpdate}
+          onDelete={handleDeleteCalendarEvent}
         />
       )}
 
