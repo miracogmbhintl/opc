@@ -607,8 +607,12 @@ function EinsaetzeOverview() {
     setErrorMessage('');
 
     try {
+      // OPC_JOBS_CANONICAL_SOURCE_V1
+      // Managers load the canonical source table first. The detail view remains
+      // only as fallback because it can be available while containing an
+      // incomplete date range.
       const sources = isManagerRole(roleOverride)
-        ? ['opc_job_detail_view', 'opc_service_jobs']
+        ? ['opc_service_jobs', 'opc_job_detail_view']
         : ['opc_my_portal_job_feed'];
       const weekStart = startOfCalendarWeek(new Date());
       const weekEnd = endOfCalendarWeek(new Date());
