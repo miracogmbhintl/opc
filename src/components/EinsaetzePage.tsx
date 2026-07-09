@@ -68,8 +68,10 @@ const BRAND = {
 };
 
 // OPC_JOBS_PROGRESSIVE_LOAD_V1
-const JOBS_INITIAL_LIMIT = 100;
+// OPC_JOBS_UPCOMING_WINDOW_V1
+const JOBS_INITIAL_LIMIT = 500;
 const JOBS_HISTORY_PAGE_SIZE = 25;
+const JOBS_UPCOMING_WINDOW_DAYS = 93;
 const JOBS_CLOSED_FILTER = '(completed,cancelled,report_approved,approved,sent_to_client,rejected,inactive)';
 
 const closedStatuses = new Set([
@@ -610,6 +612,9 @@ function EinsaetzeOverview() {
         : ['opc_my_portal_job_feed'];
       const weekStart = startOfCalendarWeek(new Date());
       const weekEnd = endOfCalendarWeek(new Date());
+      const upcomingEnd = endOfDay(
+        addDays(weekStart, JOBS_UPCOMING_WINDOW_DAYS),
+      );
       let finalRows: RawJob[] = [];
       let selectedSource = '';
       let lastError: any = null;
@@ -627,6 +632,8 @@ function EinsaetzeOverview() {
             .from(source)
             .select('*')
             .or(`status.is.null,status.not.in.${JOBS_CLOSED_FILTER}`)
+            .gte('planned_start', weekStart.toISOString())
+            .lte('planned_start', upcomingEnd.toISOString())
             .order('planned_start', { ascending: true, nullsFirst: false })
             .limit(JOBS_INITIAL_LIMIT),
         ]);
