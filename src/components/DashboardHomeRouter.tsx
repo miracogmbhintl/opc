@@ -771,9 +771,15 @@ export default function DashboardHomeRouter() {
     );
   }
 
-  if (normalizeRole(profile?.role) === 'employee' && profile) {
+  const normalizedProfileRole = normalizeRole(profile?.role);
+
+  if (normalizedProfileRole === 'employee' && profile) {
     return <EmployeeDashboardContent profile={profile} />;
   }
 
-  return <OwnerDashboardHome />;
+  return (
+    <OwnerDashboardHome
+      showFinance={normalizedProfileRole === 'owner'}
+    />
+  );
 }

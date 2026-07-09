@@ -1777,10 +1777,17 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
-export default function OwnerDashboardHome() {
+// OPC_DASHBOARD_OWNER_ONLY_FINANCE_V1
+export default function OwnerDashboardHome({
+  showFinance = false,
+}: {
+  showFinance?: boolean;
+}) {
   const bootstrapCache = useMemo(() => readDashboardBootstrapCache(), []);
   const bootstrapCore = bootstrapCache.core?.data || null;
-  const bootstrapFinance = bootstrapCache.finance?.data || null;
+  const bootstrapFinance = showFinance
+    ? bootstrapCache.finance?.data || null
+    : null;
 
   const [stats, setStats] = useState<DashboardStats>(() => ({
     ...EMPTY_DASHBOARD_STATS,
@@ -1795,7 +1802,9 @@ export default function OwnerDashboardHome() {
     ...(bootstrapFinance?.financePreviews || {}),
   }));
   const [activeFinanceTab, setActiveFinanceTab] = useState<FinancePreviewTab>('invoices');
-  const [financeLoading, setFinanceLoading] = useState(() => !bootstrapFinance);
+  const [financeLoading, setFinanceLoading] = useState(
+    () => showFinance && !bootstrapFinance,
+  );
 
   const [jobs, setJobs] = useState<ServiceJob[]>(() => bootstrapCore?.jobs || []);
   const [activeTab, setActiveTab] = useState<DashboardTab>(() => bootstrapCore?.activeTab || 'today');
@@ -1806,10 +1815,12 @@ export default function OwnerDashboardHome() {
       bootstrapCache.core,
       DASHBOARD_CORE_TTL_MS,
     );
-    const financeFresh = dashboardPersistentSliceIsFresh(
-      bootstrapCache.finance,
-      DASHBOARD_FINANCE_TTL_MS,
-    );
+    const financeFresh =
+      showFinance &&
+      dashboardPersistentSliceIsFresh(
+        bootstrapCache.finance,
+        DASHBOARD_FINANCE_TTL_MS,
+      );
 
     // The eight top cards are already painted synchronously from localStorage.
     // When missing or stale, refresh them immediately instead of waiting for idle time.
@@ -1821,7 +1832,11 @@ export default function OwnerDashboardHome() {
 
     let financeTimer = 0;
 
-    if (!financeFresh) {
+    if (!showFinance) {
+      // Admins, dispatch and Sara retain the operational dashboard but must
+      // neither render nor query finance, payroll, invoice or quote data.
+      setFinanceLoading(false);
+    } else if (!financeFresh) {
       // Finance never blocks authentication or the first eight cards. It starts on
       // a deterministic short delay and keeps a stale snapshot visible while refreshing.
       financeTimer = window.setTimeout(() => {
@@ -1834,7 +1849,7 @@ export default function OwnerDashboardHome() {
     return () => {
       if (financeTimer) window.clearTimeout(financeTimer);
     };
-  }, []);
+  }, [showFinance]);
 
   async function loadData(options: { background?: boolean } = {}) {
     const isBackground = Boolean(options.background);
@@ -2345,6 +2360,8 @@ export default function OwnerDashboardHome() {
             )}
           </section>
 
+          {showFinance ? (
+            <>
           <div className="opc-dashboard-list-heading opc-finance-heading">
             <h2 style={sectionTitleStyle}>Finanzen</h2>
 
@@ -2540,6 +2557,8 @@ export default function OwnerDashboardHome() {
               </>
             )}
           </section>
+            </>
+          ) : null}
         </main>
 
         <aside style={{ display: 'flex', flexDirection: 'column', gap: '14px', minWidth: 0 }}>

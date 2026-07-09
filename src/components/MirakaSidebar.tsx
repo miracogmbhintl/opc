@@ -110,11 +110,39 @@ function normalizeRole(role: string): NormalizedRole {
   return 'client';
 }
 
+// OPC_SARA_SPECIAL_ADMIN_V2
+const SARA_BATISTA_AUTH_USER_ID =
+  '7dcbbbb5-9087-45bc-9e2a-55f2507bf884';
+
+const SARA_BATISTA_EMAILS = new Set([
+  's.batista@orangeproclean.ch',
+]);
+
 function isSaraSpecialAdmin(user: UserProfile | null) {
   const profile = user as any;
-  const email = String(profile?.email || '').trim().toLowerCase();
 
-  return email === 's.batista@orangeproclean.ch';
+  const userId = String(
+    profile?.id ||
+    profile?.user_id ||
+    profile?.auth_user_id ||
+    '',
+  )
+    .trim()
+    .toLowerCase();
+
+  const emails = [
+    profile?.email,
+    profile?.business_email,
+    profile?.private_email,
+    profile?.auth_email,
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  return (
+    userId === SARA_BATISTA_AUTH_USER_ID ||
+    emails.some((email) => SARA_BATISTA_EMAILS.has(email))
+  );
 }
 
 function getRoleLabel(role: string) {
@@ -186,6 +214,10 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const normalizedRole = normalizeRole((user as any)?.role || role);
+  const saraSpecialAdmin = useMemo(
+    () => isSaraSpecialAdmin(user),
+    [user],
+  );
   const [isCollapsed, setIsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
 
@@ -554,7 +586,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         'settings',
       ]);
 
-      if (isSaraSpecialAdmin(user)) {
+      if (saraSpecialAdmin) {
         [
           'employees',
           'jobs',
@@ -575,7 +607,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
     }
 
     return clientItems;
-  }, [normalizedRole, routes]);
+  }, [normalizedRole, routes, saraSpecialAdmin]);
 
   const activePath = normalizePath(resolvedPath);
 
@@ -600,7 +632,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       : normalizedRole === 'employee'
         ? ['overview', 'zeiterfassung', 'jobs', 'calendar', 'settings']
         : normalizedRole === 'admin'
-          ? isSaraSpecialAdmin(user)
+          ? saraSpecialAdmin
             ? ['overview', 'inquiries', 'jobs', 'settings']
             : ['overview', 'clients', 'inquiries', 'settings']
           : ['overview', 'zeiterfassung', 'jobs', 'settings'];
