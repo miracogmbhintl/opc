@@ -2,31 +2,49 @@
  * Session security helpers for Orange Pro Clean.
  *
  * Important production behavior:
- * - No automatic inactivity logout.
- * - No forced logout on temporary network/session validation errors.
+ * - Supabase sessions remain persisted on the device.
+ * - A session expires after seven complete days without portal activity.
+ * - Temporary network and refresh errors do not immediately log the user out.
  * - Explicit logout still clears Supabase and local browser state.
- *
- * Staff often use the portal on mobile while working on jobs. A strict
- * inactivity timeout can interrupt time tracking, reports and uploads.
  */
 
 import { supabase } from './supabase';
 
 const LOGOUT_FLAG_KEY = 'mco_logged_out';
 const LAST_ACTIVITY_KEY = 'mco_last_activity';
+const SESSION_INACTIVITY_MS = 7 * 24 * 60 * 60 * 1000;
+const ACTIVITY_WRITE_THROTTLE_MS = 60 * 1000;
 
 let isMonitoring = false;
 let visibilityRefreshTimer: number | null = null;
+let lastActivityWriteAt = 0;
 
 function isBrowser() {
   return typeof window !== 'undefined';
 }
 
-function rememberActivity() {
-  if (!isBrowser()) return;
-
+function readLastActivityAt() {
+  if (!isBrowser()) return 0;
   try {
-    window.sessionStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now()));
+    const value = Number(window.localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function inactivityExpired() {
+  const lastActivityAt = readLastActivityAt();
+  return lastActivityAt > 0 && Date.now() - lastActivityAt >= SESSION_INACTIVITY_MS;
+}
+
+function rememberActivity(force = false) {
+  if (!isBrowser()) return;
+  const now = Date.now();
+  if (!force && now - lastActivityWriteAt < ACTIVITY_WRITE_THROTTLE_MS) return;
+  lastActivityWriteAt = now;
+  try {
+    window.localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
   } catch {
     // Ignore storage failures.
   }
@@ -34,19 +52,29 @@ function rememberActivity() {
 
 async function refreshSessionSilently() {
   try {
-    if (!supabase) return true;
-
-    const { data } = await supabase.auth.getSession();
-
-    if (!data?.session) {
+    if (inactivityExpired()) {
+      await secureLogout('/');
       return false;
     }
 
-    await supabase.auth.refreshSession();
-    return true;
+    const { data, error } = await supabase.auth.getSession();
+    if (error) return true;
+    if (!data?.session) return false;
+
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.error) {
+      return typeof navigator !== 'undefined' && navigator.onLine === false;
+    }
+
+    return Boolean(refreshed.data.session || data.session);
   } catch {
     return true;
   }
+}
+
+async function refreshOrRedirect() {
+  const valid = await refreshSessionSilently();
+  if (!valid && isBrowser()) window.location.replace('/');
 }
 
 function handleVisibilityChange() {
@@ -57,12 +85,12 @@ function handleVisibilityChange() {
   }
 
   visibilityRefreshTimer = window.setTimeout(() => {
-    void refreshSessionSilently();
+    void refreshOrRedirect();
   }, 250);
 }
 
 function handlePageShow() {
-  void refreshSessionSilently();
+  void refreshOrRedirect();
 }
 
 export function startSessionMonitoring() {
@@ -76,7 +104,7 @@ export function startSessionMonitoring() {
     // Ignore storage failures.
   }
 
-  rememberActivity();
+  rememberActivity(true);
 
   const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
 
@@ -154,29 +182,31 @@ export async function checkSessionBeforeRender(): Promise<boolean> {
 
     if (wasLoggedOut) return false;
 
-    const { data } = await supabase.auth.getSession();
+    if (inactivityExpired()) {
+      await secureLogout('/');
+      return false;
+    }
 
-    if (data?.session) return true;
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data?.session) return false;
 
-    return Boolean(
-      window.localStorage.getItem('opc:auth-profile-cache:v5:persistent') ||
-      window.localStorage.getItem('mco_user_data') ||
-      window.localStorage.getItem('mco_auth')
-    );
+    rememberActivity(true);
+    return true;
   } catch {
-    return Boolean(
-      window.localStorage.getItem('opc:auth-profile-cache:v5:persistent') ||
-      window.localStorage.getItem('mco_user_data') ||
-      window.localStorage.getItem('mco_auth')
-    );
+    return false;
   }
 }
 
 export function getRemainingSessionTime(): number {
-  return Number.POSITIVE_INFINITY;
+  const lastActivityAt = readLastActivityAt();
+  if (!lastActivityAt) return Math.floor(SESSION_INACTIVITY_MS / 1000);
+  return Math.max(
+    0,
+    Math.ceil((SESSION_INACTIVITY_MS - (Date.now() - lastActivityAt)) / 1000),
+  );
 }
 
 export function extendSession() {
-  rememberActivity();
-  void refreshSessionSilently();
+  rememberActivity(true);
+  void refreshOrRedirect();
 }

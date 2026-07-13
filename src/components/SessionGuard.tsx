@@ -1,7 +1,7 @@
 /**
  * Session Guard Component
  * Wraps dashboard pages to enforce session security
- * - Auto logout after 15 minutes inactivity
+ * - Auto logout after seven days without portal activity
  * - Prevents back button bypass after logout
  * - Shows session timeout warnings
  */
@@ -51,7 +51,7 @@ export default function SessionGuard({
       setIsValid(true);
       setIsValidating(false);
 
-      // Start session monitoring (15 min inactivity logout)
+      // Start persistent monitoring with seven-day inactivity expiry
       startSessionMonitoring();
 
       // Show warning 2 minutes before timeout

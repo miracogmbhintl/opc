@@ -394,7 +394,8 @@ async function fetchLiveOpcAuthProfile(
   const user = session?.user || null;
 
   if (!user) {
-    if (cachedProfile && !isExplicitlyLoggedOut()) return cachedProfile;
+    // Profile metadata may render immediately, but it never substitutes for
+    // a genuine persisted Supabase session.
     return null;
   }
 

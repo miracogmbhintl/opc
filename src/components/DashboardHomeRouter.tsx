@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { supabase, type UserProfile } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
-import { loadOpcAuthProfile, readCachedOpcAuthProfile } from '../lib/opc-auth-cache';
+import { readCachedOpcAuthProfile, refreshOpcAuthProfile } from '../lib/opc-auth-cache';
 import OwnerDashboardHome from './OwnerDashboardHome';
 
 type EmployeeEntryStatus = 'open' | 'on_break' | 'submitted' | 'approved' | 'rejected' | string;
@@ -345,29 +345,10 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
       const userId = authData.user?.id;
       if (!userId) throw new Error('Nicht eingeloggt.');
 
-      const jobsResult = await supabase
-        .from('opc_my_portal_job_feed')
-        .select('*')
-        .limit(120);
-
-      if (jobsResult.error) throw jobsResult.error;
-
-      const mappedJobs = (jobsResult.data || [])
-        .map(mapJob)
-        .filter((job) => job.id)
-        .sort((a, b) => {
-          const aTime = a.plannedStart ? new Date(a.plannedStart).getTime() : 0;
-          const bTime = b.plannedStart ? new Date(b.plannedStart).getTime() : 0;
-          return aTime - bTime;
-        });
-
-      setJobs(mappedJobs);
-
       const entryResult = await supabase
         .from('opc_employee_time_entries')
         .select('*')
         .eq('user_id', userId)
-        .eq('work_date', todayString())
         .in('status', ['open', 'on_break'])
         .is('clock_out_at', null)
         .order('created_at', { ascending: false })
@@ -376,6 +357,31 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
 
       if (entryResult.error) throw entryResult.error;
       setActiveEntry((entryResult.data || null) as EmployeeTimeEntry | null);
+
+      const jobsResult = await supabase
+        .from('opc_my_portal_job_feed')
+        .select('*')
+        .limit(120);
+
+      if (jobsResult.error) {
+        console.error('[OPC Dashboard] Einsatzliste konnte nicht geladen werden.', {
+          message: jobsResult.error.message,
+          code: jobsResult.error.code,
+          details: jobsResult.error.details,
+          hint: jobsResult.error.hint,
+        });
+      } else {
+        const mappedJobs = (jobsResult.data || [])
+          .map(mapJob)
+          .filter((job) => job.id)
+          .sort((a, b) => {
+            const aTime = a.plannedStart ? new Date(a.plannedStart).getTime() : 0;
+            const bTime = b.plannedStart ? new Date(b.plannedStart).getTime() : 0;
+            return aTime - bTime;
+          });
+
+        setJobs(mappedJobs);
+      }
     } catch (error: any) {
       setErrorMessage(error?.message || 'Mitarbeiter-Dashboard konnte nicht geladen werden.');
     } finally {
@@ -392,6 +398,12 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
       await callback();
       await loadDashboard(false);
     } catch (error: any) {
+      console.error(`[OPC Time] ${action} fehlgeschlagen.`, {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+      });
       setErrorMessage(error?.message || 'Aktion konnte nicht ausgeführt werden.');
     } finally {
       setActionLoading(null);
@@ -448,6 +460,9 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
 
   const isActive = Boolean(activeEntry && !activeEntry.clock_out_at);
   const isOnBreak = normalizeStatus(activeEntry?.status) === 'on_break';
+  const hasStaleActiveEntry = Boolean(
+    isActive && activeEntry?.clock_in_at && !isToday(activeEntry.clock_in_at),
+  );
 
   const todayJobs = useMemo(() => jobs.filter((job) => isToday(job.plannedStart)), [jobs]);
   const nextJob = useMemo(() => {
@@ -496,6 +511,11 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
 
       {errorMessage ? <div style={{ border: '1px solid #FECACA', background: '#FEF2F2', color: BRAND.red, padding: '14px 16px', borderRadius: 16, fontSize: 13, fontWeight: 720, marginBottom: 14 }}>{errorMessage}</div> : null}
       {successMessage ? <div style={{ border: '1px solid #BBF7D0', background: '#F0FDF4', color: BRAND.green, padding: '14px 16px', borderRadius: 16, fontSize: 13, fontWeight: 720, marginBottom: 14 }}>{successMessage}</div> : null}
+      {hasStaleActiveEntry ? (
+        <div style={{ border: '1px solid #FDE68A', background: '#FFFBEB', color: BRAND.amber, padding: '14px 16px', borderRadius: 16, fontSize: 13, lineHeight: 1.5, fontWeight: 720, marginBottom: 14 }}>
+          Offener Zeiteintrag seit {formatDateTime(activeEntry?.clock_in_at)} erkannt. Dieser ältere Eintrag muss zuerst administrativ geprüft und korrigiert werden. Ein neuer Arbeitstag wird bis dahin nicht stillschweigend gestartet.
+        </div>
+      ) : null}
 
       <div className="opc-employee-dashboard-grid">
         <section style={{ ...cardStyle, padding: 20 }}>
@@ -542,21 +562,21 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
               </button>
             ) : null}
 
-            {isActive && !isOnBreak ? (
+            {isActive && !hasStaleActiveEntry && !isOnBreak ? (
               <button type="button" onClick={() => void startBreak()} disabled={actionLoading === 'break_start'} style={secondaryButtonStyle}>
                 {actionLoading === 'break_start' ? <Loader2 size={16} /> : <Coffee size={16} />}
                 Pause starten
               </button>
             ) : null}
 
-            {isActive && isOnBreak ? (
+            {isActive && !hasStaleActiveEntry && isOnBreak ? (
               <button type="button" onClick={() => void endBreak()} disabled={actionLoading === 'break_end'} style={secondaryButtonStyle}>
                 {actionLoading === 'break_end' ? <Loader2 size={16} /> : <Coffee size={16} />}
                 Pause beenden
               </button>
             ) : null}
 
-            {isActive ? (
+            {isActive && !hasStaleActiveEntry ? (
               <button type="button" onClick={() => void clockOut()} disabled={actionLoading === 'clock_out'} style={dangerButtonStyle}>
                 {actionLoading === 'clock_out' ? <Loader2 size={16} /> : <LogOut size={16} />}
                 Arbeitstag beenden
@@ -739,7 +759,7 @@ export default function DashboardHomeRouter() {
     initialProfile,
   );
   const [loading, setLoading] = useState(!initialProfile);
-  const didProfileLoadRef = useRef(Boolean(initialProfile));
+  const didProfileLoadRef = useRef(false);
 
   useEffect(() => {
     if (didProfileLoadRef.current) return;
@@ -749,8 +769,16 @@ export default function DashboardHomeRouter() {
 
     async function loadProfile() {
       try {
-        const nextProfile = await loadOpcAuthProfile();
-        if (mounted) setProfile(nextProfile);
+        const nextProfile = await refreshOpcAuthProfile(true);
+        if (!mounted) return;
+
+        if (!nextProfile) {
+          setProfile(null);
+          window.location.replace('/');
+          return;
+        }
+
+        setProfile(nextProfile);
       } finally {
         if (mounted) setLoading(false);
       }
