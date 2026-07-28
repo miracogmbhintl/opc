@@ -36,6 +36,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import MirakaDashboardShell from './MirakaDashboardShell';
+import PayrollOwnerPanel from './PayrollOwnerPanel';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import {
@@ -675,11 +676,11 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
   }
 
   if (loading) {
-    return <MirakaDashboardShell title="Mitarbeiterdetails" hideTopBar={false} requiredRole={['owner','admin']} currentPath="/mitarbeiter"><div className="opc-employee-loading" style={{fontFamily: pageFont}}><Loader2 size={19} className="spin" /> Mitarbeiter wird geladen...</div></MirakaDashboardShell>;
+    return <MirakaDashboardShell title="Mitarbeiterdetails" hideTopBar={false} currentPath="/mitarbeiter"><div className="opc-employee-loading" style={{fontFamily: pageFont}}><Loader2 size={19} className="spin" /> Mitarbeiter wird geladen...</div></MirakaDashboardShell>;
   }
 
   return (
-    <MirakaDashboardShell title="Mitarbeiterdetails" hideTopBar={false} fullWidth={false} requiredRole={['owner','admin']} currentPath="/mitarbeiter">
+    <MirakaDashboardShell title="Mitarbeiterdetails" hideTopBar={false} fullWidth={false} currentPath="/mitarbeiter">
       <div className="opc-employee-page" style={{ fontFamily: pageFont, color: BRAND.text }}>
         <a className="opc-back-link" href={`${baseUrl}/mitarbeiter`}>← Zurück zu Mitarbeiter</a>
         {errorMessage ? <div className="opc-employee-error">{errorMessage}</div> : null}
@@ -863,83 +864,11 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                     <span>Dieser Bereich ist nur für Owner sichtbar.</span>
                   </div>
 
-                  <div className="opc-contract-upload-panel">
-                    <div className="opc-contract-upload-copy">
-                      <strong>Stundenansatz festlegen</strong>
-                      <span>Dieser Ansatz wird für die Lohnabrechnung innerhalb des angegebenen Gültigkeitszeitraums verwendet. Er hat Vorrang vor unvollständigen Vertragsdaten.</span>
-                    </div>
-
-                    <div className="opc-hourly-rate-grid">
-                      <label className="opc-edit-field">
-                        <span>Stundenansatz CHF</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.05"
-                          inputMode="decimal"
-                          value={hourlyRate}
-                          onChange={(event) => { setHourlyRate(event.target.value); setPayrollSummary(null); }}
-                          placeholder="z. B. 26.50"
-                        />
-                      </label>
-                      <label className="opc-edit-field">
-                        <span>Gültig ab</span>
-                        <input type="date" value={hourlyRateValidFrom} onChange={(event) => { setHourlyRateValidFrom(event.target.value); setPayrollSummary(null); }} />
-                      </label>
-                      <label className="opc-edit-field">
-                        <span>Gültig bis (optional)</span>
-                        <input type="date" value={hourlyRateValidUntil} onChange={(event) => { setHourlyRateValidUntil(event.target.value); setPayrollSummary(null); }} />
-                      </label>
-                      <button
-                        type="button"
-                        className="opc-btn opc-btn-dark"
-                        disabled={hourlyRateSaving || !hourlyRate || !hourlyRateValidFrom}
-                        onClick={() => void saveHourlyRate()}
-                      >
-                        {hourlyRateSaving ? <Loader2 size={15} className="spin" /> : <Save size={15} />}
-                        Stundenansatz speichern
-                      </button>
-                    </div>
-
-                    <div className="opc-document-hint">Beispiel Filip: CHF 26.50, gültig ab 01.06.2026. Bereits genehmigte Arbeitsstunden in diesem Zeitraum werden danach mit diesem Ansatz berechnet.</div>
-                  </div>
-
-                  <div className="opc-contract-upload-panel">
-                    <div className="opc-contract-upload-copy">
-                      <strong>Lohnabrechnung aus genehmigten Arbeitszeiten</strong>
-                      <span>Wählen Sie den Zeitraum. Berücksichtigt werden ausschliesslich genehmigte Zeiteinträge und der im jeweiligen Zeitraum gültige Stundenansatz.</span>
-                    </div>
-
-                    <div className="opc-payroll-filter-grid">
-                      <label className="opc-edit-field">
-                        <span>Zeitraum von</span>
-                        <input type="date" value={payrollFrom} onChange={(event) => { setPayrollFrom(event.target.value); setPayrollSummary(null); }} />
-                      </label>
-                      <label className="opc-edit-field">
-                        <span>Zeitraum bis</span>
-                        <input type="date" value={payrollTo} onChange={(event) => { setPayrollTo(event.target.value); setPayrollSummary(null); }} />
-                      </label>
-                      <button
-                        type="button"
-                        className="opc-btn opc-btn-dark"
-                        disabled={payrollLoading || !payrollFrom || !payrollTo}
-                        onClick={() => void handlePayrollDownload()}
-                      >
-                        {payrollLoading ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
-                        Lohnabrechnung herunterladen
-                      </button>
-                    </div>
-
-                    {payrollSummary ? (
-                      <div className="opc-payroll-summary-grid">
-                        <MiniField label="Genehmigte Einträge" value={payrollSummary.entriesCount} />
-                        <MiniField label="Arbeitszeit" value={`${formatHours(payrollSummary.totalHours)} h`} />
-                        <MiniField label="Bruttolohn" value={`CHF ${payrollSummary.grossSalary.toFixed(2)}`} />
-                      </div>
-                    ) : null}
-
-                    <div className="opc-document-hint">Diese erste Ausbaustufe berechnet den Grundlohn aus genehmigten Netto-Arbeitsminuten × gültigem Stundenansatz. Sozialabzüge, Spesen und weitere Lohnbestandteile werden derzeit mit CHF 0.00 ausgewiesen, bis deren Regeln im Payroll-System hinterlegt sind.</div>
-                  </div>
+                  <PayrollOwnerPanel
+                    employeeId={employeeId}
+                    employee={employee}
+                    onSaved={() => loadDetail(false)}
+                  />
 
                   <div className="opc-contract-upload-panel">
                     <div className="opc-contract-upload-copy">
