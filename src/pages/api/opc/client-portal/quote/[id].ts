@@ -50,12 +50,37 @@ function isVisible(row: AnyRow) {
   return !['', 'draft', 'ready'].includes(status);
 }
 
-function sanitize(row: AnyRow) {
+function sanitize(row: AnyRow | null | undefined) {
+  if (!row) return null;
   const next = { ...row };
   for (const key of ['internal_notes', 'private_notes', 'created_by', 'updated_by']) {
     delete next[key];
   }
   return next;
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as AnyRow
+    : null;
+}
+
+function firstUrl(row: AnyRow) {
+  const meta = metadata(row);
+  for (const key of [
+    'download_url',
+    'file_url',
+    'public_url',
+    'pdf_url',
+    'document_url',
+    'signed_url',
+    'attachment_url',
+    'quote_pdf_url',
+  ]) {
+    const value = row[key] || meta[key];
+    if (value) return String(value);
+  }
+  return '';
 }
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
@@ -96,22 +121,48 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
       return opcClientPortalJson({ ok: false, error: 'Offerte wurde nicht gefunden.' }, 404);
     }
 
-    const itemsResult = await authenticated.serviceClient
-      .from('opc_quote_items')
-      .select('*')
-      .eq('quote_id', quoteId)
-      .order('sort_order', { ascending: true });
+    const rawQuote = quoteResult.data as AnyRow;
+    const siteId = rawQuote.client_site_id || rawQuote.site_id || null;
+    const [itemsResult, siteResult] = await Promise.all([
+      authenticated.serviceClient
+        .from('opc_quote_items')
+        .select('*')
+        .eq('quote_id', quoteId)
+        .order('sort_order', { ascending: true }),
+      siteId
+        ? authenticated.serviceClient
+            .from('opc_client_sites')
+            .select('*')
+            .eq('id', siteId)
+            .eq('client_id', authenticated.access.clientId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
 
     if (itemsResult.error) {
       throw new Error(`Offertenpositionen konnten nicht geladen werden: ${itemsResult.error.message}`);
     }
 
+    const quote = sanitize(rawQuote) as AnyRow;
+    if (!objectValue(quote.client_snapshot)) {
+      quote.client_snapshot = sanitize(authenticated.access.client) || {};
+    }
+    if (!objectValue(quote.contact_snapshot) && authenticated.access.contact) {
+      quote.contact_snapshot = sanitize(authenticated.access.contact) || {};
+    }
+    if (!objectValue(quote.site_snapshot) && siteResult.data) {
+      quote.site_snapshot = sanitize(siteResult.data) || {};
+    }
+
+    const originalUrl = firstUrl(quote);
+    if (originalUrl) quote.download_url = originalUrl;
+
     return opcClientPortalJson({
       ok: true,
       portal: serializeAccess(authenticated.access),
       detail: {
-        quote: sanitize(quoteResult.data),
-        items: (itemsResult.data || []).map(sanitize),
+        quote,
+        items: (itemsResult.data || []).map((row: AnyRow) => sanitize(row)),
       },
     });
   } catch (error: any) {
