@@ -12,8 +12,11 @@ let section:
   | 'orders'
   | 'order-detail'
   | 'sites'
+  | 'site-detail'
   | 'documents'
   | 'requests'
+  | 'ticket-detail'
+  | 'cleaning-request'
   | 'finance'
   | 'settings' = 'overview';
 let itemId: string | undefined;
@@ -26,15 +29,26 @@ if (parts[0] === 'auftraege' && parts[1]) {
 } else if (parts[0] === 'auftraege') {
   section = 'orders';
   title = 'Meine Aufträge';
+} else if ((parts[0] === 'standorte' || parts[0] === 'standort') && parts[1]) {
+  section = 'site-detail';
+  itemId = parts[1];
+  title = 'Standortdetails';
 } else if (parts[0] === 'standorte') {
   section = 'sites';
   title = 'Standorte';
 } else if (parts[0] === 'dokumente') {
   section = 'documents';
   title = 'Berichte & Dokumente';
+} else if ((parts[0] === 'anfragen' || parts[0] === 'anfrage') && parts[1]) {
+  section = 'ticket-detail';
+  itemId = parts[1];
+  title = 'Anfragedetails';
 } else if (parts[0] === 'anfragen') {
   section = 'requests';
   title = 'Anfragen & Schäden';
+} else if (parts[0] === 'reinigung-anfragen') {
+  section = 'cleaning-request';
+  title = 'Neue Reinigung anfordern';
 } else if (parts[0] === 'finanzen') {
   section = 'finance';
   title = 'Offerten & Rechnungen';
