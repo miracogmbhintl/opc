@@ -50,12 +50,37 @@ function isVisible(row: AnyRow) {
   return !['', 'draft'].includes(status);
 }
 
-function sanitize(row: AnyRow) {
+function sanitize(row: AnyRow | null | undefined) {
+  if (!row) return null;
   const next = { ...row };
   for (const key of ['internal_notes', 'private_notes', 'created_by', 'updated_by']) {
     delete next[key];
   }
   return next;
+}
+
+function objectValue(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as AnyRow
+    : null;
+}
+
+function firstUrl(row: AnyRow) {
+  const meta = metadata(row);
+  for (const key of [
+    'download_url',
+    'file_url',
+    'public_url',
+    'pdf_url',
+    'document_url',
+    'signed_url',
+    'attachment_url',
+    'invoice_pdf_url',
+  ]) {
+    const value = row[key] || meta[key];
+    if (value) return String(value);
+  }
+  return '';
 }
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
@@ -96,22 +121,48 @@ export const GET: APIRoute = async ({ request, locals, params }) => {
       return opcClientPortalJson({ ok: false, error: 'Rechnung wurde nicht gefunden.' }, 404);
     }
 
-    const itemsResult = await authenticated.serviceClient
-      .from('opc_invoice_items')
-      .select('*')
-      .eq('invoice_id', invoiceId)
-      .order('sort_order', { ascending: true });
+    const rawInvoice = invoiceResult.data as AnyRow;
+    const siteId = rawInvoice.client_site_id || rawInvoice.site_id || null;
+    const [itemsResult, siteResult] = await Promise.all([
+      authenticated.serviceClient
+        .from('opc_invoice_items')
+        .select('*')
+        .eq('invoice_id', invoiceId)
+        .order('sort_order', { ascending: true }),
+      siteId
+        ? authenticated.serviceClient
+            .from('opc_client_sites')
+            .select('*')
+            .eq('id', siteId)
+            .eq('client_id', authenticated.access.clientId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
 
     if (itemsResult.error) {
       throw new Error(`Rechnungspositionen konnten nicht geladen werden: ${itemsResult.error.message}`);
     }
 
+    const invoice = sanitize(rawInvoice) as AnyRow;
+    if (!objectValue(invoice.client_snapshot)) {
+      invoice.client_snapshot = sanitize(authenticated.access.client) || {};
+    }
+    if (!objectValue(invoice.contact_snapshot) && authenticated.access.contact) {
+      invoice.contact_snapshot = sanitize(authenticated.access.contact) || {};
+    }
+    if (!objectValue(invoice.site_snapshot) && siteResult.data) {
+      invoice.site_snapshot = sanitize(siteResult.data) || {};
+    }
+
+    const originalUrl = firstUrl(invoice);
+    if (originalUrl) invoice.download_url = originalUrl;
+
     return opcClientPortalJson({
       ok: true,
       portal: serializeAccess(authenticated.access),
       detail: {
-        invoice: sanitize(invoiceResult.data),
-        items: (itemsResult.data || []).map(sanitize),
+        invoice,
+        items: (itemsResult.data || []).map((row: AnyRow) => sanitize(row)),
       },
     });
   } catch (error: any) {
