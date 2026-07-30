@@ -50,6 +50,22 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       periodTo,
     });
 
+    if (calculation.reconciliation && calculation.reconciliation.matches !== true) {
+      return jsonResponse(
+        {
+          success: false,
+          error:
+            'Der berechnete Lohn stimmt noch nicht mit dem geprüften Payroll-Abgleich überein. ' +
+            `Brutto-Differenz CHF ${Number(calculation.reconciliation.grossDifference || 0).toFixed(2)}, ` +
+            `Auszahlungs-Differenz CHF ${Number(calculation.reconciliation.payoutDifference || 0).toFixed(2)}. ` +
+            'Der Lohnlauf wurde nicht abgeschlossen.',
+          reconciliation: calculation.reconciliation,
+          warnings: calculation.warnings,
+        },
+        409,
+      );
+    }
+
     const existingResponse = await supabase
       .from('opc_payroll_runs')
       .select('id,run_number,status')
@@ -102,7 +118,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         created_by: actorId,
         updated_by: actorId,
         metadata: {
-          calculation_version: 'opc_payroll_phase1_v1',
+          calculation_version: 'opc_payroll_reconciliation_v2',
           source: 'employee_payroll_owner_panel',
           filename: calculation.filename,
           warnings: calculation.warnings,
@@ -194,6 +210,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         employerContributions: calculation.employerContributions,
         totalEmployerCost: calculation.totalEmployerCost,
         employerCostPerHour: calculation.employerCostPerHour,
+        accruals: calculation.accruals,
+        periodAdjustments: calculation.periodAdjustments,
+        reconciliation: calculation.reconciliation,
         warnings: calculation.warnings,
       },
     });

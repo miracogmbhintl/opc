@@ -77,6 +77,24 @@ function monthEndIso() {
   return start.toISOString().slice(0, 10);
 }
 
+function calendarMonthBounds(value: string) {
+  const month = String(value || monthStartIso()).slice(0, 7);
+  const from = `${month}-01`;
+  const end = new Date(`${from}T12:00:00Z`);
+  end.setUTCMonth(end.getUTCMonth() + 1);
+  end.setUTCDate(0);
+  return { from, to: end.toISOString().slice(0, 10) };
+}
+
+function payrollMonthLabel(value: string) {
+  const bounds = calendarMonthBounds(value);
+  return new Intl.DateTimeFormat('de-CH', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(`${bounds.from}T12:00:00Z`));
+}
+
 function n(value: unknown) {
   const parsed = Number(String(value ?? '').replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -238,6 +256,26 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
   useEffect(() => { void load(); }, [employeeId]);
 
   const salaryType = text(contract.salary_type || 'hourly');
+
+  useEffect(() => {
+    if (salaryType !== 'monthly') return;
+
+    const contractStart = text(contract.valid_from);
+    let anchor = periodFrom || contractStart || monthStartIso();
+    let bounds = calendarMonthBounds(anchor);
+
+    if (contractStart && bounds.to < contractStart) {
+      anchor = contractStart;
+      bounds = calendarMonthBounds(anchor);
+    }
+
+    if (periodFrom !== bounds.from) setPeriodFrom(bounds.from);
+    if (periodTo !== bounds.to) setPeriodTo(bounds.to);
+    setPreview(null);
+    setEntryRates([]);
+    setEntryRatesLoaded(false);
+  }, [salaryType, employeeId, contract.valid_from]);
+
   const ruleText = useMemo(() => {
     if (!activeRuleSet) return 'Kein aktiver Regelsatz';
     return `Regelsatz ${activeRuleSet.rule_year}: AHV ${activeRuleSet.ahv_employee_rate}% / ALV ${activeRuleSet.alv_employee_rate}%`;
@@ -358,6 +396,15 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
   function changePeriod(field: 'from' | 'to', value: string) {
     if (field === 'from') setPeriodFrom(value);
     else setPeriodTo(value);
+    setPreview(null);
+    setEntryRates([]);
+    setEntryRatesLoaded(false);
+  }
+
+  function changePayrollMonth(value: string) {
+    const bounds = calendarMonthBounds(`${value}-01`);
+    setPeriodFrom(bounds.from);
+    setPeriodTo(bounds.to);
     setPreview(null);
     setEntryRates([]);
     setEntryRatesLoaded(false);
@@ -510,9 +557,21 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
 
       <div className="opc-payroll-panel">
         <div className="opc-payroll-panel-title"><FileCheck2 size={17} /><div><strong>Lohnabrechnung</strong><span>Vorschau berechnen, PDF herunterladen oder als abgeschlossenen Lohnlauf speichern.</span></div></div>
-        <div className="opc-payroll-period">
-          <Input label="Von"><input type="date" value={periodFrom} onChange={(e) => changePeriod('from', e.target.value)} /></Input>
-          <Input label="Bis"><input type="date" value={periodTo} onChange={(e) => changePeriod('to', e.target.value)} /></Input>
+        <div className={`opc-payroll-period ${salaryType === 'monthly' ? 'monthly' : ''}`}>
+          {salaryType === 'monthly' ? (
+            <Input label="Abrechnungsmonat">
+              <input
+                type="month"
+                value={periodFrom.slice(0, 7)}
+                onChange={(e) => changePayrollMonth(e.target.value)}
+              />
+            </Input>
+          ) : (
+            <>
+              <Input label="Von"><input type="date" value={periodFrom} onChange={(e) => changePeriod('from', e.target.value)} /></Input>
+              <Input label="Bis"><input type="date" value={periodTo} onChange={(e) => changePeriod('to', e.target.value)} /></Input>
+            </>
+          )}
           <button className="opc-payroll-button" type="button" disabled={calculating} onClick={() => void calculate(false)}>{calculating ? <Loader2 size={15} className="spin" /> : <Calculator size={15} />} Berechnen</button>
           <button className="opc-payroll-button" type="button" disabled={calculating} onClick={() => void calculate(true)}><Download size={15} /> PDF</button>
           <button className="opc-payroll-button dark" type="button" disabled={finalizing} onClick={() => void finalize()}>{finalizing ? <Loader2 size={15} className="spin" /> : <FileCheck2 size={15} />} Abschliessen</button>
@@ -522,23 +581,28 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
           <>
             <div className="opc-payroll-values">
               <Value label="Lohnart" value={preview.summary.salaryType === 'monthly' ? 'Fix-/Monatslohn' : 'Stundenlohn'} />
-              <Value label="Genehmigte Stunden" value={`${n(preview.summary.totalHours).toFixed(2)} h`} />
+              <Value
+                label={preview.summary.salaryType === 'monthly' ? 'Abrechnungsmonat' : 'Genehmigte Stunden'}
+                value={preview.summary.salaryType === 'monthly'
+                  ? payrollMonthLabel(periodFrom)
+                  : `${n(preview.summary.totalHours).toFixed(2)} h`}
+              />
               <Value label="Bruttolohn" value={money.format(n(preview.summary.grossSalary))} />
               <Value label="Arbeitnehmerabzüge" value={money.format(n(preview.summary.employeeDeductions))} />
               <Value label="Nettolohn" value={money.format(n(preview.summary.netSalary))} />
               <Value label="Auszahlung" value={money.format(n(preview.summary.payout))} />
               <Value label="Arbeitgeberbeiträge" value={money.format(n(preview.summary.employerContributions))} />
               <Value label="Arbeitgeberkosten" value={money.format(n(preview.summary.totalEmployerCost))} />
-              <Value label="Kosten pro Stunde" value={preview.summary.employerCostPerHour == null ? 'Nicht berechenbar' : money.format(n(preview.summary.employerCostPerHour))} />
+              {preview.summary.salaryType === 'monthly' ? null : (
+                <Value label="Kosten pro Stunde" value={preview.summary.employerCostPerHour == null ? 'Nicht berechenbar' : money.format(n(preview.summary.employerCostPerHour))} />
+              )}
             </div>
-            {(preview.summary.rateBreakdown || []).length ? <div className="opc-payroll-rate-summary">{preview.summary.rateBreakdown.map((bucket: JsonRow, index: number) => <div key={`${bucket.hourlyRate}-${bucket.source}-${index}`}><strong>{n(bucket.hours).toFixed(2)} h × {money.format(n(bucket.hourlyRate))}</strong><span>{bucket.source === 'employment_contract' ? 'Vertrag' : 'individueller Zeiteintrag'} · {money.format(n(bucket.amount))}</span></div>)}</div> : null}
-            {(preview.summary.warnings || []).length ? <div className="opc-payroll-warnings">{preview.summary.warnings.map((warning: string) => <div key={warning}>{warning}</div>)}</div> : null}
           </>
         ) : null}
       </div>
 
       <style>{`
-        .opc-payroll-phase1{display:grid;gap:12px;color:#111827}.opc-payroll-banner{display:flex;gap:10px;align-items:center;border:1px solid #d1d5db;background:#f9fafb;border-radius:14px;padding:12px}.opc-payroll-banner>div{display:grid;gap:3px}.opc-payroll-banner strong{font-size:12px}.opc-payroll-banner span{font-size:10px;color:#6b7280;font-weight:650}.opc-payroll-loading{display:flex;align-items:center;gap:8px;padding:14px;border:1px solid #e5e7eb;border-radius:14px;font-size:11px;font-weight:700}.opc-payroll-alert{display:flex;align-items:center;gap:7px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:700}.opc-payroll-alert.error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}.opc-payroll-alert.success{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}.opc-payroll-panel{border:1px solid #e5e7eb;border-radius:15px;padding:13px;background:#fff}.opc-payroll-panel-title{display:flex;align-items:flex-start;gap:8px;margin-bottom:12px}.opc-payroll-panel-title>div{display:grid;gap:3px}.opc-payroll-panel-title strong{font-size:12px}.opc-payroll-panel-title span{font-size:10px;color:#6b7280;font-weight:650}.opc-payroll-grid{display:grid;gap:8px}.opc-payroll-grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}.opc-payroll-field{display:grid;gap:5px;min-width:0}.opc-payroll-field>span{font-size:9px;color:#6b7280;font-weight:800}.opc-payroll-field input,.opc-payroll-field select{width:100%;min-width:0;min-height:39px;border:1px solid #d1d5db;border-radius:11px;background:#fff;padding:8px 9px;font:700 11px inherit;color:#111827;outline:none}.opc-payroll-field input:focus,.opc-payroll-field select:focus{border-color:#111827}.opc-payroll-checks{display:flex;flex-wrap:wrap;gap:12px;margin:11px 0}.opc-payroll-checks label,.opc-payroll-tax-grid>label{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:750;color:#374151}.opc-payroll-tax-grid{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));gap:8px;align-items:end;margin-top:10px}.opc-payroll-button{min-height:39px;border:1px solid #d1d5db;border-radius:11px;background:#fff;color:#111827;padding:8px 12px;font:800 10px inherit;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}.opc-payroll-button.primary,.opc-payroll-button.dark{background:#111827;border-color:#111827;color:#fff}.opc-payroll-button:disabled{opacity:.55;cursor:not-allowed}.opc-payroll-period{display:grid;grid-template-columns:1fr 1fr auto auto auto;gap:8px;align-items:end}.opc-payroll-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb}.opc-payroll-value{border:1px solid #e5e7eb;border-radius:12px;padding:10px;display:grid;gap:4px}.opc-payroll-value span{font-size:9px;color:#6b7280;font-weight:800}.opc-payroll-value strong{font-size:12px}.opc-payroll-warnings{margin-top:10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:12px;padding:10px;font-size:10px;font-weight:700;display:grid;gap:4px}.opc-payroll-rate-actions{display:flex;gap:8px;margin-bottom:10px}.opc-payroll-rate-table-wrap{overflow:auto;border:1px solid #e5e7eb;border-radius:12px}.opc-payroll-rate-table{width:100%;border-collapse:collapse;min-width:680px}.opc-payroll-rate-table th,.opc-payroll-rate-table td{text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:10px}.opc-payroll-rate-table th{background:#f9fafb;color:#6b7280;font-size:9px}.opc-payroll-rate-table td:nth-child(2){display:grid;gap:2px}.opc-payroll-rate-table td span{color:#6b7280}.opc-payroll-rate-table input{width:100%;min-height:34px;border:1px solid #d1d5db;border-radius:9px;padding:6px 8px;font:700 10px inherit}.opc-payroll-empty{border:1px dashed #d1d5db;border-radius:12px;padding:12px;color:#6b7280;font-size:10px;font-weight:700}.opc-payroll-rate-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.opc-payroll-rate-summary>div{border:1px solid #e5e7eb;border-radius:11px;padding:9px;display:grid;gap:3px}.opc-payroll-rate-summary strong{font-size:10px}.opc-payroll-rate-summary span{font-size:9px;color:#6b7280}@media(max-width:1100px){.opc-payroll-grid.four{grid-template-columns:repeat(2,minmax(0,1fr))}.opc-payroll-tax-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.opc-payroll-tax-grid>label{grid-column:1/-1}.opc-payroll-period{grid-template-columns:repeat(2,minmax(0,1fr))}.opc-payroll-period .opc-payroll-button{width:100%}.opc-payroll-values{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.opc-payroll-grid.four,.opc-payroll-tax-grid,.opc-payroll-period,.opc-payroll-values{grid-template-columns:1fr}}
+        .opc-payroll-phase1{display:grid;gap:12px;color:#111827}.opc-payroll-banner{display:flex;gap:10px;align-items:center;border:1px solid #d1d5db;background:#f9fafb;border-radius:14px;padding:12px}.opc-payroll-banner>div{display:grid;gap:3px}.opc-payroll-banner strong{font-size:12px}.opc-payroll-banner span{font-size:10px;color:#6b7280;font-weight:650}.opc-payroll-loading{display:flex;align-items:center;gap:8px;padding:14px;border:1px solid #e5e7eb;border-radius:14px;font-size:11px;font-weight:700}.opc-payroll-alert{display:flex;align-items:center;gap:7px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:700}.opc-payroll-alert.error{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}.opc-payroll-alert.success{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}.opc-payroll-panel{border:1px solid #e5e7eb;border-radius:15px;padding:13px;background:#fff}.opc-payroll-panel-title{display:flex;align-items:flex-start;gap:8px;margin-bottom:12px}.opc-payroll-panel-title>div{display:grid;gap:3px}.opc-payroll-panel-title strong{font-size:12px}.opc-payroll-panel-title span{font-size:10px;color:#6b7280;font-weight:650}.opc-payroll-grid{display:grid;gap:8px}.opc-payroll-grid.four{grid-template-columns:repeat(4,minmax(0,1fr))}.opc-payroll-field{display:grid;gap:5px;min-width:0}.opc-payroll-field>span{font-size:9px;color:#6b7280;font-weight:800}.opc-payroll-field input,.opc-payroll-field select{width:100%;min-width:0;min-height:39px;border:1px solid #d1d5db;border-radius:11px;background:#fff;padding:8px 9px;font:700 11px inherit;color:#111827;outline:none}.opc-payroll-field input:focus,.opc-payroll-field select:focus{border-color:#111827}.opc-payroll-checks{display:flex;flex-wrap:wrap;gap:12px;margin:11px 0}.opc-payroll-checks label,.opc-payroll-tax-grid>label{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:750;color:#374151}.opc-payroll-tax-grid{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));gap:8px;align-items:end;margin-top:10px}.opc-payroll-button{min-height:39px;border:1px solid #d1d5db;border-radius:11px;background:#fff;color:#111827;padding:8px 12px;font:800 10px inherit;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer}.opc-payroll-button.primary,.opc-payroll-button.dark{background:#111827;border-color:#111827;color:#fff}.opc-payroll-button:disabled{opacity:.55;cursor:not-allowed}.opc-payroll-period{display:grid;grid-template-columns:1fr 1fr auto auto auto;gap:8px;align-items:end}.opc-payroll-period.monthly{grid-template-columns:minmax(220px,1fr) auto auto auto}.opc-payroll-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #e5e7eb}.opc-payroll-value{border:1px solid #e5e7eb;border-radius:12px;padding:10px;display:grid;gap:4px}.opc-payroll-value span{font-size:9px;color:#6b7280;font-weight:800}.opc-payroll-value strong{font-size:12px}.opc-payroll-warnings{margin-top:10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:12px;padding:10px;font-size:10px;font-weight:700;display:grid;gap:4px}.opc-payroll-accruals{margin-top:10px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:12px;padding:10px;font-size:10px;display:grid;gap:6px}.opc-payroll-accruals>strong{font-size:10px}.opc-payroll-accruals>div{display:flex;justify-content:space-between;gap:10px;border-top:1px solid #e2e8f0;padding-top:5px}.opc-payroll-reconciliation{margin-top:10px;border-radius:12px;padding:10px;font-size:10px;display:grid;gap:4px}.opc-payroll-reconciliation.ok{border:1px solid #bbf7d0;background:#f0fdf4;color:#166534}.opc-payroll-reconciliation.error{border:1px solid #fecaca;background:#fef2f2;color:#991b1b}.opc-payroll-rate-actions{display:flex;gap:8px;margin-bottom:10px}.opc-payroll-rate-table-wrap{overflow:auto;border:1px solid #e5e7eb;border-radius:12px}.opc-payroll-rate-table{width:100%;border-collapse:collapse;min-width:680px}.opc-payroll-rate-table th,.opc-payroll-rate-table td{text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:10px}.opc-payroll-rate-table th{background:#f9fafb;color:#6b7280;font-size:9px}.opc-payroll-rate-table td:nth-child(2){display:grid;gap:2px}.opc-payroll-rate-table td span{color:#6b7280}.opc-payroll-rate-table input{width:100%;min-height:34px;border:1px solid #d1d5db;border-radius:9px;padding:6px 8px;font:700 10px inherit}.opc-payroll-empty{border:1px dashed #d1d5db;border-radius:12px;padding:12px;color:#6b7280;font-size:10px;font-weight:700}.opc-payroll-rate-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.opc-payroll-rate-summary>div{border:1px solid #e5e7eb;border-radius:11px;padding:9px;display:grid;gap:3px}.opc-payroll-rate-summary strong{font-size:10px}.opc-payroll-rate-summary span{font-size:9px;color:#6b7280}@media(max-width:1100px){.opc-payroll-grid.four{grid-template-columns:repeat(2,minmax(0,1fr))}.opc-payroll-tax-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.opc-payroll-tax-grid>label{grid-column:1/-1}.opc-payroll-period{grid-template-columns:repeat(2,minmax(0,1fr))}.opc-payroll-period .opc-payroll-button{width:100%}.opc-payroll-values{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:640px){.opc-payroll-grid.four,.opc-payroll-tax-grid,.opc-payroll-period,.opc-payroll-values{grid-template-columns:1fr}}
       `}</style>
     </div>
   );

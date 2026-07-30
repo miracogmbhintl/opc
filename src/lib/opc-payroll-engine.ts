@@ -48,6 +48,9 @@ export type PayrollCalculation = {
   employerCostPerHour: number | null;
   rateBreakdown: Array<{
     hourlyRate: number;
+    nominalHourlyRate?: number;
+    minimumHourlyRate?: number;
+    category?: string;
     minutes: number;
     hours: number;
     amount: number;
@@ -55,6 +58,16 @@ export type PayrollCalculation = {
     source: string;
     timeEntryCount: number;
   }>;
+  accruals: Array<{
+    code: string;
+    label: string;
+    basisAmount: number;
+    rate: number;
+    amount: number;
+    status: string;
+  }>;
+  periodAdjustments: JsonRow[];
+  reconciliation: JsonRow | null;
   lines: PayrollLine[];
   warnings: string[];
   payrollDocument: JsonRow;
@@ -132,6 +145,20 @@ function countWorkingDays(from: string, to: string) {
   return total;
 }
 
+function calendarMonthBounds(value: string) {
+  const from = `${value.slice(0, 7)}-01`;
+  const date = dateAtNoon(from);
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  date.setUTCDate(0);
+  return { from, to: dateKey(date) };
+}
+
+function isCompleteCalendarMonth(from: string, to: string) {
+  if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) return false;
+  const bounds = calendarMonthBounds(from);
+  return from === bounds.from && to === bounds.to;
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('de-CH', {
     day: '2-digit',
@@ -167,7 +194,7 @@ function monthHeading(from: string, to: string) {
 
   return {
     month: `${formatDate(from)} – ${formatDate(to)}`,
-    year: String(toDate.getUTCFullYear()),
+    year: '',
   };
 }
 
@@ -271,15 +298,76 @@ function documentLine(item: PayrollLine) {
   const amount = item.lineGroup === 'employer_contribution'
     ? item.employerAmount
     : item.employeeAmount;
+  const metadata = safeObject(item.metadata);
+  const basisOverride = cleanText(metadata.document_basis);
+  const rateOverride = cleanText(metadata.document_rate);
   return {
     label: item.description,
-    basis: item.basisAmount === null
+    basis: basisOverride || (item.basisAmount === null
       ? item.quantity === null
         ? ''
         : `${item.quantity}`
-      : `CHF ${item.basisAmount.toFixed(2)}`,
-    rate: item.rate === null ? '' : `${item.rate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')} %`,
+      : `CHF ${item.basisAmount.toFixed(2)}`),
+    rate: rateOverride || (item.rate === null
+      ? ''
+      : `${item.rate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')} %`),
     amount,
+  };
+}
+
+
+function normalizeService(value: unknown) {
+  return (cleanText(value) || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function entryServiceType(entry: JsonRow) {
+  const metadata = safeObject(entry.metadata);
+  return cleanText(entry.service_type) || cleanText(metadata.service_type) || '';
+}
+
+function entryObjectName(entry: JsonRow) {
+  const metadata = safeObject(entry.metadata);
+  return cleanText(entry.object_name) || cleanText(metadata.object_name) || '';
+}
+
+function serviceCategory(entry: JsonRow): 'maintenance' | 'special' | 'other' {
+  const metadata = safeObject(entry.metadata);
+  const explicitCategory = normalizeService(
+    entry.payroll_cleaning_category
+      || metadata.payroll_cleaning_category
+      || metadata.gav_cleaning_category
+      || metadata.cleaning_category,
+  );
+
+  if (['special', 'spezial', 'spezialreinigung'].includes(explicitCategory)) {
+    return 'special';
+  }
+  if (['maintenance', 'unterhalt', 'unterhaltsreinigung'].includes(explicitCategory)) {
+    return 'maintenance';
+  }
+
+  // OPC management decision:
+  // Do not infer payroll categories from customer names, job titles or words such
+  // as Fenster, Grund-, Fein- or Umzugsreinigung. Unless a payroll category is
+  // explicitly assigned, the entry is treated as Unterhaltsreinigung.
+  return 'maintenance';
+}
+
+function metadataNumber(metadata: JsonRow, key: string, fallback: number) {
+  const parsed = asNumber(metadata[key]);
+  return parsed > 0 ? parsed : fallback;
+}
+
+function accrualDocumentLine(item: PayrollCalculation['accruals'][number]) {
+  return {
+    label: item.label,
+    basis: `CHF ${item.basisAmount.toFixed(2)}`,
+    rate: `${item.rate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')} %`,
+    amount: item.amount,
+    status: item.status,
   };
 }
 
@@ -289,8 +377,15 @@ async function loadPayrollData(
   periodFrom: string,
   periodTo: string,
 ) {
-  const [employeeResponse, addressResponse, contractResponse, profileResponse, ruleSetResponse] =
-    await Promise.all([
+  const [
+    employeeResponse,
+    addressResponse,
+    contractResponse,
+    profileResponse,
+    ruleSetResponse,
+    adjustmentResponse,
+    reconciliationResponse,
+  ] = await Promise.all([
       supabase.from('opc_employees').select('*').eq('id', employeeId).maybeSingle(),
       supabase
         .from('opc_employee_addresses')
@@ -317,6 +412,22 @@ async function loadPayrollData(
         .order('valid_from', { ascending: false })
         .limit(1)
         .maybeSingle(),
+      supabase
+        .from('opc_payroll_period_adjustments')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .eq('status', 'active')
+        .lte('period_from', periodTo)
+        .gte('period_to', periodFrom)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('opc_payroll_reconciliation_reference')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .eq('period_from', periodFrom)
+        .eq('period_to', periodTo)
+        .maybeSingle(),
     ]);
 
   throwOnError(employeeResponse.error, 'Mitarbeiter konnte nicht geladen werden');
@@ -324,6 +435,8 @@ async function loadPayrollData(
   throwOnError(contractResponse.error, 'Arbeitsverträge konnten nicht geladen werden');
   throwOnError(profileResponse.error, 'Payroll-Profil konnte nicht geladen werden');
   throwOnError(ruleSetResponse.error, 'Payroll-Regelsatz konnte nicht geladen werden');
+  throwOnError(adjustmentResponse.error, 'Periodische Lohnkorrekturen konnten nicht geladen werden');
+  throwOnError(reconciliationResponse.error, 'Payroll-Abgleich konnte nicht geladen werden');
 
   const employee = employeeResponse.data as JsonRow | null;
   if (!employee) throw new Error('Mitarbeiter wurde nicht gefunden.');
@@ -353,13 +466,19 @@ async function loadPayrollData(
     .select('*')
     .eq('employee_id', employeeId)
     .eq('status', 'approved')
-    .gte('work_date', periodFrom)
+    .gte('work_date', addDays(periodFrom, -90))
     .lte('work_date', periodTo)
     .order('work_date', { ascending: true })
     .order('created_at', { ascending: true });
   throwOnError(timeResponse.error, 'Genehmigte Arbeitszeiten konnten nicht geladen werden');
 
-  const entries = (timeResponse.data || []) as JsonRow[];
+  const entries = ((timeResponse.data || []) as JsonRow[]).filter((entry) => {
+    const workDate = isoDate(entry.work_date);
+    if (workDate >= periodFrom && workDate <= periodTo) return true;
+    const metadata = safeObject(entry.metadata);
+    return isoDate(metadata.payroll_period_override_from) === periodFrom &&
+      isoDate(metadata.payroll_period_override_to) === periodTo;
+  });
   let payRates: JsonRow[] = [];
   const entryIds = entries.map((entry) => cleanText(entry.id)).filter(Boolean) as string[];
   if (entryIds.length) {
@@ -389,6 +508,8 @@ async function loadPayrollData(
     ruleSet,
     entries,
     payRates,
+    periodAdjustments: (adjustmentResponse.data || []) as JsonRow[],
+    reconciliationReference: (reconciliationResponse.data || null) as JsonRow | null,
   };
 }
 
@@ -407,18 +528,45 @@ export async function calculateEmployeePayroll({
     throw new Error('Ungültiger Abrechnungszeitraum.');
   }
 
-  const { employee, address, contracts, contract, profile, ruleSet, entries, payRates } =
-    await loadPayrollData(supabase, employeeId, periodFrom, periodTo);
+  const {
+    employee,
+    address,
+    contracts,
+    contract,
+    profile,
+    ruleSet,
+    entries,
+    payRates,
+    periodAdjustments,
+    reconciliationReference,
+  } = await loadPayrollData(supabase, employeeId, periodFrom, periodTo);
 
   const positiveEntries = entries
     .map((entry) => ({ entry, minutes: netMinutes(entry) }))
     .filter(({ minutes }) => minutes > 0);
+  const carryoverEntries = positiveEntries.filter(({ entry }) => {
+    const workDate = isoDate(entry.work_date);
+    return workDate < periodFrom || workDate > periodTo;
+  });
   const totalMinutes = positiveEntries.reduce((sum, item) => sum + item.minutes, 0);
   const totalHours = roundFour(totalMinutes / 60);
   const salaryType = String(contract.salary_type).toLowerCase() as 'hourly' | 'monthly';
   const lines: PayrollLine[] = [];
   const warnings: string[] = [];
+  const accruals: PayrollCalculation['accruals'] = [];
   const rateBreakdown: PayrollCalculation['rateBreakdown'] = [];
+  const profileMetadata = safeObject(profile.metadata);
+  const ruleMetadata = safeObject(ruleSet.metadata);
+  const gavApplicable = contract.is_gav_applicable === true;
+
+  if (carryoverEntries.length) {
+    const carryoverHours = roundFour(
+      carryoverEntries.reduce((sum, item) => sum + item.minutes, 0) / 60,
+    );
+    warnings.push(
+      `${carryoverHours.toFixed(2)} Stunden aus früheren Arbeitstagen werden gemäss Excel als Übertrag in diesem Abrechnungszeitraum berücksichtigt.`,
+    );
+  }
 
   let baseSalary = 0;
   let payableDays = 0;
@@ -429,15 +577,54 @@ export async function calculateEmployeePayroll({
       throw new Error('Im Zeitraum bestehen keine genehmigten Arbeitsstunden.');
     }
 
-    const buckets = new Map<string, {
-      hourlyRate: number;
+    const minimumMaintenanceRate = metadataNumber(
+      ruleMetadata,
+      'gav_minimum_hourly_maintenance_i_chf',
+      21.4,
+    );
+    const minimumSpecialRate = metadataNumber(
+      ruleMetadata,
+      'gav_minimum_hourly_special_i_chf',
+      23.4,
+    );
+    const publicHolidayMaintenanceRate = metadataNumber(
+      ruleMetadata,
+      'public_holiday_maintenance_rate',
+      1.5,
+    );
+    const publicHolidaySpecialRate = metadataNumber(
+      ruleMetadata,
+      'public_holiday_special_rate',
+      3.6,
+    );
+
+    const baseBuckets = new Map<string, {
+      nominalHourlyRate: number;
       minutes: number;
       amount: number;
       contractId: string | null;
       source: string;
       timeEntryIds: string[];
     }>();
+    const minimumAdjustmentBuckets = new Map<string, {
+      category: 'maintenance' | 'special';
+      nominalHourlyRate: number;
+      minimumHourlyRate: number;
+      minutes: number;
+      amount: number;
+      timeEntryIds: string[];
+    }>();
+    const publicHolidayBuckets = new Map<string, {
+      category: 'maintenance' | 'special';
+      publicHolidayRate: number;
+      effectiveBasis: number;
+      timeEntryIds: string[];
+    }>();
     const missingDates = new Set<string>();
+    let unknownCategoryCount = 0;
+    let minimumAdjustmentEntryCount = 0;
+    let minimumAdjustmentMinutes = 0;
+    let minimumAdjustmentAmount = 0;
     const payRateByEntryId = new Map(
       payRates.map((row) => [String(row.time_entry_id), row]),
     );
@@ -446,35 +633,104 @@ export async function calculateEmployeePayroll({
       const workDate = isoDate(entry.work_date);
       const activeContract = contractForDate(contracts, workDate, 'hourly');
       const entryRate = payRateByEntryId.get(String(entry.id));
-      const hourlyRate = entryRate && asNumber(entryRate.hourly_rate_chf) > 0
+      const nominalHourlyRate = entryRate && asNumber(entryRate.hourly_rate_chf) > 0
         ? asNumber(entryRate.hourly_rate_chf)
         : asNumber(activeContract?.hourly_rate_chf);
       const contractId = cleanText(entryRate?.contract_id) || cleanText(activeContract?.id);
       const source = entryRate
         ? cleanText(entryRate.rate_source) || 'time_entry_rate'
         : 'employment_contract';
+      const category = serviceCategory(entry);
+      const minimumHourlyRate = gavApplicable
+        ? category === 'maintenance'
+          ? minimumMaintenanceRate
+          : category === 'special'
+            ? minimumSpecialRate
+            : 0
+        : 0;
+      const effectiveHourlyRate = Math.max(nominalHourlyRate, minimumHourlyRate);
+      const publicHolidayRate = gavApplicable
+        ? category === 'maintenance'
+          ? publicHolidayMaintenanceRate
+          : category === 'special'
+            ? publicHolidaySpecialRate
+            : 0
+        : 0;
 
-      if (hourlyRate <= 0) {
+      if (nominalHourlyRate <= 0) {
         missingDates.add(workDate || String(entry.work_date || ''));
         continue;
       }
       if (entryRate && cleanText(entryRate.employee_id) !== employeeId) {
         throw new Error(`Ungültiger Lohnansatz für Zeiteintrag ${entry.id}: Mitarbeiter stimmt nicht überein.`);
       }
+      if (category === 'other' && gavApplicable) {
+        unknownCategoryCount += 1;
+      }
 
-      const key = `${source}:${contractId || 'none'}:${hourlyRate.toFixed(4)}`;
-      const bucket = buckets.get(key) || {
-        hourlyRate,
+      const nominalAmount = (minutes / 60) * nominalHourlyRate;
+      const effectiveAmount = (minutes / 60) * effectiveHourlyRate;
+      const adjustmentAmount = effectiveAmount - nominalAmount;
+
+      const baseKey = [
+        source,
+        contractId || 'none',
+        nominalHourlyRate.toFixed(4),
+      ].join(':');
+      const baseBucket = baseBuckets.get(baseKey) || {
+        nominalHourlyRate,
         minutes: 0,
         amount: 0,
         contractId,
         source,
         timeEntryIds: [],
       };
-      bucket.minutes += minutes;
-      bucket.amount += (minutes / 60) * hourlyRate;
-      bucket.timeEntryIds.push(String(entry.id));
-      buckets.set(key, bucket);
+      baseBucket.minutes += minutes;
+      baseBucket.amount += nominalAmount;
+      baseBucket.timeEntryIds.push(String(entry.id));
+      baseBuckets.set(baseKey, baseBucket);
+
+      if (
+        adjustmentAmount > 0 &&
+        (category === 'maintenance' || category === 'special')
+      ) {
+        const correctionKey = [
+          category,
+          nominalHourlyRate.toFixed(4),
+          minimumHourlyRate.toFixed(4),
+        ].join(':');
+        const correctionBucket = minimumAdjustmentBuckets.get(correctionKey) || {
+          category,
+          nominalHourlyRate,
+          minimumHourlyRate,
+          minutes: 0,
+          amount: 0,
+          timeEntryIds: [],
+        };
+        correctionBucket.minutes += minutes;
+        correctionBucket.amount += adjustmentAmount;
+        correctionBucket.timeEntryIds.push(String(entry.id));
+        minimumAdjustmentBuckets.set(correctionKey, correctionBucket);
+        minimumAdjustmentEntryCount += 1;
+        minimumAdjustmentMinutes += minutes;
+        minimumAdjustmentAmount += adjustmentAmount;
+      }
+
+      if (
+        publicHolidayRate > 0 &&
+        (category === 'maintenance' || category === 'special')
+      ) {
+        const holidayKey = `${category}:${publicHolidayRate.toFixed(4)}`;
+        const holidayBucket = publicHolidayBuckets.get(holidayKey) || {
+          category,
+          publicHolidayRate,
+          effectiveBasis: 0,
+          timeEntryIds: [],
+        };
+        holidayBucket.effectiveBasis += effectiveAmount;
+        holidayBucket.timeEntryIds.push(String(entry.id));
+        publicHolidayBuckets.set(holidayKey, holidayBucket);
+      }
     }
 
     if (missingDates.size) {
@@ -484,21 +740,28 @@ export async function calculateEmployeePayroll({
       );
     }
 
-    for (const bucket of Array.from(buckets.values()).sort((a, b) => a.hourlyRate - b.hourlyRate)) {
+    const sortedBaseBuckets = Array.from(baseBuckets.values()).sort((a, b) =>
+      a.nominalHourlyRate - b.nominalHourlyRate || a.source.localeCompare(b.source),
+    );
+
+    for (const bucket of sortedBaseBuckets) {
       const amount = roundMoney(bucket.amount);
       baseSalary += amount;
+      const hours = roundFour(bucket.minutes / 60);
       rateBreakdown.push({
-        hourlyRate: roundMoney(bucket.hourlyRate),
+        hourlyRate: roundMoney(bucket.nominalHourlyRate),
+        nominalHourlyRate: roundMoney(bucket.nominalHourlyRate),
+        minimumHourlyRate: 0,
         minutes: bucket.minutes,
-        hours: roundFour(bucket.minutes / 60),
+        hours,
         amount,
         contractId: bucket.contractId,
         source: bucket.source,
         timeEntryCount: bucket.timeEntryIds.length,
       });
       lines.push(line('earning', 'BASIC_HOURLY_PAY', 'Grundlohn Stundenlohn', {
-        basisAmount: bucket.hourlyRate,
-        quantity: roundFour(bucket.minutes / 60),
+        basisAmount: bucket.nominalHourlyRate,
+        quantity: hours,
         employeeAmount: amount,
         sortOrder: 10,
         source: bucket.source,
@@ -506,43 +769,152 @@ export async function calculateEmployeePayroll({
           contract_id: bucket.contractId,
           minutes: bucket.minutes,
           time_entry_ids: bucket.timeEntryIds,
+          nominal_hourly_rate_chf: bucket.nominalHourlyRate,
+          document_basis: `${hours.toFixed(2)} Std.`,
+          document_rate: `CHF ${bucket.nominalHourlyRate.toFixed(2)}`,
         },
       }));
     }
 
-    const holidayRate = asNumber(contract.holiday_pay_percentage);
-    const publicHolidayRate = asNumber(contract.public_holiday_percentage);
-    const thirteenthRate = asNumber(contract.thirteenth_salary_percentage);
-    const rateComposition = String(contract.rate_composition || 'base_excluding_supplements');
+    const sortedCorrections = Array.from(minimumAdjustmentBuckets.values()).sort((a, b) =>
+      a.category.localeCompare(b.category) ||
+      a.nominalHourlyRate - b.nominalHourlyRate,
+    );
 
-    if (rateComposition !== 'all_inclusive') {
-      if (holidayRate > 0) {
-        const amount = percentageAmount(baseSalary, holidayRate);
-        lines.push(line('earning', 'HOLIDAY_PAY', 'Ferienzuschlag', {
-          basisAmount: roundMoney(baseSalary), rate: holidayRate, employeeAmount: amount, sortOrder: 20,
+    for (const bucket of sortedCorrections) {
+      const amount = roundMoney(bucket.amount);
+      const hours = roundFour(bucket.minutes / 60);
+      baseSalary += amount;
+      lines.push(line(
+        'earning',
+        'GAV_MINIMUM_WAGE_ADJUSTMENT',
+        bucket.category === 'special'
+          ? 'GAV-Mindestlohnkorrektur Spezialreinigung'
+          : 'GAV-Mindestlohnkorrektur Unterhaltsreinigung',
+        {
+          employeeAmount: amount,
+          sortOrder: 20,
+          source: 'gav_rule_set',
+          metadata: {
+            category: bucket.category,
+            minutes: bucket.minutes,
+            time_entry_ids: bucket.timeEntryIds,
+            nominal_hourly_rate_chf: bucket.nominalHourlyRate,
+            minimum_hourly_rate_chf: bucket.minimumHourlyRate,
+            document_basis: `${hours.toFixed(2)} Std.`,
+            document_rate: `CHF ${(bucket.minimumHourlyRate - bucket.nominalHourlyRate).toFixed(2)}/Std.`,
+          },
+        },
+      ));
+    }
+
+    const sortedHolidayBuckets = Array.from(publicHolidayBuckets.values()).sort((a, b) =>
+      a.category.localeCompare(b.category),
+    );
+
+    for (const bucket of sortedHolidayBuckets) {
+      const basis = roundMoney(bucket.effectiveBasis);
+      const amount = percentageAmount(basis, bucket.publicHolidayRate);
+      lines.push(line('earning', 'PUBLIC_HOLIDAY_PAY',
+        bucket.category === 'special'
+          ? 'Feiertagsentschädigung Spezialreinigung'
+          : 'Feiertagsentschädigung Unterhaltsreinigung', {
+          basisAmount: basis,
+          rate: bucket.publicHolidayRate,
+          employeeAmount: amount,
+          sortOrder: 30,
+          source: 'gav_rule_set',
+          metadata: {
+            category: bucket.category,
+            time_entry_ids: bucket.timeEntryIds,
+          },
+        }));
+    }
+
+    if (minimumAdjustmentEntryCount > 0) {
+      warnings.push(
+        `GAV-Mindestlohnkorrektur intern angewendet: ${minimumAdjustmentEntryCount} Zeiteinträge, ${roundFour(minimumAdjustmentMinutes / 60).toFixed(2)} Stunden, CHF ${roundMoney(minimumAdjustmentAmount).toFixed(2)}.`,
+      );
+    }
+
+    if (unknownCategoryCount > 0) {
+      warnings.push(
+        `Für ${unknownCategoryCount} Zeiteinträge konnte keine GAV-Kategorie für die Feiertagsentschädigung bestimmt werden.`,
+      );
+    }
+
+    const entitlementBasis = roundMoney(
+      lines
+        .filter((item) => item.lineGroup === 'earning')
+        .filter((item) => [
+          'BASIC_HOURLY_PAY',
+          'GAV_MINIMUM_WAGE_ADJUSTMENT',
+          'PUBLIC_HOLIDAY_PAY',
+        ].includes(item.lineCode))
+        .reduce((sum, item) => sum + item.employeeAmount, 0),
+    );
+
+    const holidayRate = asNumber(contract.holiday_pay_percentage) || (gavApplicable ? 8.33 : 0);
+    const payVacationMonthly = profileMetadata.pay_vacation_monthly === true;
+    if (holidayRate > 0) {
+      const amount = percentageAmount(entitlementBasis, holidayRate);
+      if (payVacationMonthly) {
+        lines.push(line('earning', 'HOLIDAY_PAY', 'Ferienentschädigung', {
+          basisAmount: entitlementBasis,
+          rate: holidayRate,
+          employeeAmount: amount,
+          sortOrder: 20,
           source: 'employment_contract',
         }));
+      } else {
+        accruals.push({
+          code: 'VACATION_PAY_ACCRUAL',
+          label: 'Ferienlohn-Rückstellung (nicht ausbezahlt)',
+          basisAmount: entitlementBasis,
+          rate: holidayRate,
+          amount,
+          status: 'accrued',
+        });
       }
-      if (publicHolidayRate > 0) {
-        const amount = percentageAmount(baseSalary, publicHolidayRate);
-        lines.push(line('earning', 'PUBLIC_HOLIDAY_PAY', 'Feiertagszuschlag', {
-          basisAmount: roundMoney(baseSalary), rate: publicHolidayRate, employeeAmount: amount, sortOrder: 30,
-          source: 'employment_contract',
-        }));
-      }
-      if (thirteenthRate > 0) {
-        const monthlyAccrualRate = thirteenthRate / 12;
-        const amount = percentageAmount(baseSalary, monthlyAccrualRate);
+    }
+
+    const thirteenthRate = asNumber(contract.thirteenth_salary_percentage) || (gavApplicable ? 100 : 0);
+    const monthlyAccrualRate = thirteenthRate > 0 ? thirteenthRate / 12 : 0;
+    if (monthlyAccrualRate > 0) {
+      const amount = percentageAmount(entitlementBasis, monthlyAccrualRate);
+      if (profile.pay_thirteenth_monthly === true) {
         lines.push(line('earning', 'THIRTEENTH_SALARY', 'Anteil 13. Monatslohn', {
-          basisAmount: roundMoney(baseSalary), rate: monthlyAccrualRate, employeeAmount: amount, sortOrder: 40,
+          basisAmount: entitlementBasis,
+          rate: monthlyAccrualRate,
+          employeeAmount: amount,
+          sortOrder: 40,
           source: 'employment_contract',
         }));
+      } else {
+        accruals.push({
+          code: 'THIRTEENTH_SALARY_ACCRUAL',
+          label: 'Rückstellung 13. Monatslohn (nicht ausbezahlt)',
+          basisAmount: entitlementBasis,
+          rate: monthlyAccrualRate,
+          amount,
+          status: 'accrued',
+        });
+        warnings.push(
+          `Der 13. Monatslohn wird in dieser Abrechnung nicht ausbezahlt. Rückstellung für den Zeitraum: CHF ${amount.toFixed(2)}.`,
+        );
       }
     }
   } else {
     const monthlySalary = asNumber(contract.monthly_salary_chf);
     if (monthlySalary <= 0) {
       throw new Error('Der aktive Monatslohnvertrag enthält keinen gültigen Monatslohn.');
+    }
+
+    if (!isCompleteCalendarMonth(periodFrom, periodTo)) {
+      const expected = calendarMonthBounds(periodFrom);
+      throw new Error(
+        `Fix-/Monatslohn muss über einen vollständigen Kalendermonat abgerechnet werden: ${formatDate(expected.from)} bis ${formatDate(expected.to)}.`,
+      );
     }
 
     const contractOverlap = overlapRange(
@@ -588,23 +960,86 @@ export async function calculateEmployeePayroll({
       },
     }));
 
-    if (profile.pay_thirteenth_monthly === true && contract.monthly_salary_includes_13th !== true) {
+    if (contract.monthly_salary_includes_13th !== true) {
       const thirteenthRate = asNumber(contract.thirteenth_salary_percentage);
       if (thirteenthRate > 0) {
         const monthlyAccrualRate = thirteenthRate / 12;
         const amount = percentageAmount(baseSalary, monthlyAccrualRate);
-        lines.push(line('earning', 'THIRTEENTH_SALARY', 'Anteil 13. Monatslohn', {
-          basisAmount: baseSalary,
-          rate: monthlyAccrualRate,
-          employeeAmount: amount,
-          sortOrder: 20,
-          source: 'employment_contract',
-        }));
+        if (profile.pay_thirteenth_monthly === true) {
+          lines.push(line('earning', 'THIRTEENTH_SALARY', 'Anteil 13. Monatslohn', {
+            basisAmount: baseSalary,
+            rate: monthlyAccrualRate,
+            employeeAmount: amount,
+            sortOrder: 20,
+            source: 'employment_contract',
+          }));
+        } else {
+          accruals.push({
+            code: 'THIRTEENTH_SALARY_ACCRUAL',
+            label: 'Rückstellung 13. Monatslohn (nicht ausbezahlt)',
+            basisAmount: baseSalary,
+            rate: monthlyAccrualRate,
+            amount,
+            status: 'accrued',
+          });
+        }
       }
     }
 
     if (totalMinutes === 0) {
       warnings.push('Für den Fixlohnzeitraum bestehen keine genehmigten Arbeitsstunden; Kosten pro Stunde können nicht berechnet werden.');
+    }
+  }
+
+  const periodDeductionAdjustments: JsonRow[] = [];
+  for (const adjustment of periodAdjustments) {
+    const type = String(adjustment.adjustment_type || '').toLowerCase();
+    const amount = roundMoney(asNumber(adjustment.amount_chf));
+    const description = cleanText(adjustment.description) || 'Periodische Lohnkorrektur';
+    if (amount <= 0) continue;
+
+    if (type === 'earning') {
+      lines.push(line('earning', cleanText(adjustment.code) || 'PERIOD_EARNING', description, {
+        employeeAmount: amount,
+        sortOrder: asNumber(adjustment.sort_order) || 60,
+        source: 'payroll_period_adjustment',
+        metadata: { adjustment_id: adjustment.id },
+      }));
+    } else if (type === 'reimbursement') {
+      if (adjustment.affects_payout === false) {
+        accruals.push({
+          code: cleanText(adjustment.code) || 'INFORMATIONAL_REIMBURSEMENT',
+          label: `${description} (separat / nicht in Auszahlung)`,
+          basisAmount: amount,
+          rate: 0,
+          amount,
+          status: 'informational',
+        });
+      } else {
+        lines.push(line('reimbursement', cleanText(adjustment.code) || 'PERIOD_REIMBURSEMENT', description, {
+          employeeAmount: amount,
+          sortOrder: asNumber(adjustment.sort_order) || 310,
+          source: 'payroll_period_adjustment',
+          metadata: { adjustment_id: adjustment.id },
+        }));
+      }
+    } else if (type === 'adjustment') {
+      const signedAmount = adjustment.direction === 'deduction' ? -amount : amount;
+      lines.push(line('adjustment', cleanText(adjustment.code) || 'PERIOD_ADJUSTMENT', description, {
+        employeeAmount: signedAmount,
+        sortOrder: asNumber(adjustment.sort_order) || 320,
+        source: 'payroll_period_adjustment',
+        metadata: { adjustment_id: adjustment.id },
+      }));
+    } else if (type === 'employer_cost') {
+      lines.push(line('employer_contribution', cleanText(adjustment.code) || 'PERIOD_EMPLOYER_COST', description, {
+        employerAmount: amount,
+        sortOrder: asNumber(adjustment.sort_order) || 290,
+        source: 'payroll_period_adjustment',
+        metadata: { adjustment_id: adjustment.id },
+      }));
+    } else if (type === 'deduction' || type === 'advance') {
+      periodDeductionAdjustments.push(adjustment);
     }
   }
 
@@ -668,7 +1103,15 @@ export async function calculateEmployeePayroll({
     asNumber(contract.guaranteed_weekly_hours),
   );
   const nbuThreshold = asNumber(ruleSet.nbu_weekly_hours_threshold);
-  const nbuEligible = Math.max(contractualWeeklyHours, actualAverageWeeklyHours) >= nbuThreshold;
+  const nbuMode = String(profileMetadata.nbu_eligibility_mode || 'auto').toLowerCase();
+  const nbuEligible = nbuMode === 'always'
+    ? true
+    : nbuMode === 'never'
+      ? false
+      : Math.max(contractualWeeklyHours, actualAverageWeeklyHours) >= nbuThreshold;
+  if (nbuMode === 'always' && Math.max(contractualWeeklyHours, actualAverageWeeklyHours) < nbuThreshold) {
+    warnings.push('NBU wird gemäss hinterlegter OPC-/Excel-Einstufung abgezogen, obwohl der aktuelle Periodendurchschnitt unter 8 Stunden pro Woche liegt. Versicherungseinstufung prüfen.');
+  }
   if (!nbuEligible && (asNumber(profile.nbu_employee_rate) > 0 || asNumber(profile.nbu_employer_rate) > 0)) {
     warnings.push(`NBU wurde nicht berechnet, weil die Wochenstunden unter ${nbuThreshold.toFixed(2)} Stunden liegen.`);
   }
@@ -693,7 +1136,9 @@ export async function calculateEmployeePayroll({
     },
     {
       code: 'GAV', employerCode: 'GAV_EMPLOYER', label: 'GAV-Beitrag',
-      employeeRate: asNumber(profile.gav_employee_rate), employerRate: asNumber(profile.gav_employer_rate), sort: 150,
+      employeeRate: gavApplicable ? asNumber(profile.gav_employee_rate) : 0,
+      employerRate: gavApplicable ? asNumber(profile.gav_employer_rate) : 0,
+      sort: 150,
     },
   ];
 
@@ -745,6 +1190,20 @@ export async function calculateEmployeePayroll({
     }));
   }
 
+  if (profileMetadata.bvg_amount_confirmed !== true && (bvgEmployee > 0 || bvgEmployer > 0)) {
+    warnings.push('BVG-Betrag stammt aus einer provisorischen Excel-/Schätzwert-Hinterlegung und muss mit dem Vorsorgeplan abgeglichen werden.');
+  }
+
+  if (
+    profile.source_tax_subject === true &&
+    String(profileMetadata.source_tax_status || '').toLowerCase().includes('provisional')
+  ) {
+    warnings.push('Quellensteuer ist als provisorischer Excel-Wert hinterlegt. Kantonalen Tarif und Tarifcode vor definitiver Meldung prüfen.');
+  }
+  if (profile.source_tax_subject === true && (!cleanText(profile.source_tax_canton) || !cleanText(profile.source_tax_tariff_code))) {
+    warnings.push('Quellensteuerpflichtig, aber Kanton oder Tarifcode fehlt.');
+  }
+
   if (profile.source_tax_subject === true) {
     const fixed = asNumber(profile.source_tax_fixed_amount_chf);
     const rate = asNumber(profile.source_tax_rate);
@@ -783,6 +1242,18 @@ export async function calculateEmployeePayroll({
       sortOrder: 190,
       source: 'employee_payroll_profile',
     }));
+  }
+
+  for (const adjustment of periodDeductionAdjustments) {
+    const amount = roundMoney(asNumber(adjustment.amount_chf));
+    const type = String(adjustment.adjustment_type || '').toLowerCase();
+    lines.push(line('employee_deduction', cleanText(adjustment.code) || (type === 'advance' ? 'ADVANCE' : 'PERIOD_DEDUCTION'),
+      cleanText(adjustment.description) || (type === 'advance' ? 'Vorschuss / bereits ausbezahlt' : 'Periodischer Abzug'), {
+        employeeAmount: amount,
+        sortOrder: asNumber(adjustment.sort_order) || (type === 'advance' ? 180 : 190),
+        source: 'payroll_period_adjustment',
+        metadata: { adjustment_id: adjustment.id },
+      }));
   }
 
   const reimbursement = asNumber(profile.expense_reimbursement_chf);
@@ -835,6 +1306,33 @@ export async function calculateEmployeePayroll({
       .reduce((sum, item) => sum + item.employerAmount, 0),
   );
   const totalEmployerCost = roundMoney(grossSalary + employerContributions + reimbursements);
+
+  const reconciliation = reconciliationReference
+    ? {
+        referenceId: reconciliationReference.employee_id || employeeId,
+        status: cleanText(reconciliationReference.status) || null,
+        excelGrossSalary: roundMoney(asNumber(reconciliationReference.excel_gross_chf)),
+        excelPayout: roundMoney(asNumber(reconciliationReference.excel_payout_chf)),
+        expectedGrossSalary: roundMoney(asNumber(reconciliationReference.corrected_gross_chf)),
+        expectedPayout: roundMoney(asNumber(reconciliationReference.corrected_payout_chf)),
+        grossDifference: roundMoney(
+          grossSalary - asNumber(reconciliationReference.corrected_gross_chf),
+        ),
+        payoutDifference: roundMoney(
+          payout - asNumber(reconciliationReference.corrected_payout_chf),
+        ),
+        notes: cleanText(reconciliationReference.notes) || null,
+        matches:
+          Math.abs(grossSalary - asNumber(reconciliationReference.corrected_gross_chf)) <= 0.05 &&
+          Math.abs(payout - asNumber(reconciliationReference.corrected_payout_chf)) <= 0.05,
+      }
+    : null;
+
+  if (reconciliation && !reconciliation.matches) {
+    warnings.push(
+      `Kontrollabweichung zum geprüften Excel-Abgleich: Brutto ${reconciliation.grossDifference >= 0 ? '+' : ''}CHF ${reconciliation.grossDifference.toFixed(2)}, Auszahlung ${reconciliation.payoutDifference >= 0 ? '+' : ''}CHF ${reconciliation.payoutDifference.toFixed(2)}. Lohnlauf darf nicht abgeschlossen werden.`,
+    );
+  }
 
   const grossPerHour = totalMinutes > 0 ? roundFour(grossSalary / (totalMinutes / 60)) : null;
   const netPerHour = totalMinutes > 0 ? roundFour(netSalary / (totalMinutes / 60)) : null;
@@ -889,7 +1387,7 @@ export async function calculateEmployeePayroll({
   const filename = safeFilename(`Lohnabrechnung_${fileIdentity}_${periodFrom}_${periodTo}.pdf`);
 
   const snapshot = {
-    calculation_version: 'opc_payroll_phase1_v1',
+    calculation_version: 'opc_payroll_reconciliation_v2_2_maintenance',
     employee_id: employeeId,
     employee_number: employee.employee_number || null,
     period_from: periodFrom,
@@ -900,6 +1398,9 @@ export async function calculateEmployeePayroll({
     rule_set: safeObject(ruleSet),
     approved_entry_ids: positiveEntries.map((item) => item.entry.id),
     time_entry_pay_rates: payRates.map((row) => safeObject(row)),
+    period_adjustments: periodAdjustments.map((row) => safeObject(row)),
+    reconciliation,
+    accruals,
     contribution_basis_chf: contributionBasis,
     totals: {
       entries_count: positiveEntries.length,
@@ -944,6 +1445,9 @@ export async function calculateEmployeePayroll({
     netPerHour,
     employerCostPerHour,
     rateBreakdown,
+    accruals,
+    periodAdjustments,
+    reconciliation,
     lines,
     warnings,
     payrollDocument,
