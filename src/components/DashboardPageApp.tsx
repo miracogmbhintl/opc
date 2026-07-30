@@ -1,6 +1,6 @@
 // OPC_DASHBOARD_SINGLE_ISLAND_V1
 import MirakaDashboardShell from './MirakaDashboardShell';
-import DashboardHomeRouter from './DashboardHomeRouter';
+import DashboardHomeEntry from './DashboardHomeEntry';
 
 export default function DashboardPageApp() {
   return (
@@ -16,7 +16,7 @@ export default function DashboardPageApp() {
       currentPath="/dashboard"
       hideTopBar={true}
     >
-      <DashboardHomeRouter />
+      <DashboardHomeEntry />
     </MirakaDashboardShell>
   );
 }
