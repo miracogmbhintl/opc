@@ -179,7 +179,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .from('opc_tickets')
       .insert({
         ticket_number: ticketNumber,
-        source: 'client_portal_cleaning_request',
+        source: 'client_portal',
         status: 'new',
         priority: ['low', 'normal', 'high'].includes(priority) ? priority : 'normal',
         category: serviceCategory === 'change_request' ? 'other' : 'cleaning_needed',
@@ -236,7 +236,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         original_filename: file.name || fileName,
         mime_type: file.type,
         file_size_bytes: file.size,
-        uploaded_by_type: 'client',
+        uploaded_by_type: 'public',
       });
     }
 
@@ -255,7 +255,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       actor_name: identity.display_name,
       actor_email: identity.email || null,
       new_status: 'new',
-      visibility: 'client',
       metadata: { source: 'opc_customer_portal', service_category: serviceCategory, related_job_id: jobId },
     }];
 
@@ -269,12 +268,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
         actor_user_id: authenticated.user.id,
         actor_name: identity.display_name,
         actor_email: identity.email || null,
-        visibility: 'client',
         metadata: { uploaded_count: mediaRows.length },
       });
     }
 
-    await authenticated.serviceClient.from('opc_ticket_events').insert(eventRows);
+    const eventInsert = await authenticated.serviceClient.from('opc_ticket_events').insert(eventRows);
+    if (eventInsert.error) {
+      console.warn('[opc/client-portal/cleaning-request] event insert failed', eventInsert.error.message);
+    }
 
     return opcClientPortalJson({
       ok: true,
