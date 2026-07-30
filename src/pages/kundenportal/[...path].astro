@@ -1,0 +1,62 @@
+---
+import OpcClientPortalApp from '../../components/OpcClientPortalApp';
+import '../../styles/miraka-portal.css';
+
+export const prerender = false;
+
+const rawPath = String(Astro.params.path || '').replace(/^\/+|\/+$/g, '');
+const parts = rawPath.split('/').filter(Boolean);
+
+let section:
+  | 'overview'
+  | 'orders'
+  | 'order-detail'
+  | 'sites'
+  | 'documents'
+  | 'requests'
+  | 'finance'
+  | 'settings' = 'overview';
+let itemId: string | undefined;
+let title = 'Kundenportal';
+
+if (parts[0] === 'auftraege' && parts[1]) {
+  section = 'order-detail';
+  itemId = parts[1];
+  title = 'Auftragsdetails';
+} else if (parts[0] === 'auftraege') {
+  section = 'orders';
+  title = 'Meine Aufträge';
+} else if (parts[0] === 'standorte') {
+  section = 'sites';
+  title = 'Standorte';
+} else if (parts[0] === 'dokumente') {
+  section = 'documents';
+  title = 'Berichte & Dokumente';
+} else if (parts[0] === 'anfragen') {
+  section = 'requests';
+  title = 'Anfragen & Schäden';
+} else if (parts[0] === 'finanzen') {
+  section = 'finance';
+  title = 'Offerten & Rechnungen';
+} else if (parts[0] === 'einstellungen') {
+  section = 'settings';
+  title = 'Einstellungen';
+}
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#ff7a00" />
+  <meta name="application-name" content="Orange Pro Clean Kundenportal" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+  <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
+  <title>{title} | Orange Pro Clean</title>
+</head>
+<body>
+  <OpcClientPortalApp client:only="react" section={section} itemId={itemId} />
+</body>
+</html>
