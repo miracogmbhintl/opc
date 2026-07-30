@@ -78,6 +78,28 @@ function portalIdentity(access: any) {
   };
 }
 
+function buildInternalDescription(input: {
+  description: string;
+  service: string;
+  preferredDate: string | null;
+  buildingSize: string | null;
+  floors: string | null;
+  requestedServices: string | null;
+  notes: string | null;
+  jobId: string | null;
+}) {
+  return [
+    input.description,
+    `Reinigungsart: ${input.service}`,
+    input.preferredDate ? `Wunschtermin: ${input.preferredDate}` : '',
+    input.buildingSize ? `Gebäudegrösse: ${input.buildingSize} m²` : '',
+    input.floors ? `Etagen: ${input.floors}` : '',
+    input.requestedServices ? `Benötigte Leistungen:\n${input.requestedServices}` : '',
+    input.notes ? `Weitere Bemerkungen:\n${input.notes}` : '',
+    input.jobId ? `Bezug zu Auftrag: ${input.jobId}` : '',
+  ].filter(Boolean).join('\n\n').slice(0, 5000);
+}
+
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
     const authenticated = await authenticateOpcClientPortalRequest(request, locals);
@@ -96,16 +118,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const form = await request.formData();
     const serviceCategory = clean(form.get('service_category'), 80) || 'other';
     const allowedServices = new Set([
-      'maintenance',
-      'special',
-      'emergency',
-      'move',
-      'window',
-      'construction',
-      'deep',
-      'office',
-      'change_request',
-      'other',
+      'maintenance', 'special', 'emergency', 'move', 'window',
+      'construction', 'deep', 'office', 'change_request', 'other',
     ]);
     if (!allowedServices.has(serviceCategory)) {
       return opcClientPortalJson({ ok: false, error: 'Bitte eine gültige Reinigungsart auswählen.' }, 400);
@@ -174,6 +188,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const suffix = Math.random().toString(36).slice(2, 7).toUpperCase();
     const ticketNumber = `RA-${datePart}-${suffix}`;
     const identity = portalIdentity(authenticated.access);
+    const service = serviceLabel(serviceCategory);
+    const internalDescription = buildInternalDescription({
+      description,
+      service,
+      preferredDate,
+      buildingSize,
+      floors,
+      requestedServices,
+      notes,
+      jobId,
+    });
 
     const ticketResult = await authenticated.serviceClient
       .from('opc_tickets')
@@ -184,7 +209,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         priority: ['low', 'normal', 'high'].includes(priority) ? priority : 'normal',
         category: serviceCategory === 'change_request' ? 'other' : 'cleaning_needed',
         title,
-        description,
+        description: internalDescription,
         reporter_name: identity.display_name,
         reporter_phone: identity.phone || null,
         reporter_email: identity.email || null,
@@ -199,7 +224,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           source: 'opc_customer_portal',
           request_kind: 'cleaning_request',
           service_category: serviceCategory,
-          service_label: serviceLabel(serviceCategory),
+          service_label: service,
+          original_description: description,
           preferred_date: preferredDate,
           building_size_m2: buildingSize,
           floors,
@@ -249,7 +275,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       ticket_id: ticket.id,
       ticket_number: ticket.ticket_number,
       event_type: 'created',
-      message: `${serviceLabel(serviceCategory)} wurde über das Kundenportal angefragt.`,
+      message: `${service} wurde über das Kundenportal angefragt.`,
       actor_type: 'client',
       actor_user_id: authenticated.user.id,
       actor_name: identity.display_name,
