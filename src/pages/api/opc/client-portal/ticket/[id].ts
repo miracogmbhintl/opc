@@ -81,17 +81,15 @@ function sanitizeEvent(row: AnyRow, clientName: string) {
 }
 
 async function loadTicket(serviceClient: any, clientId: string, ticketId: string) {
-  const ticketResult = await serviceClient
+  const result = await serviceClient
     .from('opc_tickets')
     .select('*')
     .eq('id', ticketId)
     .eq('client_id', clientId)
     .maybeSingle();
 
-  if (ticketResult.error) {
-    throw new Error(`Anfrage konnte nicht geladen werden: ${ticketResult.error.message}`);
-  }
-  return ticketResult.data || null;
+  if (result.error) throw new Error(`Anfrage konnte nicht geladen werden: ${result.error.message}`);
+  return result.data || null;
 }
 
 async function loadDetail(serviceClient: any, access: any, ticketId: string) {
@@ -122,10 +120,10 @@ async function loadDetail(serviceClient: any, access: any, ticketId: string) {
   const media = await Promise.all((mediaResult.data || []).map(async (row: AnyRow) => {
     const bucket = row.bucket_id || MEDIA_BUCKET;
     const path = row.storage_path;
-    let display_url: string | null = null;
+    let displayUrl: string | null = null;
     if (path) {
       const signed = await serviceClient.storage.from(bucket).createSignedUrl(path, 60 * 60);
-      display_url = signed.data?.signedUrl || null;
+      displayUrl = signed.data?.signedUrl || null;
     }
     return {
       id: row.id,
@@ -133,7 +131,7 @@ async function loadDetail(serviceClient: any, access: any, ticketId: string) {
       mime_type: row.mime_type || null,
       file_size_bytes: row.file_size_bytes || null,
       created_at: row.created_at || null,
-      display_url,
+      display_url: displayUrl,
     };
   }));
 
@@ -147,12 +145,7 @@ async function loadDetail(serviceClient: any, access: any, ticketId: string) {
     delete safeTicket[key];
   }
 
-  return {
-    ticket: safeTicket,
-    site: siteResult.data || null,
-    events,
-    media,
-  };
+  return { ticket: safeTicket, site: siteResult.data || null, events, media };
 }
 
 export const GET: APIRoute = async ({ request, locals, params }) => {
@@ -249,10 +242,10 @@ export const PATCH: APIRoute = async ({ request, locals, params }) => {
     }
 
     const identity = portalIdentity(authenticated.access);
-    await authenticated.serviceClient.from('opc_ticket_events').insert({
+    const eventResult = await authenticated.serviceClient.from('opc_ticket_events').insert({
       ticket_id: ticketId,
       ticket_number: current.ticket_number || null,
-      event_type: 'client_update',
+      event_type: 'internal_update',
       message: changes.join(' '),
       actor_type: 'client',
       actor_user_id: authenticated.user.id,
@@ -260,9 +253,12 @@ export const PATCH: APIRoute = async ({ request, locals, params }) => {
       actor_email: identity.email || null,
       old_status: current.status || null,
       new_status: current.status || null,
-      visibility: 'client',
       metadata: { source: 'opc_customer_portal', changes: updates },
     });
+
+    if (eventResult.error) {
+      console.warn('[opc/client-portal/ticket] update event failed', eventResult.error.message);
+    }
 
     return opcClientPortalJson({ ok: true, ticket: updatedResult.data, message: 'Änderungen wurden gespeichert.' });
   } catch (error: any) {
@@ -320,7 +316,7 @@ export const POST: APIRoute = async ({ request, locals, params }) => {
         original_filename: file.name || fileName,
         mime_type: file.type,
         file_size_bytes: file.size,
-        uploaded_by_type: 'client',
+        uploaded_by_type: 'public',
       });
     }
 
@@ -334,14 +330,13 @@ export const POST: APIRoute = async ({ request, locals, params }) => {
       eventRows.push({
         ticket_id: ticketId,
         ticket_number: ticket.ticket_number || null,
-        event_type: 'client_comment',
+        event_type: 'internal_update',
         message: comment,
         actor_type: 'client',
         actor_user_id: authenticated.user.id,
         actor_name: identity.display_name,
         actor_email: identity.email || null,
-        visibility: 'client',
-        metadata: { source: 'opc_customer_portal' },
+        metadata: { source: 'opc_customer_portal', kind: 'client_comment' },
       });
     }
     if (mediaRows.length) {
@@ -354,11 +349,15 @@ export const POST: APIRoute = async ({ request, locals, params }) => {
         actor_user_id: authenticated.user.id,
         actor_name: identity.display_name,
         actor_email: identity.email || null,
-        visibility: 'client',
         metadata: { source: 'opc_customer_portal', uploaded_count: mediaRows.length },
       });
     }
-    if (eventRows.length) await authenticated.serviceClient.from('opc_ticket_events').insert(eventRows);
+    if (eventRows.length) {
+      const eventInsert = await authenticated.serviceClient.from('opc_ticket_events').insert(eventRows);
+      if (eventInsert.error) {
+        console.warn('[opc/client-portal/ticket] event insert failed', eventInsert.error.message);
+      }
+    }
 
     await authenticated.serviceClient
       .from('opc_tickets')
