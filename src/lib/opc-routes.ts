@@ -71,7 +71,7 @@ export function legacyRouteToOpc(path: string): string {
     [/^\/dashboard$/, OPC_ROUTES.dashboard],
 
     [/^\/kundenportal$/, OPC_ROUTES.clientPortal],
-    [/^\/kundenportal\/auftraege(?:\/(.*))?$/, (_match: string, id?: string) => id ? `${OPC_ROUTES.clientOrders}/${id}` : OPC_ROUTES.clientOrders as any],
+    [/^\/kundenportal\/auftraege$/, OPC_ROUTES.clientOrders],
     [/^\/kundenportal\/standorte$/, OPC_ROUTES.clientSites],
     [/^\/kundenportal\/dokumente$/, OPC_ROUTES.clientDocuments],
     [/^\/kundenportal\/anfragen$/, OPC_ROUTES.clientRequests],
@@ -127,7 +127,7 @@ export function legacyRouteToOpc(path: string): string {
 
   for (const [pattern, replacement] of replacements) {
     if (pattern.test(normalizedPath)) {
-      return normalizedPath.replace(pattern, replacement as string);
+      return normalizedPath.replace(pattern, replacement);
     }
   }
 
