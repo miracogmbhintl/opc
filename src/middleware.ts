@@ -47,6 +47,41 @@ function isInternalOpcPage(pathname: string) {
   );
 }
 
+function customerPortalDestination(pathname: string) {
+  if (pathname === '/einsaetze' || pathname.startsWith('/einsatz/')) {
+    return '/kundenportal/auftraege';
+  }
+
+  if (pathname === '/anfragen-schaeden' || pathname.startsWith('/anfragen-schaeden/')) {
+    return '/kundenportal/anfragen';
+  }
+
+  if (
+    pathname === '/berichte-dateien' ||
+    pathname.startsWith('/berichte-dateien/') ||
+    pathname === '/dokumente' ||
+    pathname.startsWith('/dokumente/')
+  ) {
+    return '/kundenportal/dokumente';
+  }
+
+  if (
+    pathname === '/offerten' ||
+    pathname.startsWith('/offerte/') ||
+    pathname === '/rechnungen' ||
+    pathname.startsWith('/rechnung/') ||
+    pathname === '/finanzen'
+  ) {
+    return '/kundenportal/finanzen';
+  }
+
+  if (pathname === '/einstellungen' || pathname.startsWith('/einstellungen/')) {
+    return '/kundenportal/einstellungen';
+  }
+
+  return '/kundenportal';
+}
+
 function isRestrictedOpcApi(pathname: string) {
   if (!pathname.startsWith('/api/opc/')) return false;
 
@@ -130,7 +165,7 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
       );
     }
 
-    return context.redirect('/kundenportal', 302);
+    return context.redirect(customerPortalDestination(pathname), 302);
   } catch (error) {
     console.warn(
       '[OPC Middleware] Client portal separation failed:',
