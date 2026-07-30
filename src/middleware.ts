@@ -47,10 +47,29 @@ function isInternalOpcPage(pathname: string) {
   );
 }
 
-async function redirectClientFromInternalPortal(context: any, pathname: string) {
-  if (!isInternalOpcPage(pathname)) return null;
+function isRestrictedOpcApi(pathname: string) {
+  if (!pathname.startsWith('/api/opc/')) return false;
 
-  const token = context.cookies.get('sb-access-token')?.value || '';
+  const allowedClientApiPrefixes = [
+    '/api/opc/client-portal',
+    '/api/opc/jobs/access',
+  ];
+
+  return !allowedClientApiPrefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+async function enforceClientPortalSeparation(context: any, pathname: string) {
+  const internalPage = isInternalOpcPage(pathname);
+  const restrictedApi = isRestrictedOpcApi(pathname);
+
+  if (!internalPage && !restrictedApi) return null;
+
+  const token =
+    context.cookies.get('sb-access-token')?.value ||
+    bearerToken(context.request);
+
   if (!token) return null;
 
   try {
@@ -95,10 +114,26 @@ async function redirectClientFromInternalPortal(context: any, pathname: string) 
     if (staffResult.data) return null;
     if (!clientResult.data) return null;
 
+    if (restrictedApi) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: 'Diese interne Funktion ist für Kundenkonten nicht freigegeben.',
+        }),
+        {
+          status: 403,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'private, no-store, max-age=0',
+          },
+        },
+      );
+    }
+
     return context.redirect('/kundenportal', 302);
   } catch (error) {
     console.warn(
-      '[OPC Middleware] Client route separation failed:',
+      '[OPC Middleware] Client portal separation failed:',
       error instanceof Error ? error.message : error,
     );
     return null;
@@ -107,9 +142,9 @@ async function redirectClientFromInternalPortal(context: any, pathname: string) 
 
 export const onRequest = defineMiddleware(async (context, next) => {
   const pathname = new URL(context.request.url).pathname;
-  const clientRedirect = await redirectClientFromInternalPortal(context, pathname);
+  const separationResponse = await enforceClientPortalSeparation(context, pathname);
 
-  if (clientRedirect) return clientRedirect;
+  if (separationResponse) return separationResponse;
 
   const response = await next();
 
