@@ -11,6 +11,7 @@ export default function DashboardPageApp() {
         'admin',
         'dispatch',
         'employee',
+        'client',
       ]}
       currentPath="/dashboard"
       hideTopBar={true}
