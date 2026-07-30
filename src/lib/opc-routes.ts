@@ -2,6 +2,14 @@ export const OPC_ROUTES = {
   login: '/',
   dashboard: '/dashboard',
 
+  clientPortal: '/kundenportal',
+  clientOrders: '/kundenportal/auftraege',
+  clientSites: '/kundenportal/standorte',
+  clientDocuments: '/kundenportal/dokumente',
+  clientRequests: '/kundenportal/anfragen',
+  clientFinance: '/kundenportal/finanzen',
+  clientSettings: '/kundenportal/einstellungen',
+
   inquiries: '/anfragen',
   calendar: '/kalender',
   timeTracking: '/zeiterfassung',
@@ -43,13 +51,17 @@ export const OPC_ROUTES = {
 export function getOpcDashboardRoute(role?: string | null): string {
   const normalizedRole = String(role || '').toLowerCase().trim();
 
+  if (normalizedRole === 'client' || normalizedRole === 'kunde') {
+    return OPC_ROUTES.clientPortal;
+  }
+
   // All internal staff roles land on /dashboard. The dashboard component decides
   // whether to render the management dashboard or the employee dashboard.
   if (['owner', 'admin', 'dispatch', 'dispatcher', 'disposition', 'employee', 'mitarbeiter'].includes(normalizedRole)) {
     return OPC_ROUTES.dashboard;
   }
 
-  return OPC_ROUTES.dashboard;
+  return OPC_ROUTES.login;
 }
 
 export function legacyRouteToOpc(path: string): string {
@@ -57,6 +69,14 @@ export function legacyRouteToOpc(path: string): string {
 
   const replacements: Array<[RegExp, string]> = [
     [/^\/dashboard$/, OPC_ROUTES.dashboard],
+
+    [/^\/kundenportal$/, OPC_ROUTES.clientPortal],
+    [/^\/kundenportal\/auftraege(?:\/(.*))?$/, (_match: string, id?: string) => id ? `${OPC_ROUTES.clientOrders}/${id}` : OPC_ROUTES.clientOrders as any],
+    [/^\/kundenportal\/standorte$/, OPC_ROUTES.clientSites],
+    [/^\/kundenportal\/dokumente$/, OPC_ROUTES.clientDocuments],
+    [/^\/kundenportal\/anfragen$/, OPC_ROUTES.clientRequests],
+    [/^\/kundenportal\/finanzen$/, OPC_ROUTES.clientFinance],
+    [/^\/kundenportal\/einstellungen$/, OPC_ROUTES.clientSettings],
 
     [/^\/dashboard\/tickets$/, OPC_ROUTES.tickets],
     [/^\/dashboard\/qr-codes$/, OPC_ROUTES.qrCodes],
@@ -107,7 +127,7 @@ export function legacyRouteToOpc(path: string): string {
 
   for (const [pattern, replacement] of replacements) {
     if (pattern.test(normalizedPath)) {
-      return normalizedPath.replace(pattern, replacement);
+      return normalizedPath.replace(pattern, replacement as string);
     }
   }
 
