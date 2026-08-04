@@ -2,6 +2,7 @@ import {
   cleanText,
   safeObject,
   throwOnError,
+  todayIsoDate,
 } from './opc-employee-api';
 
 type JsonRow = Record<string, any>;
@@ -392,7 +393,9 @@ async function loadPayrollData(
         .select('*')
         .eq('employee_id', employeeId)
         .eq('address_type', 'residence')
-        .order('valid_from', { ascending: false }),
+        .order('valid_from', { ascending: false })
+        .order('updated_at', { ascending: false })
+        .order('created_at', { ascending: false }),
       supabase
         .from('opc_employment_contracts')
         .select('*')
@@ -492,12 +495,24 @@ async function loadPayrollData(
   }
 
   const addressRows = (addressResponse.data || []) as JsonRow[];
+  const addressToday = todayIsoDate();
+
+  // A newly generated payroll document uses the employee's current residence
+  // address at generation time. Historical address rows remain available for
+  // auditing, but the payroll period no longer forces an old address onto a
+  // newly generated preview or PDF.
   const address =
     addressRows.find((row) => {
       const from = isoDate(row.valid_from) || '0000-01-01';
       const until = isoDate(row.valid_until) || '9999-12-31';
-      return from <= periodTo && until >= periodFrom;
-    }) || addressRows[0] || {};
+      return row.is_primary === true && from <= addressToday && until >= addressToday;
+    }) ||
+    addressRows.find((row) => {
+      const from = isoDate(row.valid_from) || '0000-01-01';
+      const until = isoDate(row.valid_until) || '9999-12-31';
+      return from <= addressToday && until >= addressToday;
+    }) ||
+    addressRows[0] || {};
 
   return {
     employee,
