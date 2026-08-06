@@ -1,5 +1,5 @@
 ---
-import SiteInspectionDetailPage from '../../components/SiteInspectionDetailPage';
+import SiteInspectionMediaRoute from '../../components/SiteInspectionMediaRoute';
 import '../../styles/miraka-portal.css';
 
 const { id } = Astro.params;
@@ -35,6 +35,6 @@ const { id } = Astro.params;
   <title>Besichtigung | Orange Pro Clean</title>
 </head>
 <body>
-  <SiteInspectionDetailPage client:only="react" inspectionId={id || 'neu'} />
+  <SiteInspectionMediaRoute client:only="react" inspectionId={id || 'neu'} />
 </body>
 </html>
