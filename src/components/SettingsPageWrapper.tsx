@@ -1,57 +1,42 @@
 /**
  * Settings Page Wrapper
- * Handles auth check and role detection before rendering SettingsPage
+ * Uses the canonical OPC auth profile instead of reading a second role source directly.
  */
 
-import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { useEffect, useState } from 'react';
 import { baseUrl } from '../lib/base-url';
+import { loadOpcAuthProfile, refreshOpcAuthProfile } from '../lib/opc-auth-cache';
 import MirakaSidebar from './MirakaSidebar';
 import SettingsPage from './SettingsPage';
-import ClientSettings from './ClientSettings';
 
 export default function SettingsPageWrapper() {
   const [loading, setLoading] = useState(true);
   const [role, setRole] = useState<'owner' | 'admin' | 'client' | null>(null);
 
   useEffect(() => {
-    checkAuth();
+    void checkAuth();
   }, []);
 
-  const checkAuth = async () => {
+  async function checkAuth() {
     try {
-      // Check session
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) {
+      const cached = await loadOpcAuthProfile();
+      const profile = await refreshOpcAuthProfile(true).catch(() => cached);
+
+      if (!profile) {
         window.location.href = `${baseUrl}/`;
         return;
       }
 
-      // Fetch user profile
-      const { data: profile, error } = await supabase
-        .from('user_profiles')
-        .select('role')
-        .eq('id', session.user.id)
-        .single();
-
-      if (error || !profile) {
-        console.error('Error loading profile:', error);
-        window.location.href = `${baseUrl}/`;
-        return;
-      }
-
-      setRole(profile.role as 'owner' | 'admin' | 'client');
+      const resolvedRole = profile.role === 'owner' ? 'owner' : profile.role === 'admin' ? 'admin' : 'client';
+      setRole(resolvedRole);
       setLoading(false);
-    } catch (err) {
-      console.error('Auth check error:', err);
+    } catch (error) {
+      console.error('Settings auth check error:', error);
       window.location.href = `${baseUrl}/`;
     }
-  };
-
-  if (loading) {
-    return null;
   }
+
+  if (loading || !role) return null;
 
   return (
     <>
@@ -60,5 +45,3 @@ export default function SettingsPageWrapper() {
     </>
   );
 }
-
-
