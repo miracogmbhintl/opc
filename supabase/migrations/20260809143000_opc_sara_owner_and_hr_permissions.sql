@@ -1,9 +1,9 @@
 -- OPC owner promotion + HR permission consistency
--- Promotes Sara Batista to a real Owner role and keeps legacy profile role in sync.
+-- opc_staff_roles is the authoritative access source.
 
 begin;
 
--- Sara Batista: authoritative OPC staff role.
+-- Sara Batista: promote the authoritative OPC staff role to Owner.
 update public.opc_staff_roles
 set
   role = 'owner',
@@ -19,40 +19,40 @@ set
 where user_id = '7dcbbbb5-9087-45bc-9e2a-55f2507bf884'::uuid
    or lower(coalesce(email, '')) = 's.batista@orangeproclean.ch';
 
--- Keep the legacy profile compatible with owner-only pages that still read user_profiles.
-update public.user_profiles
-set role = 'owner'
-where id = '7dcbbbb5-9087-45bc-9e2a-55f2507bf884'::uuid;
+-- user_profiles is a compatibility VIEW in the production database and is not
+-- directly updatable. Keep opc_staff_roles authoritative and install a narrow
+-- compatibility trigger so legacy role-only writes cannot break portal-role edits.
+create or replace function public.opc_user_profiles_role_compat_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  -- Only legacy role flags may be written through this compatibility view.
+  -- No HR/personnel data is persisted here; opc_staff_roles remains authoritative.
+  if (to_jsonb(new) - 'role' - 'is_owner' - 'is_admin')
+     is distinct from
+     (to_jsonb(old) - 'role' - 'is_owner' - 'is_admin') then
+    raise exception 'user_profiles is read-only except compatibility role flags';
+  end if;
 
--- Some historical user_profiles installations also expose is_owner/is_admin flags.
+  return new;
+end
+$$;
+
 do $$
 begin
   if exists (
     select 1
-    from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'user_profiles'
-      and column_name = 'is_owner'
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'user_profiles'
+      and c.relkind = 'v'
   ) then
-    execute $sql$
-      update public.user_profiles
-      set is_owner = true
-      where id = '7dcbbbb5-9087-45bc-9e2a-55f2507bf884'::uuid
-    $sql$;
-  end if;
-
-  if exists (
-    select 1
-    from information_schema.columns
-    where table_schema = 'public'
-      and table_name = 'user_profiles'
-      and column_name = 'is_admin'
-  ) then
-    execute $sql$
-      update public.user_profiles
-      set is_admin = true
-      where id = '7dcbbbb5-9087-45bc-9e2a-55f2507bf884'::uuid
-    $sql$;
+    execute 'drop trigger if exists opc_user_profiles_role_compat_update on public.user_profiles';
+    execute 'create trigger opc_user_profiles_role_compat_update instead of update on public.user_profiles for each row execute function public.opc_user_profiles_role_compat_update()';
   end if;
 end
 $$;
@@ -77,7 +77,9 @@ where (
 
 -- Audit helper: surfaces employees with more than one currently-valid permit candidate.
 -- It does not delete historical permit data automatically.
-create or replace view public.opc_employee_permit_duplicate_audit as
+create or replace view public.opc_employee_permit_duplicate_audit
+with (security_invoker = true)
+as
 select
   employee_id,
   count(*) as candidate_count,
@@ -92,6 +94,12 @@ group by employee_id
 having count(*) > 1;
 
 comment on view public.opc_employee_permit_duplicate_audit is
-  'Read-only audit view for employees with multiple currently-valid permit candidates. No automatic deletion is performed.';
+  'Server-side audit view for employees with multiple currently-valid permit candidates. No automatic deletion is performed.';
+
+-- Never expose the permit audit view to normal portal sessions.
+revoke all on public.opc_employee_permit_duplicate_audit from public;
+revoke all on public.opc_employee_permit_duplicate_audit from anon;
+revoke all on public.opc_employee_permit_duplicate_audit from authenticated;
+grant select on public.opc_employee_permit_duplicate_audit to service_role;
 
 commit;
