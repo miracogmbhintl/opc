@@ -1,5 +1,5 @@
 ---
-import EmployeeDetailPage from '../../components/EmployeeDetailPage';
+import EmployeeDetailAdminWrapper from '../../components/EmployeeDetailAdminWrapper';
 import '../../styles/miraka-portal.css';
 const { id } = Astro.params;
 ---
@@ -41,6 +41,6 @@ const { id } = Astro.params;
   <title>Mitarbeiterdetails | Orange Pro Clean</title>
 </head>
 <body>
-  <EmployeeDetailPage client:only="react" employeeId={id || ''} />
+  <EmployeeDetailAdminWrapper client:only="react" employeeId={id || ''} />
 </body>
 </html>
