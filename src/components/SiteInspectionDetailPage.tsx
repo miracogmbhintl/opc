@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { fetchInspectionMediaPayload, uploadInspectionMediaFiles } from '../lib/opc-inspection-media-client';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import {
   OPCPageShell,
@@ -355,16 +356,77 @@ function safeDocumentFileName(value: string) {
     .replace(/^_+|_+$/g, '');
 }
 
-async function imageUrlToPdfData(url: string) {
-  const response = await fetch(url, {
-    cache: 'force-cache',
-  });
+// OPC_INSPECTION_PDF_IMAGE_RETRY_20260812
+async function fetchInspectionImageWithRetry(
+  url: string,
+) {
+  let lastError: any = null;
 
-  if (!response.ok) {
-    throw new Error(
-      `Bild konnte nicht geladen werden (${response.status}).`
+  for (
+    let attempt = 1;
+    attempt <= 3;
+    attempt += 1
+  ) {
+    const controller =
+      new AbortController();
+
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      45000,
     );
+
+    try {
+      const response = await fetch(url, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        return response;
+      }
+
+      const error = new Error(
+        `Bild konnte nicht geladen werden (${response.status}).`,
+      ) as Error & {
+        retryable?: boolean;
+      };
+
+      error.retryable =
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500;
+
+      throw error;
+    } catch (error: any) {
+      lastError = error;
+
+      if (
+        error?.retryable === false ||
+        attempt >= 3
+      ) {
+        throw error;
+      }
+    } finally {
+      window.clearTimeout(timeout);
+    }
+
+    await new Promise<void>((resolve) => {
+      window.setTimeout(
+        resolve,
+        attempt === 1 ? 500 : 1200,
+      );
+    });
   }
+
+  throw (
+    lastError ||
+    new Error('Bild konnte nicht geladen werden.')
+  );
+}
+
+async function imageUrlToPdfData(url: string) {
+  const response =
+    await fetchInspectionImageWithRetry(url);
 
   const sourceBlob = await response.blob();
   const objectUrl = URL.createObjectURL(sourceBlob);
@@ -706,48 +768,35 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
     };
   }
 
-  async function loadMedia(targetInspectionId: string) {
-    if (!supabase) return;
+  async function loadMedia(
+    targetInspectionId: string,
+    failLoudly = false,
+  ) {
+    try {
+      const payload =
+        await fetchInspectionMediaPayload(
+          targetInspectionId,
+        );
 
-    const { data, error } = await supabase
-      .from('opc_site_inspection_media')
-      .select('*')
-      .eq('inspection_id', targetInspectionId)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: false });
+      const rows = Array.isArray(payload?.media)
+        ? payload.media
+        : [];
 
-    if (error) {
-      console.warn('Besichtigungsmedien konnten nicht geladen werden:', error.message);
+      setMediaRows(rows);
+      return rows;
+    } catch (error: any) {
+      console.warn(
+        'Besichtigungsmedien konnten nicht geladen werden:',
+        error?.message || error,
+      );
+
+      if (failLoudly) {
+        throw error;
+      }
+
       setMediaRows([]);
       return [];
     }
-
-    const rows = data || [];
-    const rowsWithPreviews = await Promise.all(
-      rows.map(async (media) => {
-        if (!media.object_path) return media;
-
-        try {
-          const bucketId = media.bucket_id || 'opc-site-inspection-media';
-          const { data: signed, error: signedError } = await supabase.storage
-            .from(bucketId)
-            .createSignedUrl(media.object_path, 60 * 60);
-
-          if (signedError) {
-            console.warn('Vorschau konnte nicht signiert werden:', signedError.message);
-            return media;
-          }
-
-          return { ...media, preview_url: signed?.signedUrl || null };
-        } catch (previewError) {
-          console.warn('Vorschau konnte nicht erstellt werden:', previewError);
-          return media;
-        }
-      })
-    );
-
-    setMediaRows(rowsWithPreviews);
-    return rowsWithPreviews;
   }
 
   async function loadExistingQuote(targetInspectionId: string) {
@@ -1145,72 +1194,63 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
     }
   }
 
-  async function uploadFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0 || !form.id) return;
+  async function uploadFiles(
+    fileList: FileList | File[] | null,
+  ) {
+    const files = Array.from(fileList || []);
+
+    if (
+      files.length === 0 ||
+      !form.id
+    ) {
+      return;
+    }
 
     setUploading(true);
     setErrorMessage('');
     setSuccessMessage('');
 
     try {
-      if (!supabase) throw new Error('Supabase ist nicht verfügbar.');
-
-      const files = Array.from(fileList);
-      let uploadedCount = 0;
-      const failedFiles: string[] = [];
-
-      for (const [index, file] of files.entries()) {
-        try {
-          const extension = file.name.includes('.') ? file.name.split('.').pop() : 'file';
-          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-          const objectPath = `${form.client_id}/${form.id}/${Date.now()}-${index}-${Math.random().toString(36).slice(2)}-${safeName}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('opc-site-inspection-media')
-            .upload(objectPath, file, {
-              cacheControl: '3600',
-              upsert: false,
-              contentType: file.type || undefined,
-            });
-
-          if (uploadError) throw uploadError;
-
-          const mediaType = file.type.startsWith('video/') ? 'video' : file.type === 'application/pdf' ? 'document' : 'image';
-
-          const { error: insertError } = await supabase.from('opc_site_inspection_media').insert({
-            inspection_id: form.id,
-            client_id: form.client_id,
-            client_site_id: form.client_site_id,
-            bucket_id: 'opc-site-inspection-media',
-            object_path: objectPath,
-            media_type: mediaType,
-            purpose: 'inspection',
-            file_name: file.name,
-            mime_type: file.type || null,
-            file_size_bytes: file.size,
-            sort_order: mediaRows.length + index,
-            metadata: { original_extension: extension },
-          });
-
-          if (insertError) throw insertError;
-
-          uploadedCount += 1;
-        } catch (fileError: any) {
-          failedFiles.push(`${file.name}: ${fileError?.message || 'Upload fehlgeschlagen'}`);
-        }
-      }
+      const {
+        uploadedCount,
+        failedFiles,
+      } = await uploadInspectionMediaFiles(
+        form.id,
+        files,
+        (progress) => {
+          setSuccessMessage(
+            `Upload: ${progress.completed} von ${progress.total} verarbeitet · ${progress.uploaded} erfolgreich.`,
+          );
+        },
+      );
 
       await loadMedia(form.id);
 
       if (uploadedCount > 0) {
-        setSuccessMessage(`${uploadedCount} von ${files.length} Medien wurden hochgeladen.`);
+        setSuccessMessage(
+          `${uploadedCount} von ${files.length} Medien wurden hochgeladen.`,
+        );
+      } else {
+        setSuccessMessage('');
       }
 
       if (failedFiles.length > 0) {
-        setErrorMessage(`Nicht alle Medien konnten hochgeladen werden. ${failedFiles.slice(0, 5).join(' | ')}`);
+        const details = failedFiles
+          .map(
+            (failure) =>
+              `${failure.fileName}: ${failure.message}`,
+          )
+          .join(' | ');
+
+        setErrorMessage(
+          `${failedFiles.length} von ${files.length} Medien konnten nicht hochgeladen werden. ` +
+          `Die erfolgreichen Uploads bleiben gespeichert. Fehlgeschlagen: ${details}`,
+        );
       }
     } catch (error: any) {
-      setErrorMessage(error?.message || 'Upload fehlgeschlagen.');
+      setErrorMessage(
+        error?.message || 'Upload fehlgeschlagen.',
+      );
     } finally {
       setUploading(false);
     }
@@ -1238,7 +1278,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         return;
       }
 
-      const freshMedia = await loadMedia(savedId);
+      const freshMedia = await loadMedia(savedId, true);
 
       const mediaForPdf = Array.isArray(freshMedia)
         ? freshMedia
@@ -1802,10 +1842,11 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
 
       /*
        * Bilder:
-       * Vier Bilder werden gleichzeitig vorbereitet.
+       * Zwei Bilder werden gleichzeitig vorbereitet.
+       * Das reduziert Spitzenlast und Speicherbedarf auf Mobilgeräten.
        * Zwei Bilder werden pro A4-Seite dargestellt.
        */
-      const imageBatchSize = 4;
+      const imageBatchSize = 2;
       const imageFailures: string[] = [];
 
       for (
@@ -1833,8 +1874,10 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
               );
             } catch (error: any) {
               imageFailures.push(
-                error?.message ||
+                `${media.file_name || media.object_path || 'Bild'}: ${
+                  error?.message ||
                   'Bild konnte nicht verarbeitet werden.'
+                }`
               );
 
               return null;
@@ -2662,7 +2705,20 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
               <label style={{ ...opcBlackButtonStyle, width: 'auto', cursor: canUpload ? 'pointer' : 'not-allowed', opacity: canUpload ? 1 : 0.55 }}>
                 <UploadCloud size={16} />
                 {uploading ? 'Upload läuft...' : 'Medien hochladen'}
-                <input type="file" multiple accept="image/*,video/*,application/pdf" disabled={!canUpload || uploading} onChange={(event) => uploadFiles(event.target.files)} style={{ display: 'none' }} />
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,video/*,application/pdf"
+                  disabled={!canUpload || uploading}
+                  onChange={(event) => {
+                    const selectedFiles = Array.from(
+                      event.currentTarget.files || [],
+                    );
+                    event.currentTarget.value = '';
+                    void uploadFiles(selectedFiles);
+                  }}
+                  style={{ display: 'none' }}
+                />
               </label>
             </div>
 

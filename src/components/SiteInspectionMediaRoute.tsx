@@ -11,6 +11,7 @@ import SiteInspectionDetailPage from './SiteInspectionDetailPage';
 import MirakaDashboardShell from './MirakaDashboardShell';
 import { supabase, type UserProfile, type UserRole } from '../lib/supabase';
 import { loadOpcAuthProfile } from '../lib/opc-auth-cache';
+import { inspectionMediaApiFetch, uploadInspectionMediaFiles } from '../lib/opc-inspection-media-client';
 import {
   OPCPageShell,
   OPCListCard,
@@ -59,38 +60,21 @@ function normalizeRole(value: unknown): UserRole {
   return 'client';
 }
 
-async function getAccessToken() {
-  if (!supabase) throw new Error('Supabase ist nicht verfügbar.');
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    throw new Error('Die Sitzung ist abgelaufen. Bitte neu anmelden.');
-  }
-
-  return session.access_token;
-}
-
-async function apiFetch(path: string, init: RequestInit = {}) {
-  const accessToken = await getAccessToken();
-  const headers = new Headers(init.headers || {});
-  headers.set('Authorization', `Bearer ${accessToken}`);
-
-  const response = await fetch(path, {
-    ...init,
-    credentials: 'include',
-    headers,
-  });
-
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok || !payload?.success) {
-    throw new Error(payload?.error || `Anfrage fehlgeschlagen (${response.status}).`);
-  }
-
-  return payload;
+async function apiFetch(
+  path: string,
+  init: RequestInit = {},
+) {
+  return inspectionMediaApiFetch(
+    path,
+    init,
+    {
+      attempts: 3,
+      timeoutMs:
+        init.method === 'POST'
+          ? 120000
+          : 30000,
+    },
+  );
 }
 
 function formatDateTime(value?: string | null) {
@@ -213,28 +197,47 @@ function EmployeeInspectionMediaPage({ inspectionId }: { inspectionId: string })
     setPayload(result as MediaPayload);
   }
 
-  async function uploadFiles(fileList: FileList | null) {
+  async function uploadFiles(
+    fileList: FileList | null,
+  ) {
     if (!fileList?.length) return;
 
     setUploading(true);
     setErrorMessage('');
 
     try {
-      const body = new FormData();
-      body.set('inspection_id', inspectionId);
-      Array.from(fileList).forEach((file) => body.append('files', file));
+      const files = Array.from(fileList);
 
-      await apiFetch(API_PATH, {
-        method: 'POST',
-        body,
-      });
+      const {
+        failedFiles,
+      } = await uploadInspectionMediaFiles(
+        inspectionId,
+        files,
+      );
 
       await reloadMedia();
+
+      if (failedFiles.length > 0) {
+        setErrorMessage(
+          `${failedFiles.length} von ${files.length} Medien konnten nicht hochgeladen werden. ` +
+          failedFiles
+            .map(
+              (failure) =>
+                `${failure.fileName}: ${failure.message}`,
+            )
+            .join(' | '),
+        );
+      }
     } catch (error: any) {
-      setErrorMessage(error?.message || 'Upload fehlgeschlagen.');
+      setErrorMessage(
+        error?.message || 'Upload fehlgeschlagen.',
+      );
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   }
 

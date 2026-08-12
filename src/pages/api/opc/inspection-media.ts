@@ -429,18 +429,98 @@ function sanitizeFileName(fileName: string) {
   return safe || 'datei';
 }
 
+// OPC_INSPECTION_UPLOAD_IDEMPOTENCY_20260812
+function sanitizeUploadToken(value: unknown) {
+  return clean(value)
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 100);
+}
+
+async function findExistingUpload(
+  supabaseAdmin: any,
+  inspectionId: string,
+  actorUserId: string,
+  uploadToken: string,
+) {
+  if (!uploadToken) return null;
+
+  const response = await supabaseAdmin
+    .from('opc_site_inspection_media')
+    .select('*')
+    .eq('inspection_id', inspectionId)
+    .eq('uploaded_by', actorUserId)
+    .contains('metadata', {
+      upload_token: uploadToken,
+    })
+    .limit(1)
+    .maybeSingle();
+
+  if (response.error) {
+    return null;
+  }
+
+  return response.data || null;
+}
+
+function fileExtension(file: File) {
+  const name = clean(file.name).toLowerCase();
+  const dot = name.lastIndexOf('.');
+  return dot >= 0 ? name.slice(dot + 1) : '';
+}
+
 function getMediaType(file: File) {
-  if (file.type.startsWith('video/')) return 'video';
-  if (file.type === 'application/pdf') return 'document';
+  const type = clean(file.type).toLowerCase();
+  const extension = fileExtension(file);
+
+  if (
+    type.startsWith('video/') ||
+    ['mov', 'mp4', 'm4v', 'webm'].includes(extension)
+  ) {
+    return 'video';
+  }
+
+  if (
+    type === 'application/pdf' ||
+    extension === 'pdf'
+  ) {
+    return 'document';
+  }
+
   return 'image';
 }
 
 function isAllowedFile(file: File) {
-  return (
-    file.type.startsWith('image/') ||
-    file.type.startsWith('video/') ||
-    file.type === 'application/pdf'
-  );
+  const type = clean(file.type).toLowerCase();
+  const extension = fileExtension(file);
+
+  if (
+    type.startsWith('image/') ||
+    type.startsWith('video/') ||
+    type === 'application/pdf'
+  ) {
+    return true;
+  }
+
+  if (!type || type === 'application/octet-stream') {
+    return [
+      'jpg',
+      'jpeg',
+      'png',
+      'webp',
+      'gif',
+      'heic',
+      'heif',
+      'mov',
+      'mp4',
+      'm4v',
+      'webm',
+      'pdf',
+    ].includes(extension);
+  }
+
+  return false;
 }
 
 function errorStatus(message: string) {
@@ -475,6 +555,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     const actor = await resolveActor(supabaseAdmin, getAccessToken(request, cookies));
     const formData = await request.formData();
     const inspectionId = clean(formData.get('inspection_id'));
+    const uploadToken = sanitizeUploadToken(
+      formData.get('upload_token'),
+    );
 
     if (!inspectionId) return jsonResponse({ success: false, error: 'inspection_id fehlt.' }, 400);
 
@@ -496,6 +579,24 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       }, 400);
     }
 
+    if (uploadToken && files.length === 1) {
+      const existingUpload =
+        await findExistingUpload(
+          supabaseAdmin,
+          inspection.id,
+          actor.userId,
+          uploadToken,
+        );
+
+      if (existingUpload) {
+        return jsonResponse({
+          success: true,
+          uploaded_count: 1,
+          reused: true,
+        }, 200);
+      }
+    }
+
     const lastSortResponse = await supabaseAdmin
       .from('opc_site_inspection_media')
       .select('sort_order')
@@ -509,7 +610,10 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
 
     for (const [index, file] of files.entries()) {
       const safeName = sanitizeFileName(file.name);
-      const objectPath = `${inspection.client_id}/${inspection.id}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+      const objectName = uploadToken
+        ? `${uploadToken}-${safeName}`
+        : `${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+      const objectPath = `${inspection.client_id}/${inspection.id}/${objectName}`;
       const arrayBuffer = await file.arrayBuffer();
 
       const uploadResponse = await supabaseAdmin.storage
@@ -521,6 +625,21 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         });
 
       if (uploadResponse.error) {
+        if (uploadToken) {
+          const existingUpload =
+            await findExistingUpload(
+              supabaseAdmin,
+              inspection.id,
+              actor.userId,
+              uploadToken,
+            );
+
+          if (existingUpload) {
+            uploaded.push(existingUpload);
+            continue;
+          }
+        }
+
         throw new Error(`${file.name}: ${uploadResponse.error.message}`);
       }
 
