@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { fetchInspectionMediaPayload, uploadInspectionMediaFiles } from '../lib/opc-inspection-media-client';
@@ -105,6 +105,13 @@ const emptyManualSiteAddress: ManualSiteAddress = {
 
 function clean(value: unknown) {
   return String(value || '').trim();
+}
+
+// OPC_INSPECTION_MEDIA_RELOAD_RETRY_20260813
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function toNumberOrNull(value: string) {
@@ -589,6 +596,7 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
   const [pdfProgress, setPdfProgress] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const mediaLoadRequestRef = useRef(0);
 
   useEffect(() => {
     void loadInitialData();
@@ -771,32 +779,61 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
   async function loadMedia(
     targetInspectionId: string,
     failLoudly = false,
+    options: { attempts?: number; delayMs?: number } = {},
   ) {
-    try {
-      const payload =
-        await fetchInspectionMediaPayload(
-          targetInspectionId,
+    const attempts = Math.max(1, options.attempts ?? 1);
+    const delayMs = Math.max(0, options.delayMs ?? 800);
+    const requestId = ++mediaLoadRequestRef.current;
+    let lastError: any = null;
+
+    for (
+      let attempt = 1;
+      attempt <= attempts;
+      attempt += 1
+    ) {
+      try {
+        const payload =
+          await fetchInspectionMediaPayload(
+            targetInspectionId,
+          );
+
+        const rows = Array.isArray(payload?.media)
+          ? payload.media
+          : [];
+
+        if (requestId === mediaLoadRequestRef.current) {
+          setMediaRows(rows);
+        }
+
+        return rows;
+      } catch (error: any) {
+        lastError = error;
+
+        console.warn(
+          `Besichtigungsmedien konnten nicht geladen werden (Versuch ${attempt}/${attempts}):`,
+          error?.message || error,
         );
 
-      const rows = Array.isArray(payload?.media)
-        ? payload.media
-        : [];
-
-      setMediaRows(rows);
-      return rows;
-    } catch (error: any) {
-      console.warn(
-        'Besichtigungsmedien konnten nicht geladen werden:',
-        error?.message || error,
-      );
-
-      if (failLoudly) {
-        throw error;
+        if (attempt < attempts) {
+          await wait(delayMs * attempt);
+        }
       }
-
-      setMediaRows([]);
-      return [];
     }
+
+    if (failLoudly) {
+      throw (
+        lastError ||
+        new Error(
+          'Besichtigungsmedien konnten nicht geladen werden.',
+        )
+      );
+    }
+
+    if (requestId === mediaLoadRequestRef.current) {
+      setMediaRows([]);
+    }
+
+    return [];
   }
 
   async function loadExistingQuote(targetInspectionId: string) {
@@ -1224,11 +1261,30 @@ export default function SiteInspectionDetailPage({ inspectionId }: SiteInspectio
         },
       );
 
-      await loadMedia(form.id);
+      const freshMediaRows = await loadMedia(
+        form.id,
+        true,
+        {
+          attempts: 6,
+          delayMs: 1000,
+        },
+      );
+
+      if (
+        uploadedCount > 0 &&
+        freshMediaRows.length === 0
+      ) {
+        throw new Error(
+          `${uploadedCount} von ${files.length} Medien wurden gespeichert, ` +
+          'aber die Galerie konnte nach dem Upload noch nicht geladen werden. ' +
+          'Bitte die Seite neu laden.',
+        );
+      }
 
       if (uploadedCount > 0) {
         setSuccessMessage(
-          `${uploadedCount} von ${files.length} Medien wurden hochgeladen.`,
+          `${uploadedCount} von ${files.length} Medien wurden hochgeladen. ` +
+          `${freshMediaRows.length} Medien werden angezeigt.`,
         );
       } else {
         setSuccessMessage('');
