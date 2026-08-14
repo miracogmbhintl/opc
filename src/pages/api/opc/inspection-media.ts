@@ -262,18 +262,119 @@ async function getInspection(
   return inspection;
 }
 
-async function createSignedUrl(supabaseAdmin: any, row: any) {
+function signedUrlKey(bucketId: string, objectPath: string) {
+  return `${bucketId}::${objectPath}`;
+}
+
+// OPC_INSPECTION_MEDIA_BATCHED_SIGNED_URLS_20260814
+async function createSignedUrlMap(
+  supabaseAdmin: any,
+  rows: any[],
+) {
+  const result = new Map<string, string | null>();
+  const grouped = new Map<string, string[]>();
+
+  for (const row of rows || []) {
+    const bucketId = clean(row.bucket_id) || BUCKET_ID;
+    const objectPath = clean(row.object_path);
+
+    if (!objectPath) continue;
+
+    const key = signedUrlKey(bucketId, objectPath);
+    result.set(key, null);
+
+    const paths = grouped.get(bucketId) || [];
+    paths.push(objectPath);
+    grouped.set(bucketId, paths);
+  }
+
+  for (const [bucketId, paths] of grouped.entries()) {
+    const uniquePaths = Array.from(new Set(paths));
+
+    for (let index = 0; index < uniquePaths.length; index += 100) {
+      const chunk = uniquePaths.slice(index, index + 100);
+      const storageBucket = supabaseAdmin.storage.from(bucketId) as any;
+
+      try {
+        if (typeof storageBucket.createSignedUrls === 'function') {
+          const { data, error } =
+            await storageBucket.createSignedUrls(
+              chunk,
+              60 * 30,
+            );
+
+          if (error) {
+            for (const objectPath of chunk) {
+              result.set(
+                signedUrlKey(bucketId, objectPath),
+                null,
+              );
+            }
+            continue;
+          }
+
+          const signedRows = Array.isArray(data)
+            ? data
+            : [];
+
+          for (
+            let signedIndex = 0;
+            signedIndex < chunk.length;
+            signedIndex += 1
+          ) {
+            const objectPath =
+              clean(signedRows[signedIndex]?.path) ||
+              chunk[signedIndex];
+
+            result.set(
+              signedUrlKey(bucketId, objectPath),
+              clean(signedRows[signedIndex]?.signedUrl) ||
+                null,
+            );
+          }
+
+          continue;
+        }
+
+        for (const objectPath of chunk) {
+          const { data, error } =
+            await storageBucket.createSignedUrl(
+              objectPath,
+              60 * 30,
+            );
+
+          result.set(
+            signedUrlKey(bucketId, objectPath),
+            error ? null : clean(data?.signedUrl) || null,
+          );
+        }
+      } catch {
+        for (const objectPath of chunk) {
+          result.set(
+            signedUrlKey(bucketId, objectPath),
+            null,
+          );
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+function getSignedUrl(
+  signedUrls: Map<string, string | null>,
+  row: any,
+) {
   const bucketId = clean(row.bucket_id) || BUCKET_ID;
   const objectPath = clean(row.object_path);
 
   if (!objectPath) return null;
 
-  const { data, error } = await supabaseAdmin.storage
-    .from(bucketId)
-    .createSignedUrl(objectPath, 60 * 30);
-
-  if (error) return null;
-  return data?.signedUrl || null;
+  return (
+    signedUrls.get(signedUrlKey(bucketId, objectPath)) ||
+    null
+  );
 }
 
 function inspectionSummary(inspection: any) {
@@ -360,13 +461,20 @@ async function loadPayload(supabaseAdmin: any, inspection: any, actor: StaffActo
     throw new Error(`Besichtigungsmedien konnten nicht geladen werden: ${mediaResponse.error.message}`);
   }
 
-  const media = await Promise.all((mediaResponse.data || []).map(async (row: any) => ({
+  const mediaRows = mediaResponse.data || [];
+  const mediaSignedUrls =
+    await createSignedUrlMap(
+      supabaseAdmin,
+      mediaRows,
+    );
+
+  const media = mediaRows.map((row: any) => ({
     ...row,
-    preview_url: await createSignedUrl(supabaseAdmin, row),
+    preview_url: getSignedUrl(mediaSignedUrls, row),
     can_delete:
       actor.role === 'owner' ||
       (actor.role === 'employee' && row.uploaded_by === actor.userId),
-  })));
+  }));
 
   let deleted: any[] = [];
   let audit: any[] = [];
@@ -393,14 +501,21 @@ async function loadPayload(supabaseAdmin: any, inspection: any, actor: StaffActo
       throw new Error(`Löschprotokoll konnte nicht geladen werden: ${auditResponse.error.message}`);
     }
 
-    deleted = await Promise.all((trashResponse.data || []).map(async (row: any) => ({
+    const deletedRows = trashResponse.data || [];
+    const deletedSignedUrls =
+      await createSignedUrlMap(
+        supabaseAdmin,
+        deletedRows,
+      );
+
+    deleted = deletedRows.map((row: any) => ({
       ...row,
-      preview_url: await createSignedUrl(supabaseAdmin, row),
+      preview_url: getSignedUrl(deletedSignedUrls, row),
       can_restore:
         actor.role === 'owner' &&
         !row.permanently_deleted_at &&
         restoreAvailableUntil(row.restore_until),
-    })));
+    }));
     audit = auditResponse.data || [];
   }
 
@@ -539,7 +654,14 @@ export const GET: APIRoute = async ({ request, locals, cookies, url }) => {
     const supabaseAdmin = getServerSupabase(locals);
     const actor = await resolveActor(supabaseAdmin, getAccessToken(request, cookies));
     const inspection = await getInspection(supabaseAdmin, inspectionId, actor);
-    await purgeExpiredTrash(supabaseAdmin, actor);
+
+    if (
+      clean(url.searchParams.get('purge_expired')) === '1' &&
+      actor.role === 'owner'
+    ) {
+      await purgeExpiredTrash(supabaseAdmin, actor);
+    }
+
     const payload = await loadPayload(supabaseAdmin, inspection, actor);
 
     return jsonResponse(payload);
