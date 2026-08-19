@@ -117,8 +117,42 @@ function splitAddress(value: unknown) {
     .filter(Boolean);
 }
 
+// OPC_RECIPIENT_SALUTATION_FIX_20260819
+function normalizeRecipientNamePart(value: unknown) {
+  return clean(value)
+    .replace(/^(?:herrn?|frau|firma)(?:[\s,.:;-]+|$)/i, '')
+    .trim();
+}
+
 function getClientDisplayName(clientSnapshot?: OPCDocumentParty, fallback?: string) {
-  return getSnapshotValue(clientSnapshot, ['billing_name', 'company_name', 'full_name', 'name', 'contact_name']) || clean(fallback) || 'Kundin / Kunde';
+  const companyName = getSnapshotValue(clientSnapshot, ['company_name', 'business_name']);
+  const billingName = normalizeRecipientNamePart(getSnapshotValue(clientSnapshot, ['billing_name']));
+  const personName = normalizeRecipientNamePart(
+    getSnapshotValue(clientSnapshot, ['full_name', 'name', 'contact_name']),
+  );
+  return companyName || billingName || personName || clean(fallback) || 'Kundin / Kunde';
+}
+
+function getInvoiceFallbackDisplayName(invoice: Record<string, any>) {
+  const metadata = invoice?.metadata && typeof invoice.metadata === 'object' && !Array.isArray(invoice.metadata)
+    ? invoice.metadata
+    : {};
+  const client = invoice?.client_snapshot || {};
+  const value = (invoiceKey: string, offerKey: string) =>
+    Object.prototype.hasOwnProperty.call(metadata, invoiceKey)
+      ? String(metadata[invoiceKey] ?? '')
+      : Object.prototype.hasOwnProperty.call(metadata, offerKey)
+        ? String(metadata[offerKey] ?? '')
+        : '';
+  const form = value('invoice_recipient_form_of_address', 'offer_recipient_form_of_address')
+    .trim().toLocaleLowerCase('de-CH');
+  const companyName = clean(value('invoice_recipient_company_name', 'offer_recipient_company_name'));
+  const firstName = normalizeRecipientNamePart(value('invoice_recipient_first_name', 'offer_recipient_first_name'));
+  const lastName = normalizeRecipientNamePart(value('invoice_recipient_last_name', 'offer_recipient_last_name'));
+  const personName = [firstName, lastName].filter(Boolean).join(' ');
+
+  if (form === 'firma' || (!form && companyName)) return companyName || personName;
+  return personName || companyName || getClientDisplayName(client, invoice.title);
 }
 
 export function getClientEmail(clientSnapshot?: OPCDocumentParty) {
@@ -398,7 +432,7 @@ function splitStreet(address: string) {
 function buildQrBillData(invoice: Record<string, any>, totals: OPCDocumentTotals) {
   const client = invoice.client_snapshot || {};
   const site = invoice.site_snapshot || {};
-  const debtorName = getClientDisplayName(client, invoice.title);
+  const debtorName = getInvoiceFallbackDisplayName(invoice);
   const address = getSnapshotValue(client, ['billing_address', 'address_text', 'address']) || getSnapshotValue(site, ['address_text', 'address']) || '';
   const postalCode = getSnapshotValue(site, ['postal_code', 'postcode', 'zip']) || getSnapshotValue(client, ['postal_code', 'postcode', 'zip']);
   const city = getSnapshotValue(site, ['city', 'billing_city']) || getSnapshotValue(client, ['city', 'billing_city']);
@@ -558,7 +592,7 @@ export async function generateInvoicePdfDocument(input: OPCInvoicePdfInput) {
   const metadata = invoice?.metadata && typeof invoice.metadata === 'object' ? invoice.metadata : {};
   const dateLine = `${OPC_COMPANY.city}, ${isoDate(invoice.issue_date)}`;
 
-  let y = drawHeader(doc, { title: 'Rechnung', number: String(invoice.invoice_number || ''), dateLine, clientSnapshot: invoice.client_snapshot, siteSnapshot: invoice.site_snapshot, fallbackClientName: invoice.title, logoDataUrl });
+  let y = drawHeader(doc, { title: 'Rechnung', number: String(invoice.invoice_number || ''), dateLine, clientSnapshot: invoice.client_snapshot, siteSnapshot: invoice.site_snapshot, fallbackClientName: getInvoiceFallbackDisplayName(invoice), logoDataUrl });
   const scope = buildScopeText(metadata.invoice_scope_text || metadata.source_quote_scope_text, metadata.source_quote_service_description_text, true);
   y = drawIntroAndScope(doc, y, clean(invoice.intro_text) || 'Danke für Ihr Vertrauen. Ihre Rechnung setzt sich wie folgt zusammen:', scope);
   y = drawItemsAndTotals(doc, y, items, totals, 'invoice');

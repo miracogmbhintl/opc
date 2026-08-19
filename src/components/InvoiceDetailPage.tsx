@@ -372,6 +372,25 @@ function metadataField(
   return value === null || value === undefined ? '' : String(value);
 }
 
+// OPC_RECIPIENT_SALUTATION_FIX_20260819
+function normalizeRecipientNamePart(value: unknown) {
+  return String(value ?? '')
+    .trim()
+    .replace(/^(?:herrn?|frau|firma)(?:[\s,.:;-]+|$)/i, '')
+    .trim();
+}
+
+function normalizeRecipientFormOfAddress(value: unknown) {
+  const source = String(value ?? '').trim();
+  const normalized = source.toLocaleLowerCase('de-CH');
+
+  if (!source || normalized === 'keine anrede' || normalized === 'ohne anrede') return '';
+  if (normalized === 'herr' || normalized === 'herrn') return 'Herr';
+  if (normalized === 'frau') return 'Frau';
+  if (normalized === 'firma') return 'Firma';
+  return source;
+}
+
 function getInvoiceRecipientEditor(invoice?: InvoiceRow | null) {
   const client =
     invoice?.client_snapshot &&
@@ -415,12 +434,12 @@ function getInvoiceRecipientEditor(invoice?: InvoiceRow | null) {
     'billing_name',
   ]);
 
-  const explicitName = snapshotValue(client, [
+  const explicitName = normalizeRecipientNamePart(snapshotValue(client, [
     'contact_name',
     'contact_person',
     'full_name',
     'name',
-  ]).replace(/^(Herr|Frau|Firma)\s+/i, '');
+  ]));
 
   const nameParts = explicitName.split(/\s+/).filter(Boolean);
 
@@ -474,23 +493,23 @@ function getInvoiceRecipientEditor(invoice?: InvoiceRow | null) {
     snapshotValue(site, ['country']) ||
     'Schweiz';
 
-  const formOfAddress = metadataField(
+  const formOfAddress = normalizeRecipientFormOfAddress(metadataField(
     invoice,
     'invoice_recipient_form_of_address',
     metadataField(invoice, 'offer_recipient_form_of_address', snapshotFormOfAddress),
-  );
+  ));
 
-  const firstName = metadataField(
+  const firstName = normalizeRecipientNamePart(metadataField(
     invoice,
     'invoice_recipient_first_name',
     metadataField(invoice, 'offer_recipient_first_name', snapshotFirstName),
-  );
+  ));
 
-  const lastName = metadataField(
+  const lastName = normalizeRecipientNamePart(metadataField(
     invoice,
     'invoice_recipient_last_name',
     metadataField(invoice, 'offer_recipient_last_name', snapshotLastName),
-  );
+  ));
 
   const resolvedCompanyName = metadataField(
     invoice,
@@ -527,9 +546,9 @@ function getInvoiceRecipientEditor(invoice?: InvoiceRow | null) {
 
   let salutationLine = 'Sehr geehrte Damen und Herren';
 
-  if (normalizedForm.includes('herr')) {
+  if (normalizedForm === 'herr' && lastNameForGreeting) {
     salutationLine = `Sehr geehrter Herr ${lastNameForGreeting}`.trim();
-  } else if (normalizedForm.includes('frau')) {
+  } else if (normalizedForm === 'frau' && lastNameForGreeting) {
     salutationLine = `Sehr geehrte Frau ${lastNameForGreeting}`.trim();
   } else if (resolvedCompanyName) {
     salutationLine = 'Sehr geehrte Damen und Herren';
@@ -1499,23 +1518,22 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
             <div style={fieldGridStyle} className="opc-invoice-field-grid">
               <Field label="Anrede">
-                <input
-                  list="opc-invoice-recipient-salutations"
-                  value={recipientEditor.formOfAddress}
-                  onChange={(event) =>
+                <select
+                  value={normalizeRecipientFormOfAddress(recipientEditor.formOfAddress)}
+                  onChange={(event) => {
                     updateInvoiceMetadata(
                       'invoice_recipient_form_of_address',
                       event.target.value,
-                    )
-                  }
-                  style={inputStyle}
-                  placeholder="Herr, Frau oder Firma"
-                />
-                <datalist id="opc-invoice-recipient-salutations">
-                  <option value="Herr" />
-                  <option value="Frau" />
-                  <option value="Firma" />
-                </datalist>
+                    );
+                    updateInvoiceMetadata('invoice_salutation', '');
+                  }}
+                  style={opcSelectStyle}
+                >
+                  <option value="">Keine Anrede</option>
+                  <option value="Herr">Herr</option>
+                  <option value="Frau">Frau</option>
+                  <option value="Firma">Firma</option>
+                </select>
               </Field>
 
               <Field label="Vorname">

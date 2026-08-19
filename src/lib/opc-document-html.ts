@@ -226,6 +226,24 @@ function getQuoteSnapshot(invoice: any) {
   return asObject(invoice?.quote_snapshot);
 }
 
+// OPC_RECIPIENT_SALUTATION_FIX_20260819
+function normalizeRecipientNamePart(value: unknown) {
+  return clean(value)
+    .replace(/^(?:herrn?|frau|firma)(?:[\s,.:;-]+|$)/i, '')
+    .trim();
+}
+
+function normalizeRecipientFormOfAddress(value: unknown) {
+  const source = clean(value);
+  const normalized = source.toLocaleLowerCase('de-CH');
+
+  if (!source || normalized === 'keine anrede' || normalized === 'ohne anrede') return '';
+  if (normalized === 'herr' || normalized === 'herrn') return 'Herr';
+  if (normalized === 'frau') return 'Frau';
+  if (normalized === 'firma') return 'Firma';
+  return source;
+}
+
 function buildRecipient(
   client?: OPCDocumentParty,
   site?: OPCDocumentParty,
@@ -242,27 +260,27 @@ function buildRecipient(
     hasOverride(key) ? clean(overrideRecord[key]) : fallback;
 
   const snapshotCompanyName = pick(clientRecord, ['company_name', 'business_name']);
-  const snapshotFirstName = pick(clientRecord, ['first_name', 'firstname']);
-  const snapshotLastName = pick(clientRecord, ['last_name', 'lastname']);
-  const explicitName = pick(clientRecord, ['contact_name', 'full_name', 'billing_name', 'name']);
+  const snapshotFirstName = normalizeRecipientNamePart(pick(clientRecord, ['first_name', 'firstname']));
+  const snapshotLastName = normalizeRecipientNamePart(pick(clientRecord, ['last_name', 'lastname']));
+  const explicitName = normalizeRecipientNamePart(pick(clientRecord, ['contact_name', 'full_name', 'billing_name', 'name']));
   const explicitNameParts = explicitName.split(/\s+/).filter(Boolean);
 
   const companyName = overrideValue('offer_recipient_company_name', snapshotCompanyName);
-  const firstName = overrideValue(
+  const firstName = normalizeRecipientNamePart(overrideValue(
     'offer_recipient_first_name',
     snapshotFirstName || (explicitNameParts.length > 1 ? explicitNameParts[0] : ''),
-  );
-  const lastName = overrideValue(
+  ));
+  const lastName = normalizeRecipientNamePart(overrideValue(
     'offer_recipient_last_name',
     snapshotLastName || (explicitNameParts.length > 1 ? explicitNameParts.slice(1).join(' ') : explicitName),
-  );
+  ));
   const personName = [firstName, lastName].filter(Boolean).join(' ');
 
   const snapshotFormOfAddress = pick(clientRecord, ['salutation', 'anrede', 'form_of_address']);
-  const formOfAddress = overrideValue(
+  const formOfAddress = normalizeRecipientFormOfAddress(overrideValue(
     'offer_recipient_form_of_address',
     snapshotFormOfAddress,
-  );
+  ));
 
   const rawAddress =
     pick(clientRecord, ['billing_address', 'address_text', 'address_line_1', 'street', 'address']) ||
@@ -322,7 +340,14 @@ function buildRecipient(
   const countryCode =
     pick(clientRecord, ['country_code']) || pick(siteRecord, ['country_code']) || normalizeCountryCode(country);
 
-  const personLine = [formOfAddress, personName].filter(Boolean).join(' ').trim();
+  const salutationLower = formOfAddress.toLocaleLowerCase('de-CH');
+  const personPrefix =
+    salutationLower === 'herr' || salutationLower === 'frau'
+      ? formOfAddress
+      : '';
+  const personLine = personName
+    ? [personPrefix, personName].filter(Boolean).join(' ').trim()
+    : '';
   const cityLine = [postalCode, city].filter(Boolean).join(' ');
   const addressLines = unique([
     companyName,
@@ -332,12 +357,11 @@ function buildRecipient(
     country,
   ]);
 
-  const salutationLower = formOfAddress.toLocaleLowerCase('de-CH');
   let salutationLine = 'Sehr geehrte Damen und Herren';
-  if (salutationLower.includes('herr')) {
-    salutationLine = `Sehr geehrter Herr ${lastName || personName}`.trim();
-  } else if (salutationLower.includes('frau')) {
-    salutationLine = `Sehr geehrte Frau ${lastName || personName}`.trim();
+  if (salutationLower === 'herr' && (lastName || personName)) {
+    salutationLine = `Sehr geehrter Herr ${lastName || personName}`;
+  } else if (salutationLower === 'frau' && (lastName || personName)) {
+    salutationLine = `Sehr geehrte Frau ${lastName || personName}`;
   }
 
   return {
@@ -353,7 +377,9 @@ function buildRecipient(
     countryCode,
     addressLines,
     salutationLine,
-    fullName: personName || companyName,
+    fullName: (salutationLower === 'firma' || (!salutationLower && companyName))
+      ? (companyName || personName)
+      : (personName || companyName),
   };
 }
 
