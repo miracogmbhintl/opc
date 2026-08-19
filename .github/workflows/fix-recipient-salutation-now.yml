@@ -32,11 +32,10 @@ jobs:
       - name: Apply recipient repair
         run: python3 .github/scripts/fix-recipient-salutation.py
 
-      - name: Validate diff
+      - name: Validate source
         shell: bash
         run: |
           git diff --check
-          git diff --stat
           grep -n "OPC_RECIPIENT_SALUTATION_FIX_20260819" \
             src/components/InvoiceDetailPage.tsx \
             src/lib/opc-document-html.ts \
@@ -54,7 +53,7 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Commit and push repair
+      - name: Commit repair when needed
         shell: bash
         run: |
           git config user.name "OPC Release Bot"
@@ -63,8 +62,12 @@ jobs:
             src/components/InvoiceDetailPage.tsx \
             src/lib/opc-document-html.ts \
             src/lib/opc-document-pdf.ts
-          git commit -m "Fix recipient salutation and company printing"
-          git push origin HEAD:main
+          if ! git diff --cached --quiet; then
+            git commit -m "Fix recipient salutation and company printing"
+            git push origin HEAD:main
+          else
+            echo "Recipient repair already committed."
+          fi
 
       - name: Validate Cloudflare credentials
         shell: bash
@@ -72,5 +75,22 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID"; exit 1; }
 
-      - name: Deploy portal to Cloudflare Pages
-        run: npx wrangler pages deploy dist --project-name opc --branch main
+      - name: Deploy portal and record result
+        shell: bash
+        run: |
+          set -o pipefail
+          DEPLOY_OUTPUT="$(npx wrangler pages deploy dist --project-name opc --branch main 2>&1)"
+          printf '%s\n' "$DEPLOY_OUTPUT"
+          DEPLOY_URL="$(printf '%s\n' "$DEPLOY_OUTPUT" | grep -Eo 'https://[A-Za-z0-9.-]+\.pages\.dev' | tail -1)"
+          test -n "$DEPLOY_URL" || { echo "Cloudflare deployment URL not found in Wrangler output."; exit 1; }
+
+          mkdir -p .github/deployments
+          printf 'source_commit=%s\ndeployment_url=%s\ndeployed_at=%s\n' \
+            "$(git rev-parse HEAD)" \
+            "$DEPLOY_URL" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > .github/deployments/recipient-salutation-latest.txt
+
+          git add .github/deployments/recipient-salutation-latest.txt
+          git commit -m "Record recipient salutation deployment"
+          git push origin HEAD:main
