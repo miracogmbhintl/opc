@@ -82,7 +82,23 @@ function getMetadata(row?: InvoiceRow | InvoiceItem | null) {
 
 function getInvoiceScope(invoice?: InvoiceRow | null) {
   const metadata = getMetadata(invoice);
-  return clean(metadata.invoice_scope_text) || clean(metadata.source_quote_scope_text) || clean(metadata.source_quote_service_description_text);
+
+  // OPC_INVOICE_EDITOR_V2_EXPLICIT_EMPTY_20260819
+  // A present invoice_scope_text is authoritative, including an intentional ''.
+  if (Object.prototype.hasOwnProperty.call(metadata, 'invoice_scope_text')) {
+    const value = metadata.invoice_scope_text;
+    return value === null || value === undefined ? '' : String(value);
+  }
+
+  // Legacy invoices may still inherit content from the source quote.
+  for (const key of ['source_quote_scope_text', 'source_quote_service_description_text']) {
+    const value = metadata[key];
+    if (value !== null && value !== undefined && String(value).trim()) {
+      return String(value);
+    }
+  }
+
+  return '';
 }
 
 function getGreeting(invoice?: InvoiceRow | null) {
@@ -137,6 +153,16 @@ const LEGACY_INVOICE_INTRO_TEXTS =
     'Danke für Ihr Vertrauen. Ihre Rechnung setzt sich wie folgt zusammen:',
     'Ihre Rechnung setzt sich wie folgt zusammen:',
   ]);
+
+const INVOICE_EDITOR_VERSION = 2;
+
+function rawInvoiceText(value: unknown) {
+  return value === null || value === undefined ? '' : String(value);
+}
+
+function usesExplicitInvoiceText(invoice?: InvoiceRow | null) {
+  return Number(getMetadata(invoice).invoice_editor_version || 0) >= INVOICE_EDITOR_VERSION;
+}
 
 function invoiceSnapshotObject(
   value: unknown,
@@ -268,58 +294,39 @@ function resolveInvoiceIntro(
   invoice: InvoiceRow,
   invoiceItems: InvoiceItem[],
 ) {
-  const currentIntro =
-    clean(invoice.intro_text);
-
-  if (
-    !currentIntro ||
-    LEGACY_INVOICE_INTRO_TEXTS.has(
-      currentIntro,
-    )
-  ) {
-    return buildDefaultInvoiceIntro(
-      invoice,
-      invoiceItems,
-    );
+  if (usesExplicitInvoiceText(invoice)) {
+    return rawInvoiceText(invoice.intro_text);
   }
 
-  return currentIntro;
+  const currentIntro = clean(invoice.intro_text);
+
+  if (!currentIntro || LEGACY_INVOICE_INTRO_TEXTS.has(currentIntro)) {
+    return buildDefaultInvoiceIntro(invoice, invoiceItems);
+  }
+
+  return rawInvoiceText(invoice.intro_text);
 }
 
 function buildInvoiceClosingText(
   invoice: InvoiceRow,
 ) {
-  const metadata =
-    getMetadata(invoice);
+  const metadata = getMetadata(invoice);
 
-  const combined = clean(
-    metadata.invoice_closing_text,
-  );
-
-  if (combined) {
-    return combined;
+  if (
+    usesExplicitInvoiceText(invoice) &&
+    Object.prototype.hasOwnProperty.call(metadata, 'invoice_closing_text')
+  ) {
+    return rawInvoiceText(metadata.invoice_closing_text);
   }
 
-  const closingParagraph = clean(
-    metadata.invoice_closing_paragraph,
-  ) ||
-    'Bei Fragen stehen wir Ihnen gerne zur Verfügung.';
-
-  const closingGreeting = clean(
-    metadata.invoice_closing,
-  ) ||
-    'Freundliche Grüsse';
-
-  const company = clean(
-    metadata.invoice_signatory_company,
-  ) ||
-    'Orange Pro Clean GmbH';
+  const combined = clean(metadata.invoice_closing_text);
+  if (combined) return rawInvoiceText(metadata.invoice_closing_text);
 
   return [
-    closingParagraph,
+    clean(metadata.invoice_closing_paragraph) || 'Bei Fragen stehen wir Ihnen gerne zur Verfügung.',
     '',
-    closingGreeting,
-    company,
+    clean(metadata.invoice_closing) || 'Freundliche Grüsse',
+    clean(metadata.invoice_signatory_company) || 'Orange Pro Clean GmbH',
   ].join('\n');
 }
 
@@ -679,24 +686,29 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
       const existingMetadata =
         getMetadata(row);
 
+      const explicitTextMode = usesExplicitInvoiceText(row);
+
       const normalizedInvoice = {
         ...row,
-        issue_date:
-          isoDate(row.issue_date),
-        due_date:
-          isoDate(row.due_date),
+        issue_date: isoDate(row.issue_date),
+        due_date: isoDate(row.due_date),
         intro_text:
-          resolveInvoiceIntro(
-            row,
-            loadedItems,
-          ),
+          explicitTextMode
+            ? rawInvoiceText(row.intro_text)
+            : resolveInvoiceIntro(row, loadedItems),
         payment_terms:
-          clean(row.payment_terms) ||
-          DEFAULT_INVOICE_PAYMENT_TERMS,
+          explicitTextMode
+            ? rawInvoiceText(row.payment_terms)
+            : (clean(row.payment_terms) || DEFAULT_INVOICE_PAYMENT_TERMS),
         metadata: {
           ...existingMetadata,
           invoice_closing_text:
-            buildInvoiceClosingText(row),
+            (
+              explicitTextMode &&
+              Object.prototype.hasOwnProperty.call(existingMetadata, 'invoice_closing_text')
+            )
+              ? rawInvoiceText(existingMetadata.invoice_closing_text)
+              : buildInvoiceClosingText(row),
         },
       };
 
@@ -820,8 +832,8 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         title: clean(invoice.title) || 'Rechnung',
         issue_date: isoDate(invoice.issue_date) || new Date().toISOString().slice(0, 10),
         due_date: isoDate(invoice.due_date) || null,
-        intro_text: invoice.intro_text || null,
-        payment_terms: invoice.payment_terms || null,
+        intro_text: rawInvoiceText(invoice.intro_text),
+        payment_terms: rawInvoiceText(invoice.payment_terms),
         internal_notes: invoice.internal_notes || null,
         discount_chf: roundMoney(totals.discount),
         tax_rate: roundMoney(totals.taxRate),
@@ -835,6 +847,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         updated_at: new Date().toISOString(),
         metadata: {
           ...getMetadata(invoice),
+          invoice_editor_version: INVOICE_EDITOR_VERSION,
           unrounded_total_chf: roundMoney(totals.unroundedTotal),
           rounding_difference_chf: roundMoney(totals.rounding),
           cash_rounding_increment_chf: 0.05,
@@ -1706,13 +1719,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
             >
               <TextArea
                 label="Einleitung"
-                value={
-                  invoice.intro_text ||
-                  buildDefaultInvoiceIntro(
-                    invoice,
-                    items,
-                  )
-                }
+                value={rawInvoiceText(invoice.intro_text)}
                 onChange={(value) =>
                   updateInvoiceField(
                     'intro_text',
@@ -1736,10 +1743,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
               <TextArea
                 label="Zahlungsbedingungen"
-                value={
-                  invoice.payment_terms ||
-                  DEFAULT_INVOICE_PAYMENT_TERMS
-                }
+                value={rawInvoiceText(invoice.payment_terms)}
                 onChange={(value) =>
                   updateInvoiceField(
                     'payment_terms',
@@ -2048,127 +2052,121 @@ function TextArea({
   value,
   onChange,
   wide = false,
-  rows = 5,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   wide?: boolean;
-  rows?: number;
 }) {
-  const textareaRef =
-    useRef<HTMLTextAreaElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  function formatSelectedLines(
-    mode: 'bullet' | 'plain',
-  ) {
-    const textarea = textareaRef.current;
-
-    if (!textarea) return;
-
-    const selectionStart =
-      textarea.selectionStart ?? 0;
-
-    const selectionEnd =
-      textarea.selectionEnd ?? selectionStart;
-
-    const lineStart =
-      value.lastIndexOf(
-        '\n',
-        Math.max(0, selectionStart - 1),
-      ) + 1;
-
-    const nextBreak =
-      value.indexOf('\n', selectionEnd);
-
-    const lineEnd =
-      nextBreak === -1
-        ? value.length
-        : nextBreak;
-
-    const selectedBlock =
-      value.slice(lineStart, lineEnd);
-
-    const sourceLines =
-      selectedBlock
-        ? selectedBlock.split('\n')
-        : [''];
-
-    const formattedLines =
-      sourceLines.map((line) => {
-        const plainLine = line.replace(
-          /^\s*[•*-]\s*/,
-          '',
-        );
-
-        return mode === 'bullet'
-          ? `• ${plainLine}`
-          : plainLine;
-      });
-
-    const replacement =
-      formattedLines.join('\n');
-
-    const nextValue =
-      `${value.slice(0, lineStart)}` +
-      `${replacement}` +
-      `${value.slice(lineEnd)}`;
-
-    onChange(nextValue);
-
+  function restoreSelection(start: number, end: number) {
     requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
       textarea.focus();
-
-      textarea.setSelectionRange(
-        lineStart,
-        lineStart + replacement.length,
-      );
+      textarea.setSelectionRange(start, end);
     });
   }
 
+  function formatSelectedLines(mode: 'bullet' | 'plain' | 'heading') {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    const lineStart = value.lastIndexOf('\n', Math.max(0, selectionStart - 1)) + 1;
+    const nextBreak = value.indexOf('\n', selectionEnd);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    const selectedBlock = value.slice(lineStart, lineEnd);
+    const sourceLines = selectedBlock ? selectedBlock.split('\n') : [''];
+
+    const formattedLines = sourceLines.map((line) => {
+      const plainLine = line
+        .replace(/^\s*(?:[•*-]\s+|#{1,3}\s+)/, '')
+        .trimEnd();
+
+      if (mode === 'bullet') return `• ${plainLine}`;
+      if (mode === 'heading') return `## ${plainLine}`;
+      return plainLine;
+    });
+
+    const replacement = formattedLines.join('\n');
+    const nextValue = `${value.slice(0, lineStart)}${replacement}${value.slice(lineEnd)}`;
+
+    onChange(nextValue);
+    restoreSelection(lineStart, lineStart + replacement.length);
+  }
+
+  function formatBold() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? start;
+    const selected = value.slice(start, end);
+    const replacement = selected ? `**${selected}**` : '****';
+    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+
+    onChange(nextValue);
+
+    if (selected) {
+      restoreSelection(start, start + replacement.length);
+    } else {
+      restoreSelection(start + 2, start + 2);
+    }
+  }
+
+  function insertParagraphSpacing() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart ?? value.length;
+    const end = textarea.selectionEnd ?? start;
+    const replacement = '\n\n';
+    const nextValue = `${value.slice(0, start)}${replacement}${value.slice(end)}`;
+
+    onChange(nextValue);
+    restoreSelection(start + replacement.length, start + replacement.length);
+  }
+
+  const preventToolbarBlur = (event: any) => {
+    event.preventDefault();
+  };
+
   return (
-    <label
-      style={
-        wide
-          ? { gridColumn: '1 / -1' }
-          : undefined
-      }
-    >
-      <span style={labelStyle}>
-        {label}
-      </span>
+    <label style={wide ? { gridColumn: '1 / -1' } : undefined}>
+      <span style={labelStyle}>{label}</span>
 
       <div style={editorToolbarStyle}>
-        <button
-          type="button"
-          onClick={() =>
-            formatSelectedLines('bullet')
-          }
-          style={editorToolButtonStyle}
-        >
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={() => formatSelectedLines('heading')} style={editorToolButtonStyle}>
+          Überschrift
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={formatBold} style={editorToolButtonStyle}>
+          Fett
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={() => formatSelectedLines('bullet')} style={editorToolButtonStyle}>
           • Aufzählung
         </button>
-
-        <button
-          type="button"
-          onClick={() =>
-            formatSelectedLines('plain')
-          }
-          style={editorToolButtonStyle}
-        >
-          Text
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={() => formatSelectedLines('plain')} style={editorToolButtonStyle}>
+          Normaler Text
+        </button>
+        <button type="button" onMouseDown={preventToolbarBlur} onClick={insertParagraphSpacing} style={editorToolButtonStyle}>
+          Absatzabstand
         </button>
       </div>
 
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(event) =>
-          onChange(event.target.value)
-        }
-        rows={rows}
+        onChange={(event) => onChange(event.target.value)}
+        rows={wide ? 12 : 8}
         style={textareaStyle}
       />
+
+      <span style={editorHintStyle}>
+        Leerzeilen bleiben im PDF erhalten. Überschriften und markierter fetter Text werden ebenfalls übernommen.
+      </span>
     </label>
   );
 }
@@ -2219,6 +2217,14 @@ const editorToolButtonStyle: CSSProperties = {
   fontSize: 12,
   fontWeight: 760,
   cursor: 'pointer',
+};
+
+const editorHintStyle: CSSProperties = {
+  display: 'block',
+  marginTop: 7,
+  color: OPC_BRAND.muted,
+  fontSize: 11,
+  lineHeight: 1.4,
 };
 
 const clientHeroLinkStyle: CSSProperties = {

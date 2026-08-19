@@ -42,6 +42,7 @@ type FormState = {
   dueDate: string;
   itemTitle: string;
   description: string;
+  serviceDescription: string;
   quantity: string;
   unit: string;
   unitPrice: string;
@@ -50,6 +51,7 @@ type FormState = {
   paid: string;
   introText: string;
   paymentTerms: string;
+  closingText: string;
   internalNotes: string;
 };
 
@@ -96,6 +98,17 @@ const textareaStyle: CSSProperties = {
   resize: 'vertical',
   lineHeight: 1.45,
 };
+
+// OPC_NEW_INVOICE_EDITOR_V2_20260819
+const DEFAULT_INVOICE_PAYMENT_TERMS =
+  'Bitte begleichen Sie den Rechnungsbetrag innerhalb von 10 Tagen ab Rechnungsdatum. ' +
+  'Der dazugehörige QR-Zahlteil befindet sich auf der letzten Seite. ' +
+  'Die Verrechnung erfolgt auf Grundlage des bestätigten Auftrags und des vereinbarten Leistungsumfangs.';
+
+const DEFAULT_INVOICE_CLOSING_TEXT =
+  'Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\n' +
+  'Freundliche Grüsse\n' +
+  'Orange Pro Clean GmbH';
 
 function todayInput() {
   const date = new Date();
@@ -180,7 +193,7 @@ function AdvancedTextArea({
     useRef<HTMLTextAreaElement | null>(null);
 
   function formatSelectedLines(
-    mode: 'bullet' | 'plain',
+    mode: 'bullet' | 'plain' | 'heading',
   ) {
     const textarea = textareaRef.current;
 
@@ -221,9 +234,9 @@ function AdvancedTextArea({
           '',
         );
 
-        return mode === 'bullet'
-          ? `• ${plain}`
-          : plain;
+        if (mode === 'bullet') return `• ${plain}`;
+        if (mode === 'heading') return `## ${plain}`;
+        return plain;
       })
       .join('\n');
 
@@ -261,6 +274,58 @@ function AdvancedTextArea({
       >
         <button
           type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => formatSelectedLines('heading')}
+          style={{
+            border: `1px solid ${BRAND.border}`,
+            background: '#FFFFFF',
+            color: BRAND.text,
+            borderRadius: 9,
+            padding: '6px 9px',
+            fontSize: 12,
+            fontWeight: 760,
+            cursor: 'pointer',
+          }}
+        >
+          Überschrift
+        </button>
+
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const textarea = textareaRef.current;
+            if (!textarea) return;
+            const start = textarea.selectionStart ?? 0;
+            const end = textarea.selectionEnd ?? start;
+            const selected = value.slice(start, end);
+            const replacement = selected ? `**${selected}**` : '****';
+            onChange(`${value.slice(0, start)}${replacement}${value.slice(end)}`);
+            requestAnimationFrame(() => {
+              textarea.focus();
+              if (selected) {
+                textarea.setSelectionRange(start, start + replacement.length);
+              } else {
+                textarea.setSelectionRange(start + 2, start + 2);
+              }
+            });
+          }}
+          style={{
+            border: `1px solid ${BRAND.border}`,
+            background: '#FFFFFF',
+            color: BRAND.text,
+            borderRadius: 9,
+            padding: '6px 9px',
+            fontSize: 12,
+            fontWeight: 760,
+            cursor: 'pointer',
+          }}
+        >
+          Fett
+        </button>
+
+        <button
+          type="button"
           onClick={() =>
             formatSelectedLines('bullet')
           }
@@ -294,7 +359,35 @@ function AdvancedTextArea({
             cursor: 'pointer',
           }}
         >
-          Text
+          Normaler Text
+        </button>
+
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const textarea = textareaRef.current;
+            if (!textarea) return;
+            const start = textarea.selectionStart ?? value.length;
+            const end = textarea.selectionEnd ?? start;
+            onChange(`${value.slice(0, start)}\n\n${value.slice(end)}`);
+            requestAnimationFrame(() => {
+              textarea.focus();
+              textarea.setSelectionRange(start + 2, start + 2);
+            });
+          }}
+          style={{
+            border: `1px solid ${BRAND.border}`,
+            background: '#FFFFFF',
+            color: BRAND.text,
+            borderRadius: 9,
+            padding: '6px 9px',
+            fontSize: 12,
+            fontWeight: 760,
+            cursor: 'pointer',
+          }}
+        >
+          Absatzabstand
         </button>
       </div>
 
@@ -307,6 +400,10 @@ function AdvancedTextArea({
         rows={rows}
         style={textareaStyle}
       />
+
+      <span style={{ display: 'block', marginTop: 7, color: BRAND.muted, fontSize: 11, lineHeight: 1.4 }}>
+        Leerzeilen, Überschriften, Aufzählungen und fett markierter Text werden im Rechnungs-PDF übernommen. Das Feld darf leer bleiben.
+      </span>
     </div>
   );
 }
@@ -323,14 +420,16 @@ export default function NewInvoicePage() {
     dueDate: addDays(todayInput(), 10),
     itemTitle: 'Neue Position',
     description: '',
+    serviceDescription: '',
     quantity: '1',
     unit: 'pauschal',
     unitPrice: '0',
     discount: '0',
     taxRate: '8.1',
     paid: '0',
-    introText: 'Danke für Ihr Vertrauen. Ihre Rechnung setzt sich wie folgt zusammen:',
-    paymentTerms: 'Zahlbar gemäss Vereinbarung.',
+    introText: 'Vielen Dank für Ihren Auftrag. Nachfolgend stellen wir Ihnen hiermit die Ausführung der vereinbarten Reinigungsleistung in Rechnung.',
+    paymentTerms: DEFAULT_INVOICE_PAYMENT_TERMS,
+    closingText: DEFAULT_INVOICE_CLOSING_TEXT,
     internalNotes: '',
   }));
   const [clients, setClients] = useState<ClientOption[]>([]);
@@ -429,6 +528,14 @@ export default function NewInvoicePage() {
       const quote = quoteResponse.data as QuoteRow | null;
       const item = ((itemsResponse.data || []) as QuoteItem[])[0] || null;
       if (!quote) return;
+      const sourceServiceDescription = [
+        quote.service_description_text,
+        quote.scope_text,
+      ]
+        .filter((value) => value !== null && value !== undefined && String(value).trim())
+        .map((value) => String(value))
+        .join('\n\n');
+
       setForm((current) => ({
         ...current,
         quoteId,
@@ -436,12 +543,19 @@ export default function NewInvoicePage() {
         clientSiteId: quote.client_site_id || current.clientSiteId,
         title: `Rechnung zu ${quote.quote_number || quote.title || 'Offerte'}`,
         itemTitle: clean(item?.title) || clean(quote.title) || 'Position',
-        description: clean(item?.description) || clean(quote.scope_text) || clean(quote.service_description_text),
+        description:
+          item?.description === null || item?.description === undefined
+            ? ''
+            : String(item.description),
+        serviceDescription: sourceServiceDescription,
         quantity: String(item?.quantity || 1),
         unit: item?.unit || 'pauschal',
         unitPrice: String(item?.unit_price_chf || quote.subtotal_chf || 0),
         taxRate: String(item?.tax_rate || quote.tax_rate || 8.1),
-        paymentTerms: quote.payment_terms || current.paymentTerms,
+        paymentTerms:
+          quote.payment_terms === null || quote.payment_terms === undefined
+            ? current.paymentTerms
+            : String(quote.payment_terms),
       }));
     } catch (error: any) {
       setErrorMessage(error?.message || 'Offerte konnte nicht für Rechnung übernommen werden.');
@@ -506,8 +620,8 @@ export default function NewInvoicePage() {
         due_date: form.dueDate || null,
         client_snapshot: clientSnapshot,
         site_snapshot: siteSnapshot,
-        intro_text: form.introText || null,
-        payment_terms: form.paymentTerms || null,
+        intro_text: form.introText,
+        payment_terms: form.paymentTerms,
         internal_notes: form.internalNotes || null,
         subtotal_chf: roundMoney(totals.subtotal),
         discount_chf: roundMoney(totals.discount),
@@ -519,7 +633,9 @@ export default function NewInvoicePage() {
         metadata: {
           created_from: 'rechnung_neu_page',
           source_quote_id: form.quoteId || null,
-          invoice_scope_text: form.description,
+          invoice_editor_version: 2,
+          invoice_scope_text: form.serviceDescription,
+          invoice_closing_text: form.closingText,
         },
       };
 
@@ -558,7 +674,7 @@ export default function NewInvoicePage() {
   }
 
   return (
-    <MirakaDashboardShell requiredRole={['owner', 'admin', 'dispatch']} currentPath="/rechnung/neu" fullWidth hideTopBar>
+    <MirakaDashboardShell requiredRole={['owner']} currentPath="/rechnung/neu" fullWidth hideTopBar>
       <OPCPageShell>
         <form onSubmit={handleSubmit} className="opc-new-doc-page" style={{ fontFamily: pageFont }}>
           <div className="opc-new-doc-topbar">
@@ -616,7 +732,7 @@ export default function NewInvoicePage() {
             </div>
             <div className="opc-grid two"><div><Label>Bezahlt CHF</Label><input value={form.paid} onChange={(event) => update('paid', event.target.value)} inputMode="decimal" style={inputStyle} /></div></div>
             <AdvancedTextArea
-              label="Leistungsumfang / Rechnungstext"
+              label="Beschreibung / Zusatztext der Position (optional)"
               value={form.description}
               onChange={(value) =>
                 update('description', value)
@@ -636,11 +752,29 @@ export default function NewInvoicePage() {
               />
 
               <AdvancedTextArea
+                label="Leistungsbeschreibung"
+                value={form.serviceDescription}
+                onChange={(value) =>
+                  update('serviceDescription', value)
+                }
+                wide
+              />
+
+              <AdvancedTextArea
                 label="Zahlungsbedingungen"
                 value={form.paymentTerms}
                 onChange={(value) =>
                   update('paymentTerms', value)
                 }
+              />
+
+              <AdvancedTextArea
+                label="Schlussteil"
+                value={form.closingText}
+                onChange={(value) =>
+                  update('closingText', value)
+                }
+                wide
               />
 
               <AdvancedTextArea

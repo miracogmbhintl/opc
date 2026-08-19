@@ -477,8 +477,10 @@ function mapItems(items: OPCDocumentItem[]) {
   return items.map((item, index) => {
     const positionTitle = itemPositionTitle(item);
 
-    const details = documentLines(item.description).filter(
-      (description) => clean(description) !== clean(positionTitle),
+    const details = richDocumentLines(item.description).filter(
+      (description) =>
+        description === OPC_DOCUMENT_SPACER ||
+        clean(description) !== clean(positionTitle),
     );
 
     return {
@@ -894,16 +896,22 @@ function buildInvoiceData(input: OPCInvoicePdfInput) {
     `die Ausführung der ${serviceTitle} ${objectPhrase}${addressFragment}, ` +
     `in Rechnung.`;
 
-  const configuredIntro = paragraphs(invoice.intro_text);
-  const invoiceTypeParagraphs = documentLines(metadata.invoice_type_text);
+  // OPC_INVOICE_RICH_TEXT_V2_20260819
+  const explicitEditor = Number(metadata.invoice_editor_version || 0) >= 2;
+  const configuredIntro = richDocumentLines(invoice.intro_text);
+  const invoiceTypeParagraphs = richDocumentLines(metadata.invoice_type_text);
 
-  const serviceDescriptionParagraphs = documentLines(
-    metadata.invoice_scope_text ||
-      metadata.source_quote_scope_text ||
-      metadata.source_quote_service_description_text,
-  );
+  const scopeSource =
+    Object.prototype.hasOwnProperty.call(metadata, 'invoice_scope_text')
+      ? String(metadata.invoice_scope_text ?? '')
+      : String(
+          metadata.source_quote_scope_text ??
+          metadata.source_quote_service_description_text ??
+          '',
+        );
 
-  const paymentParagraphs = paragraphs(invoice.payment_terms);
+  const serviceDescriptionParagraphs = richDocumentLines(scopeSource);
+  const paymentParagraphs = richDocumentLines(invoice.payment_terms);
 
   const defaultPaymentParagraph =
     'Bitte begleichen Sie den Rechnungsbetrag innerhalb von 10 Tagen ' +
@@ -911,74 +919,66 @@ function buildInvoiceData(input: OPCInvoicePdfInput) {
     'der letzten Seite. Die Verrechnung erfolgt auf Grundlage des ' +
     'bestätigten Auftrags und des vereinbarten Leistungsumfangs.';
 
-  // OPC_INVOICE_COMBINED_CLOSING_20260702
   const legacyClosingText = [
-    clean(metadata.invoice_closing_paragraph) ||
-      'Bei Fragen stehen wir Ihnen gerne zur Verfügung.',
+    clean(metadata.invoice_closing_paragraph) || 'Bei Fragen stehen wir Ihnen gerne zur Verfügung.',
     '',
-    clean(metadata.invoice_closing) ||
-      'Freundliche Grüsse',
-    clean(metadata.invoice_signatory_company) ||
-      TEMPLATE_COMPANY.name,
+    clean(metadata.invoice_closing) || 'Freundliche Grüsse',
+    clean(metadata.invoice_signatory_company) || TEMPLATE_COMPANY.name,
   ].join('\n');
 
   const combinedClosingText =
-    clean(metadata.invoice_closing_text) ||
-    legacyClosingText;
+    Object.prototype.hasOwnProperty.call(metadata, 'invoice_closing_text')
+      ? String(metadata.invoice_closing_text ?? '')
+      : legacyClosingText;
 
-  const closingBlocks =
-    combinedClosingText
+  let afterTableParagraphs: string[] = [];
+  let closingGreeting = '';
+  let closingCompany = '';
+
+  if (explicitEditor) {
+    const closingLines = richDocumentLines(combinedClosingText);
+    afterTableParagraphs = [
+      ...paymentParagraphs,
+      ...(paymentParagraphs.length && closingLines.length ? [OPC_DOCUMENT_SPACER] : []),
+      ...closingLines,
+    ];
+  } else {
+    const effectivePaymentParagraphs =
+      paymentParagraphs.length ? paymentParagraphs : [defaultPaymentParagraph];
+
+    const closingBlocks = clean(combinedClosingText)
       .split(/\n\s*\n/)
-      .map((block) => block.trim())
+      .map((value) => value.trim())
       .filter(Boolean);
 
-  let closingParagraphs: string[] = [];
-  let closingSignatureLines: string[] = [];
+    let closingParagraphs: string[] = [];
+    let closingSignatureLines: string[] = [];
 
-  if (closingBlocks.length >= 2) {
-    closingParagraphs =
-      closingBlocks.slice(0, -1);
-
-    closingSignatureLines =
-      closingBlocks[
-        closingBlocks.length - 1
-      ]
+    if (closingBlocks.length >= 2) {
+      closingParagraphs = closingBlocks.slice(0, -1);
+      closingSignatureLines = closingBlocks[closingBlocks.length - 1]
         .split(/\r?\n/)
-        .map((line) => line.trim())
+        .map((value) => value.trim())
         .filter(Boolean);
-  } else {
-    const allClosingLines =
-      combinedClosingText
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-
-    if (allClosingLines.length >= 3) {
-      closingParagraphs =
-        allClosingLines.slice(0, -2);
-
-      closingSignatureLines =
-        allClosingLines.slice(-2);
     } else {
-      closingParagraphs =
-        allClosingLines;
+      const lines = clean(combinedClosingText)
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .filter(Boolean);
 
-      closingSignatureLines = [
-        'Freundliche Grüsse',
-        TEMPLATE_COMPANY.name,
-      ];
+      if (lines.length >= 3) {
+        closingParagraphs = lines.slice(0, -2);
+        closingSignatureLines = lines.slice(-2);
+      } else {
+        closingParagraphs = lines;
+        closingSignatureLines = ['Freundliche Grüsse', TEMPLATE_COMPANY.name];
+      }
     }
+
+    closingGreeting = closingSignatureLines[0] || 'Freundliche Grüsse';
+    closingCompany = closingSignatureLines.slice(1).join(' ') || TEMPLATE_COMPANY.name;
+    afterTableParagraphs = [...effectivePaymentParagraphs, ...closingParagraphs];
   }
-
-  const closingGreeting =
-    closingSignatureLines[0] ||
-    'Freundliche Grüsse';
-
-  const closingCompany =
-    closingSignatureLines
-      .slice(1)
-      .join(' ') ||
-    TEMPLATE_COMPANY.name;
 
 
   return {
@@ -1019,25 +1019,22 @@ function buildInvoiceData(input: OPCInvoicePdfInput) {
       introParagraphs:
         configuredIntro.length
           ? configuredIntro
-          : [executionParagraph],
-      afterTableParagraphs: [
-        ...(paymentParagraphs.length
-          ? paymentParagraphs
-          : [defaultPaymentParagraph]),
-        ...closingParagraphs,
-      ],
+          : (explicitEditor ? [] : [executionParagraph]),
+      afterTableParagraphs,
       serviceDescriptionTitle:
         'Leistungsbeschreibung',
       serviceDescriptionParagraphs,
       termsParagraphs: [],
       closing:
-        closingGreeting,
-      signatoryName: clean(metadata.invoice_signatory_name),
+        explicitEditor ? '' : closingGreeting,
+      signatoryName:
+        explicitEditor ? '' : clean(metadata.invoice_signatory_name),
       signatoryRole:
-        clean(metadata.invoice_signatory_role) ||
-        signer.role,
+        explicitEditor
+          ? ''
+          : (clean(metadata.invoice_signatory_role) || signer.role),
       signatoryCompany:
-        closingCompany,
+        explicitEditor ? '' : closingCompany,
     },
     invoice: {
       columns: {
