@@ -1,0 +1,6 @@
+source_commit=ed7e0c1e46a9624a8465488a062a1bcca999a6c5
+build_status=success
+cloudflare_credentials=missing
+deploy_status=failed
+deployment_url=
+checked_at=2026-08-19T21:52:54Z
