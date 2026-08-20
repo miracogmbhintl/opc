@@ -93,6 +93,7 @@ function Pill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?
         fontSize: '12px',
         fontWeight: 820,
         alignItems: 'center',
+        whiteSpace: 'nowrap',
       }}
     >
       {children}
@@ -102,9 +103,9 @@ function Pill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?
 
 function EmptyState({ title, text }: { title: string; text: string }) {
   return (
-    <div style={{ ...opcCardStyle, padding: '28px', textAlign: 'center' }}>
-      <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.03em', marginBottom: '8px' }}>{title}</div>
-      <div style={{ color: OPC_BRAND.muted, fontSize: '14px', lineHeight: 1.55 }}>{text}</div>
+    <div style={{ ...opcCardStyle, padding: '22px 24px', textAlign: 'center' }}>
+      <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.03em', marginBottom: '6px' }}>{title}</div>
+      <div style={{ color: OPC_BRAND.muted, fontSize: '14px', lineHeight: 1.45, fontWeight: 620 }}>{text}</div>
     </div>
   );
 }
@@ -169,9 +170,9 @@ export default function OPCFleetMaintenancePage() {
   }, [loadMaintenance]);
 
   const vehicleById = useMemo(() => {
-    const map = new globalThis.Map<string, Vehicle>();
-    vehicles.forEach((vehicle) => map.set(vehicle.id, vehicle));
-    return map;
+    const lookup = new globalThis.Map<string, Vehicle>();
+    vehicles.forEach((vehicle) => lookup.set(vehicle.id, vehicle));
+    return lookup;
   }, [vehicles]);
 
   const dueComponents = useMemo(
@@ -189,12 +190,15 @@ export default function OPCFleetMaintenancePage() {
     [dtcs]
   );
 
-  const healthyVehicles = useMemo(() => vehicles.filter((vehicle) => {
-    const hasDue = dueComponents.some((entry) => entry.vehicle_id === vehicle.id);
-    const hasDtc = activeDtcs.some((entry) => entry.vehicle_id === vehicle.id);
-    const hasOrder = openOrders.some((entry) => entry.vehicle_id === vehicle.id);
-    return !hasDue && !hasDtc && !hasOrder;
-  }), [activeDtcs, dueComponents, openOrders, vehicles]);
+  const healthyVehicles = useMemo(
+    () => vehicles.filter((vehicle) => {
+      const hasDue = dueComponents.some((entry) => entry.vehicle_id === vehicle.id);
+      const hasDtc = activeDtcs.some((entry) => entry.vehicle_id === vehicle.id);
+      const hasOrder = openOrders.some((entry) => entry.vehicle_id === vehicle.id);
+      return !hasDue && !hasDtc && !hasOrder;
+    }),
+    [activeDtcs, dueComponents, openOrders, vehicles]
+  );
 
   const matchesQuery = (vehicleId?: string | null, text = '') => {
     const needle = query.trim().toLowerCase();
@@ -207,20 +211,28 @@ export default function OPCFleetMaintenancePage() {
       .includes(needle);
   };
 
-  const filteredDue = dueComponents.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.component_type} ${entry.notes}`) && (priorityFilter === 'all' || String(entry.condition_status) === priorityFilter));
-  const filteredOrders = openOrders.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.title} ${entry.description}`) && (priorityFilter === 'all' || String(entry.priority) === priorityFilter));
-  const filteredDtcs = activeDtcs.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.code} ${entry.description}`) && (priorityFilter === 'all' || String(entry.severity) === priorityFilter));
+  const filteredDue = dueComponents.filter(
+    (entry) => matchesQuery(entry.vehicle_id, `${entry.component_type} ${entry.notes}`) && (priorityFilter === 'all' || String(entry.condition_status) === priorityFilter)
+  );
+
+  const filteredOrders = openOrders.filter(
+    (entry) => matchesQuery(entry.vehicle_id, `${entry.title} ${entry.description}`) && (priorityFilter === 'all' || String(entry.priority) === priorityFilter)
+  );
+
+  const filteredDtcs = activeDtcs.filter(
+    (entry) => matchesQuery(entry.vehicle_id, `${entry.code} ${entry.description}`) && (priorityFilter === 'all' || String(entry.severity) === priorityFilter)
+  );
 
   return (
     <OPCPageShell>
       <OPCMetricsGrid>
-        <OPCMetricCard label="Fahrzeuge fällig" value={loading ? '—' : dueComponents.length} icon={<Wrench size={19} />} tone="warning" />
+        <OPCMetricCard label="Fahrzeuge fällig" value={loading ? '—' : dueComponents.length} icon={<Wrench size={19} />} />
         <OPCMetricCard label="Offene Arbeiten" value={loading ? '—' : openOrders.length} icon={<AlertTriangle size={19} />} />
-        <OPCMetricCard label="Aktive Fehler" value={loading ? '—' : activeDtcs.length} icon={<ShieldAlert size={19} />} tone="danger" />
-        <OPCMetricCard label="Ohne Aufmerksamkeit" value={loading ? '—' : healthyVehicles.length} icon={<CheckCircle2 size={19} />} tone="success" />
+        <OPCMetricCard label="Aktive Fehler" value={loading ? '—' : activeDtcs.length} icon={<ShieldAlert size={19} />} />
+        <OPCMetricCard label="Ohne Aufmerksamkeit" value={loading ? '—' : healthyVehicles.length} icon={<CheckCircle2 size={19} />} />
       </OPCMetricsGrid>
 
-      <OPCToolbar columns="minmax(0, 1fr) 180px 180px">
+      <OPCToolbar columns="minmax(0, 1fr) 180px 160px">
         <div style={{ position: 'relative' }}>
           <Search size={17} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: OPC_BRAND.faint }} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fahrzeug, Kennzeichen, Fehler oder Empfehlung suchen" style={opcInputWithIconStyle} />
@@ -239,15 +251,15 @@ export default function OPCFleetMaintenancePage() {
       </OPCToolbar>
 
       <OPCTabs tabs={[
-        { key: 'due', label: `Fällige Wartung · ${dueComponents.length}`, active: activeTab === 'due', onClick: () => setActiveTab('due') },
-        { key: 'orders', label: `Wartungsliste · ${openOrders.length}`, active: activeTab === 'orders', onClick: () => setActiveTab('orders') },
-        { key: 'dtc', label: `Aktive Fehler · ${activeDtcs.length}`, active: activeTab === 'dtc', onClick: () => setActiveTab('dtc') },
-        { key: 'healthy', label: `Okay · ${healthyVehicles.length}`, active: activeTab === 'healthy', onClick: () => setActiveTab('healthy') },
+        { key: 'due', label: 'Fällige Wartung', active: activeTab === 'due', onClick: () => setActiveTab('due') },
+        { key: 'orders', label: 'Wartungsliste', active: activeTab === 'orders', onClick: () => setActiveTab('orders') },
+        { key: 'dtc', label: 'Aktive Fehler', active: activeTab === 'dtc', onClick: () => setActiveTab('dtc') },
+        { key: 'healthy', label: 'Okay', active: activeTab === 'healthy', onClick: () => setActiveTab('healthy') },
       ]} />
 
-      {error && <div style={{ ...opcCardStyle, padding: '14px 16px', color: OPC_BRAND.red, marginBottom: '16px', fontWeight: 720 }}>{error}</div>}
+      {error && <div style={{ ...opcCardStyle, padding: '14px 16px', color: OPC_BRAND.red, marginBottom: '14px', fontWeight: 720 }}>{error}</div>}
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <section style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
         {activeTab === 'due' && filteredDue.length === 0 && <EmptyState title="Keine passenden Wartungsdaten" text="Komponentenzustände von AutoAid oder manuelle Prüfungen erscheinen hier." />}
         {activeTab === 'due' && filteredDue.map((item) => {
           const vehicle = item.vehicle_id ? vehicleById.get(item.vehicle_id) : undefined;
