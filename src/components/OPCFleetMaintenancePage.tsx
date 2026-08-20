@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CarFront, CheckCircle2, RefreshCw, Search, ShieldAlert, Wrench } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RefreshCw, Search, ShieldAlert, Wrench } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   OPC_BRAND,
@@ -80,7 +80,24 @@ function statusTone(status?: string | null) {
 
 function Pill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'warning' | 'critical' | 'ok' }) {
   const color = tone === 'critical' ? OPC_BRAND.red : tone === 'warning' ? OPC_BRAND.amber : tone === 'ok' ? OPC_BRAND.green : OPC_BRAND.muted;
-  return <span style={{ display: 'inline-flex', height: '26px', padding: '0 10px', borderRadius: '999px', border: `1px solid ${OPC_BRAND.border}`, color, background: '#FFFFFF', fontSize: '12px', fontWeight: 820, alignItems: 'center' }}>{children}</span>;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        height: '26px',
+        padding: '0 10px',
+        borderRadius: '999px',
+        border: `1px solid ${OPC_BRAND.border}`,
+        color,
+        background: '#FFFFFF',
+        fontSize: '12px',
+        fontWeight: 820,
+        alignItems: 'center',
+      }}
+    >
+      {children}
+    </span>
+  );
 }
 
 function EmptyState({ title, text }: { title: string; text: string }) {
@@ -110,14 +127,30 @@ export default function OPCFleetMaintenancePage() {
     setError('');
 
     try {
-      const vehiclesResult = await supabase.from('opc_fleet_vehicles').select('id, display_name, license_plate, make, model, status').order('display_name', { ascending: true });
+      const vehiclesResult = await supabase
+        .from('opc_fleet_vehicles')
+        .select('id, display_name, license_plate, make, model, status')
+        .order('display_name', { ascending: true });
+
       if (vehiclesResult.error) throw vehiclesResult.error;
       setVehicles((vehiclesResult.data || []) as Vehicle[]);
 
       const [ordersResult, componentsResult, dtcResult] = await Promise.all([
-        supabase.from('opc_maintenance_work_orders').select('id, vehicle_id, title, description, category, priority, status, scheduled_for, estimated_cost, service_provider').order('created_at', { ascending: false }).limit(100),
-        supabase.from('opc_vehicle_component_health').select('id, vehicle_id, component_type, component_position, condition_status, condition_percent, measurement_value, measurement_unit, next_inspection_at, notes').order('measured_at', { ascending: false }).limit(100),
-        supabase.from('opc_vehicle_dtc_codes').select('id, vehicle_id, code, description, severity, status, last_seen_at').order('last_seen_at', { ascending: false }).limit(100),
+        supabase
+          .from('opc_maintenance_work_orders')
+          .select('id, vehicle_id, title, description, category, priority, status, scheduled_for, estimated_cost, service_provider')
+          .order('created_at', { ascending: false })
+          .limit(100),
+        supabase
+          .from('opc_vehicle_component_health')
+          .select('id, vehicle_id, component_type, component_position, condition_status, condition_percent, measurement_value, measurement_unit, next_inspection_at, notes')
+          .order('measured_at', { ascending: false })
+          .limit(100),
+        supabase
+          .from('opc_vehicle_dtc_codes')
+          .select('id, vehicle_id, code, description, severity, status, last_seen_at')
+          .order('last_seen_at', { ascending: false })
+          .limit(100),
       ]);
 
       if (!ordersResult.error) setOrders((ordersResult.data || []) as WorkOrder[]);
@@ -136,14 +169,26 @@ export default function OPCFleetMaintenancePage() {
   }, [loadMaintenance]);
 
   const vehicleById = useMemo(() => {
-    const map = new Map<string, Vehicle>();
+    const map = new globalThis.Map<string, Vehicle>();
     vehicles.forEach((vehicle) => map.set(vehicle.id, vehicle));
     return map;
   }, [vehicles]);
 
-  const dueComponents = useMemo(() => components.filter((item) => ['monitor', 'service_due', 'critical'].includes(String(item.condition_status || '').toLowerCase())), [components]);
-  const openOrders = useMemo(() => orders.filter((order) => !['completed', 'cancelled'].includes(String(order.status || '').toLowerCase())), [orders]);
-  const activeDtcs = useMemo(() => dtcs.filter((dtc) => String(dtc.status || 'active').toLowerCase() === 'active'), [dtcs]);
+  const dueComponents = useMemo(
+    () => components.filter((item) => ['monitor', 'service_due', 'critical'].includes(String(item.condition_status || '').toLowerCase())),
+    [components]
+  );
+
+  const openOrders = useMemo(
+    () => orders.filter((order) => !['completed', 'cancelled'].includes(String(order.status || '').toLowerCase())),
+    [orders]
+  );
+
+  const activeDtcs = useMemo(
+    () => dtcs.filter((dtc) => String(dtc.status || 'active').toLowerCase() === 'active'),
+    [dtcs]
+  );
+
   const healthyVehicles = useMemo(() => vehicles.filter((vehicle) => {
     const hasDue = dueComponents.some((entry) => entry.vehicle_id === vehicle.id);
     const hasDtc = activeDtcs.some((entry) => entry.vehicle_id === vehicle.id);
@@ -155,7 +200,11 @@ export default function OPCFleetMaintenancePage() {
     const needle = query.trim().toLowerCase();
     if (!needle) return true;
     const vehicle = vehicleId ? vehicleById.get(vehicleId) : undefined;
-    return [vehicle?.display_name, vehicle?.license_plate, vehicle?.make, vehicle?.model, text].filter(Boolean).join(' ').toLowerCase().includes(needle);
+    return [vehicle?.display_name, vehicle?.license_plate, vehicle?.make, vehicle?.model, text]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(needle);
   };
 
   const filteredDue = dueComponents.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.component_type} ${entry.notes}`) && (priorityFilter === 'all' || String(entry.condition_status) === priorityFilter));
@@ -164,17 +213,6 @@ export default function OPCFleetMaintenancePage() {
 
   return (
     <OPCPageShell>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', marginBottom: '22px' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '30px', fontWeight: 860, letterSpacing: '-0.055em' }}>Wartung</h1>
-          <p style={{ margin: '7px 0 0', color: OPC_BRAND.muted, fontSize: '14px', fontWeight: 620 }}>Fällige Arbeiten, Fehlercodes und Reparaturempfehlungen.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <a href="/fuhrpark" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><CarFront size={16} /> Fahrzeuge</a>
-          <button type="button" onClick={() => void loadMaintenance(true)} disabled={refreshing} style={{ ...opcBlackButtonStyle, width: 'auto' }}><RefreshCw size={16} /> {refreshing ? 'Laden...' : 'Aktualisieren'}</button>
-        </div>
-      </div>
-
       <OPCMetricsGrid>
         <OPCMetricCard label="Fahrzeuge fällig" value={loading ? '—' : dueComponents.length} icon={<Wrench size={19} />} tone="warning" />
         <OPCMetricCard label="Offene Arbeiten" value={loading ? '—' : openOrders.length} icon={<AlertTriangle size={19} />} />
@@ -182,7 +220,7 @@ export default function OPCFleetMaintenancePage() {
         <OPCMetricCard label="Ohne Aufmerksamkeit" value={loading ? '—' : healthyVehicles.length} icon={<CheckCircle2 size={19} />} tone="success" />
       </OPCMetricsGrid>
 
-      <OPCToolbar columns="minmax(0, 1fr) 180px 160px">
+      <OPCToolbar columns="minmax(0, 1fr) 180px 180px">
         <div style={{ position: 'relative' }}>
           <Search size={17} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: OPC_BRAND.faint }} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fahrzeug, Kennzeichen, Fehler oder Empfehlung suchen" style={opcInputWithIconStyle} />
@@ -195,7 +233,9 @@ export default function OPCFleetMaintenancePage() {
           <option value="service_due">Service fällig</option>
           <option value="monitor">Beobachten</option>
         </select>
-        <button type="button" onClick={() => void loadMaintenance(true)} style={opcBlackButtonStyle}><RefreshCw size={16} /> Neu laden</button>
+        <button type="button" onClick={() => void loadMaintenance(true)} disabled={refreshing} style={opcBlackButtonStyle}>
+          <RefreshCw size={16} /> {refreshing ? 'Laden...' : 'Aktualisieren'}
+        </button>
       </OPCToolbar>
 
       <OPCTabs tabs={[
