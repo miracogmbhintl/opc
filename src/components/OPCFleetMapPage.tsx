@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CarFront, LocateFixed, MapPin, RefreshCw, Search, Wifi, WifiOff, Wrench } from 'lucide-react';
+import { ArrowLeft, CarFront, LocateFixed, RefreshCw, Search, Wifi, WifiOff, Wrench } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { OPC_BRAND, OPC_PAGE_FONT, opcBlackButtonStyle, opcCardStyle, opcInputWithIconStyle, opcSecondaryButtonStyle, opcSelectStyle } from './opc/OPCPageTop';
 
@@ -32,6 +32,13 @@ type VehicleLocation = {
   speed_kmh?: number | null;
 };
 
+const LOGISTICS_LOCATION = {
+  label: 'Orange Pro Clean Logistikstandort',
+  address: 'Wattwerkstrasse 2, 4416 Bubendorf',
+  lat: 47.45695,
+  lng: 7.74378,
+};
+
 function formatDate(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
@@ -60,9 +67,9 @@ function stateFor(vehicle?: Vehicle, status?: VehicleStatus) {
 
 function mapUrl(points: Array<{ location: VehicleLocation }>, selected?: VehicleLocation | null) {
   const source = selected || points[0]?.location;
-  const lat = Number(source?.latitude || 47.5596);
-  const lng = Number(source?.longitude || 7.5886);
-  const span = points.length > 1 ? 0.08 : 0.02;
+  const lat = Number(source?.latitude || LOGISTICS_LOCATION.lat);
+  const lng = Number(source?.longitude || LOGISTICS_LOCATION.lng);
+  const span = points.length > 1 ? 0.08 : 0.035;
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - span}%2C${lat - span}%2C${lng + span}%2C${lat + span}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
@@ -105,13 +112,13 @@ export default function OPCFleetMapPage() {
   }, [loadFleet]);
 
   const statusByVehicle = useMemo(() => {
-    const map = new Map<string, VehicleStatus>();
+    const map = new globalThis.Map<string, VehicleStatus>();
     statuses.forEach((status) => status.vehicle_id && map.set(status.vehicle_id, status));
     return map;
   }, [statuses]);
 
   const latestLocationByVehicle = useMemo(() => {
-    const map = new Map<string, VehicleLocation>();
+    const map = new globalThis.Map<string, VehicleLocation>();
     locations.forEach((location) => {
       if (!location.vehicle_id || map.has(location.vehicle_id)) return;
       if (typeof location.latitude !== 'number' || typeof location.longitude !== 'number') return;
@@ -143,42 +150,19 @@ export default function OPCFleetMapPage() {
   }
 
   return (
-    <div
-      ref={mapShellRef}
-      style={{
-        position: 'relative',
-        width: 'calc(100% + 56px)',
-        height: 'calc(100vh - 0px)',
-        minHeight: '720px',
-        margin: '-24px -28px -112px',
-        overflow: 'hidden',
-        background: '#F3F4F6',
-        fontFamily: OPC_PAGE_FONT,
-        color: OPC_BRAND.text,
-        overscrollBehavior: 'contain',
-      }}
-    >
-      <iframe
-        title="Fuhrpark Live Map"
-        src={mapUrl(points, selected?.location || null)}
-        loading="lazy"
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          border: 0,
-          background: '#EEF2F7',
-        }}
-      />
+    <div ref={mapShellRef} style={{ position: 'relative', width: 'calc(100% + 56px)', height: 'calc(100vh - 0px)', minHeight: '720px', margin: '-24px -28px -112px', overflow: 'hidden', background: '#F3F4F6', fontFamily: OPC_PAGE_FONT, color: OPC_BRAND.text, overscrollBehavior: 'contain' }}>
+      <iframe title="Fuhrpark Live Map" src={mapUrl(points, selected?.location || null)} loading="lazy" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0, background: '#EEF2F7' }} />
 
       <div style={{ position: 'absolute', top: 18, left: 18, right: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, pointerEvents: 'none' }}>
-        <div style={{ ...opcCardStyle, padding: '12px 14px', minWidth: 240, pointerEvents: 'auto' }}>
-          <div style={{ fontSize: '15px', fontWeight: 870, letterSpacing: '-0.035em' }}>Fuhrpark Karte</div>
-          <div style={{ marginTop: 4, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>{loading ? 'Lädt...' : `${points.length} sichtbar · ${formatDate(selected?.location.recorded_at)}`}</div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', pointerEvents: 'auto' }}>
+          <a href="/fuhrpark" style={{ ...opcSecondaryButtonStyle, width: 'auto', height: 42, background: '#FFFFFF' }}><ArrowLeft size={16} /> Zurück</a>
+          <div style={{ ...opcCardStyle, padding: '10px 13px', minWidth: 230 }}>
+            <div style={{ fontSize: '14px', fontWeight: 870, letterSpacing: '-0.035em' }}>Fuhrpark Karte</div>
+            <div style={{ marginTop: 3, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>{loading ? 'Lädt...' : `${points.length} sichtbar · ${formatDate(selected?.location.recorded_at)}`}</div>
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) 142px 42px 42px', gap: 10, pointerEvents: 'auto' }} className="opc-map-controls">
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) 132px 42px 42px', gap: 10, pointerEvents: 'auto' }} className="opc-map-controls">
           <div style={{ position: 'relative' }}>
             <Search size={16} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: OPC_BRAND.faint, pointerEvents: 'none' }} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fahrzeug suchen" style={{ ...opcInputWithIconStyle, height: 42, background: '#FFFFFF' }} />
@@ -189,22 +173,27 @@ export default function OPCFleetMapPage() {
             <option value="warning">Prüfen</option>
             <option value="offline">Offline</option>
           </select>
-          <button type="button" onClick={handleFocusMap} style={{ ...opcSecondaryButtonStyle, width: 42, height: 42, padding: 0 }} title="Karte fokussieren"><LocateFixed size={16} /></button>
+          <button type="button" onClick={handleFocusMap} style={{ ...opcSecondaryButtonStyle, width: 42, height: 42, padding: 0, background: '#FFFFFF' }} title="Karte fokussieren"><LocateFixed size={16} /></button>
           <button type="button" onClick={() => void loadFleet(true)} disabled={refreshing} style={{ ...opcBlackButtonStyle, width: 42, height: 42, padding: 0 }} title="Aktualisieren"><RefreshCw size={16} /></button>
         </div>
       </div>
 
-      <div style={{ position: 'absolute', left: 18, bottom: 18, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', left: 18, bottom: 18, right: 18, display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', pointerEvents: 'none' }}>
         <div style={{ ...opcCardStyle, padding: '10px 12px', display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'auto' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750 }}><CarFront size={15} /> {vehicles.length} Fahrzeuge</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750, color: OPC_BRAND.green }}><Wifi size={15} /> {onlineCount} Online</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750, color: OPC_BRAND.amber }}><Wrench size={15} /> {warningCount} Prüfen</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750, color: OPC_BRAND.muted }}><WifiOff size={15} /> {Math.max(0, offlineCount)} Offline</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750 }}><Wifi size={15} /> {onlineCount} Online</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750 }}><Wrench size={15} /> {warningCount} Prüfen</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750 }}><WifiOff size={15} /> {Math.max(0, offlineCount)} Offline</span>
+        </div>
+
+        <div style={{ ...opcCardStyle, padding: '11px 13px', width: 300, maxWidth: '100%', pointerEvents: 'auto' }}>
+          <div style={{ fontSize: 14, fontWeight: 850 }}>Logistikstandort</div>
+          <div style={{ marginTop: 4, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>{LOGISTICS_LOCATION.address}</div>
         </div>
       </div>
 
       {selected && (
-        <aside style={{ position: 'absolute', right: 18, bottom: 18, width: 340, maxWidth: 'calc(100% - 36px)', pointerEvents: 'auto', ...opcCardStyle, padding: 16 }}>
+        <aside style={{ position: 'absolute', right: 18, top: 84, width: 320, maxWidth: 'calc(100% - 36px)', pointerEvents: 'auto', ...opcCardStyle, padding: 15 }}>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
             <div style={{ width: 38, height: 38, borderRadius: 13, border: `1px solid ${OPC_BRAND.border}`, background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CarFront size={19} /></div>
             <div style={{ minWidth: 0 }}>
@@ -232,7 +221,7 @@ export default function OPCFleetMapPage() {
         </div>
       )}
 
-      {error && <div style={{ position: 'absolute', left: 18, right: 18, top: 82, ...opcCardStyle, padding: 12, color: OPC_BRAND.red, fontWeight: 720 }}>{error}</div>}
+      {error && <div style={{ position: 'absolute', left: 18, right: 18, top: 74, ...opcCardStyle, padding: 12, color: OPC_BRAND.red, fontWeight: 720 }}>{error}</div>}
 
       <style>{`
         .opc-map-controls input,
