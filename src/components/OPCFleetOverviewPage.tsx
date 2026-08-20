@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CarFront, CheckCircle2, ClipboardList, Fuel, Gauge, Map, RefreshCw, Search, Wrench } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  AlertTriangle,
+  CarFront,
+  CheckCircle2,
+  Clock3,
+  ClipboardList,
+  Fuel,
+  Gauge,
+  Map as MapIcon,
+  Plus,
+  RefreshCw,
+  Search,
+  Wrench,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   OPC_BRAND,
@@ -96,6 +109,23 @@ function formatFuel(value?: number | null) {
   return `${Math.round(next)}%`;
 }
 
+function actionLabel(action?: string | null) {
+  switch (action) {
+    case 'picked_up':
+      return 'Übernommen';
+    case 'returned':
+      return 'Zurückgegeben';
+    case 'issue_reported':
+      return 'Problem gemeldet';
+    case 'insurance_report':
+      return 'Versicherungsnotiz';
+    case 'inspection':
+      return 'Kontrolle';
+    default:
+      return 'Eintrag';
+  }
+}
+
 function normalizeStatus(vehicle: Vehicle, status?: VehicleStatus) {
   const raw = String(status?.status || vehicle.status || '').toLowerCase();
   if (raw.includes('maintenance') || raw.includes('repair') || raw.includes('critical')) return 'repair';
@@ -112,14 +142,16 @@ function StatusPill({ state }: { state: string }) {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        height: '26px',
-        padding: '0 10px',
+        justifyContent: 'center',
+        minHeight: '28px',
+        padding: '0 11px',
         borderRadius: '999px',
         border: `1px solid ${OPC_BRAND.border}`,
         background: '#FFFFFF',
         color,
         fontSize: '12px',
         fontWeight: 820,
+        whiteSpace: 'nowrap',
       }}
     >
       {label}
@@ -127,12 +159,112 @@ function StatusPill({ state }: { state: string }) {
   );
 }
 
-function EmptyState({ title, text }: { title: string; text: string }) {
+function EmptyState({ title, text, actions }: { title: string; text: string; actions?: ReactNode }) {
   return (
-    <div style={{ ...opcCardStyle, padding: '28px', textAlign: 'center' }}>
-      <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.03em', marginBottom: '8px' }}>{title}</div>
-      <div style={{ color: OPC_BRAND.muted, fontSize: '14px', lineHeight: 1.55 }}>{text}</div>
+    <div style={{ ...opcCardStyle, padding: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '18px', flexWrap: 'wrap' }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: '17px', fontWeight: 850, letterSpacing: '-0.035em', marginBottom: '7px' }}>{title}</div>
+        <div style={{ color: OPC_BRAND.muted, fontSize: '14px', lineHeight: 1.55, fontWeight: 620 }}>{text}</div>
+      </div>
+      {actions && <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>{actions}</div>}
     </div>
+  );
+}
+
+function WorkflowCard({ icon, title, text, action, disabled }: { icon: ReactNode; title: string; text: string; action: string; disabled?: boolean }) {
+  return (
+    <div style={{ ...opcCardStyle, padding: '22px', minHeight: '150px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '18px' }}>
+      <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+        <div style={{ width: '42px', height: '42px', borderRadius: '15px', border: `1px solid ${OPC_BRAND.border}`, background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {icon}
+        </div>
+        <div>
+          <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.035em' }}>{title}</div>
+          <p style={{ margin: '6px 0 0', color: OPC_BRAND.muted, fontSize: '13px', lineHeight: 1.5, fontWeight: 620 }}>{text}</p>
+        </div>
+      </div>
+      <button
+        type="button"
+        disabled={disabled}
+        style={{
+          ...opcSecondaryButtonStyle,
+          width: '100%',
+          opacity: disabled ? 0.55 : 1,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+      >
+        {action}
+      </button>
+    </div>
+  );
+}
+
+function SectionHeader({ title, text, action }: { title: string; text?: string; action?: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '16px', marginBottom: '14px', flexWrap: 'wrap' }}>
+      <div>
+        <h2 style={{ margin: 0, fontSize: '19px', fontWeight: 860, letterSpacing: '-0.045em' }}>{title}</h2>
+        {text && <p style={{ margin: '5px 0 0', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 620 }}>{text}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function InfoListCard({ title, icon, items }: { title: string; icon: ReactNode; items: Array<{ label: string; text: string }> }) {
+  return (
+    <div style={{ ...opcCardStyle, padding: '22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '11px', marginBottom: '18px' }}>
+        <div style={{ width: '38px', height: '38px', borderRadius: '14px', border: `1px solid ${OPC_BRAND.border}`, background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{icon}</div>
+        <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.035em' }}>{title}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {items.map((item) => (
+          <div key={item.label} style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr)', gap: '10px', alignItems: 'flex-start' }}>
+            <div style={{ width: '26px', height: '26px', borderRadius: '999px', border: `1px solid ${OPC_BRAND.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: OPC_BRAND.muted, fontSize: '12px', fontWeight: 800 }}>•</div>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: 820, letterSpacing: '-0.02em' }}>{item.label}</div>
+              <div style={{ marginTop: '2px', color: OPC_BRAND.muted, fontSize: '12px', lineHeight: 1.45, fontWeight: 620 }}>{item.text}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VehicleRow({ vehicle, status, latestTrip }: { vehicle: Vehicle; status?: VehicleStatus; latestTrip?: Trip }) {
+  const state = normalizeStatus(vehicle, status);
+  return (
+    <a
+      href={`/fuhrpark/fahrzeug/${vehicle.id}`}
+      style={{
+        ...opcCardStyle,
+        padding: '18px',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1.25fr) 150px 140px 140px 150px',
+        gap: '16px',
+        alignItems: 'center',
+        textDecoration: 'none',
+        color: OPC_BRAND.text,
+      }}
+    >
+      <div style={{ display: 'flex', gap: '13px', alignItems: 'center', minWidth: 0 }}>
+        <div style={{ width: '42px', height: '42px', borderRadius: '15px', border: `1px solid ${OPC_BRAND.border}`, background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <CarFront size={20} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.035em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vehicle.display_name || 'Fahrzeug'}</div>
+          <div style={{ marginTop: '4px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {vehicle.license_plate || 'Kennzeichen offen'} · {[vehicle.make, vehicle.model, vehicle.model_year].filter(Boolean).join(' ') || 'Modell offen'}
+          </div>
+        </div>
+      </div>
+      <StatusPill state={state} />
+      <div style={{ fontSize: '13px', fontWeight: 720 }}><Fuel size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />{formatFuel(status?.fuel_level_percent)}</div>
+      <div style={{ fontSize: '13px', fontWeight: 720 }}><Gauge size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />{formatKm(status?.odometer_km)}</div>
+      <div style={{ color: OPC_BRAND.muted, fontSize: '12px', fontWeight: 650, textAlign: 'right' }}>{latestTrip ? `${formatKm(latestTrip.distance_km)} letzte Fahrt` : formatDate(status?.last_seen_at)}</div>
+    </a>
   );
 }
 
@@ -187,17 +319,17 @@ export default function OPCFleetOverviewPage() {
   }, [loadFleet]);
 
   const statusByVehicle = useMemo(() => {
-    const map = new Map<string, VehicleStatus>();
-    statuses.forEach((status) => status.vehicle_id && map.set(status.vehicle_id, status));
-    return map;
+    const next = new globalThis.Map<string, VehicleStatus>();
+    statuses.forEach((status) => status.vehicle_id && next.set(status.vehicle_id, status));
+    return next;
   }, [statuses]);
 
   const latestTripByVehicle = useMemo(() => {
-    const map = new Map<string, Trip>();
+    const next = new globalThis.Map<string, Trip>();
     trips.forEach((trip) => {
-      if (trip.vehicle_id && !map.has(trip.vehicle_id)) map.set(trip.vehicle_id, trip);
+      if (trip.vehicle_id && !next.has(trip.vehicle_id)) next.set(trip.vehicle_id, trip);
     });
-    return map;
+    return next;
   }, [trips]);
 
   const filteredVehicles = useMemo(() => {
@@ -221,17 +353,26 @@ export default function OPCFleetOverviewPage() {
     return { active: vehicles.length, driving, check, repair };
   }, [statusByVehicle, vehicles]);
 
+  const todayTrips = useMemo(() => {
+    const today = new Date().toDateString();
+    return trips.filter((trip) => trip.started_at && new Date(trip.started_at).toDateString() === today);
+  }, [trips]);
+
+  const openIssues = workOrders.length;
+  const lastHandovers = handovers.slice(0, 3);
+  const lastTrips = trips.slice(0, 3);
+
   return (
     <OPCPageShell>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', marginBottom: '22px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', marginBottom: '22px', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '30px', fontWeight: 860, letterSpacing: '-0.055em' }}>Fuhrpark</h1>
           <p style={{ margin: '7px 0 0', color: OPC_BRAND.muted, fontSize: '14px', fontWeight: 620 }}>
-            Fahrzeuge, Fahrtenbuch, Übergaben und Wartung im OPC-Arbeitsstil.
+            Fahrzeuge, Fahrtenbuch, Übergaben und Wartung.
           </p>
         </div>
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <a href="/fuhrpark/karte" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><Map size={16} /> Live Map</a>
+          <a href="/fuhrpark/karte" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><MapIcon size={16} /> Live Map</a>
           <button type="button" onClick={() => void loadFleet(true)} style={{ ...opcBlackButtonStyle, width: 'auto' }} disabled={refreshing}>
             <RefreshCw size={16} /> {refreshing ? 'Laden...' : 'Aktualisieren'}
           </button>
@@ -245,7 +386,48 @@ export default function OPCFleetOverviewPage() {
         <OPCMetricCard label="Reparatur nötig" value={loading ? '—' : metrics.repair} icon={<Wrench size={19} />} tone="danger" />
       </OPCMetricsGrid>
 
-      <OPCToolbar columns="minmax(0, 1fr) 170px 170px 160px">
+      <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) minmax(360px, 0.75fr)', gap: '22px', marginBottom: '22px' }} className="opc-fleet-workflow-grid">
+        <div>
+          <SectionHeader title="Heute" text="Aktueller Fahrzeugbetrieb und direkte Mitarbeiterschritte." />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px' }} className="opc-fleet-today-grid">
+            <div style={{ ...opcCardStyle, padding: '18px' }}>
+              <div style={{ fontSize: '26px', fontWeight: 860, letterSpacing: '-0.055em' }}>{metrics.driving}</div>
+              <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 720 }}>Aktuell unterwegs</div>
+            </div>
+            <div style={{ ...opcCardStyle, padding: '18px' }}>
+              <div style={{ fontSize: '26px', fontWeight: 860, letterSpacing: '-0.055em' }}>{todayTrips.length}</div>
+              <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 720 }}>Fahrten heute</div>
+            </div>
+            <div style={{ ...opcCardStyle, padding: '18px' }}>
+              <div style={{ fontSize: '26px', fontWeight: 860, letterSpacing: '-0.055em' }}>{lastHandovers.length}</div>
+              <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 720 }}>Letzte Übergaben</div>
+            </div>
+            <div style={{ ...opcCardStyle, padding: '18px' }}>
+              <div style={{ fontSize: '26px', fontWeight: 860, letterSpacing: '-0.055em' }}>{openIssues}</div>
+              <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 720 }}>Offene Wartung</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '12px', marginTop: '12px' }} className="opc-fleet-actions-grid">
+            <WorkflowCard icon={<CarFront size={19} />} title="Fahrzeug übernehmen" text="Mitarbeiter dokumentieren Übernahme, Kilometerstand, Tankstand und Notiz." action={vehicles.length ? 'Übernahme starten' : 'Noch kein Fahrzeug'} disabled={!vehicles.length} />
+            <WorkflowCard icon={<ClipboardList size={19} />} title="Rückgabe erfassen" text="Rückgabe mit Zustand, Tank, Standort und optionaler Bemerkung speichern." action={vehicles.length ? 'Rückgabe erfassen' : 'Noch kein Fahrzeug'} disabled={!vehicles.length} />
+            <WorkflowCard icon={<AlertTriangle size={19} />} title="Problem melden" text="Schaden, Warnlampe, Defekt oder Versicherungsnotiz direkt zum Fahrzeug ablegen." action={vehicles.length ? 'Problem melden' : 'Noch kein Fahrzeug'} disabled={!vehicles.length} />
+          </div>
+        </div>
+
+        <InfoListCard
+          title="Ablauf"
+          icon={<Clock3 size={17} />}
+          items={[
+            { label: 'Fahrzeug übernehmen', text: 'Vor Fahrtbeginn Fahrzeug, Kilometerstand und Tankstand bestätigen.' },
+            { label: 'Fahrt dokumentieren', text: 'AutoAid ergänzt Position, Strecke, Status und Kilometer automatisch.' },
+            { label: 'Rückgabe erfassen', text: 'Nach der Nutzung Zustand, Standort und Bemerkungen hinterlegen.' },
+            { label: 'Wartung prüfen', text: 'Warnungen, Fehlercodes und Reparaturempfehlungen werden gesammelt.' },
+          ]}
+        />
+      </section>
+
+      <OPCToolbar columns="minmax(0, 1fr) 190px 170px">
         <div style={{ position: 'relative' }}>
           <Search size={17} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: OPC_BRAND.faint }} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fahrzeug, Kennzeichen, VIN oder Standort suchen" style={opcInputWithIconStyle} />
@@ -257,7 +439,6 @@ export default function OPCFleetOverviewPage() {
           <option value="repair">Reparatur nötig</option>
           <option value="offline">Offline</option>
         </select>
-        <a href="/fuhrpark/wartung" style={opcSecondaryButtonStyle}><Wrench size={16} /> Wartung</a>
         <button type="button" data-opc-wide="true" onClick={() => void loadFleet(true)} style={opcBlackButtonStyle}><RefreshCw size={16} /> Neu laden</button>
       </OPCToolbar>
 
@@ -272,35 +453,29 @@ export default function OPCFleetOverviewPage() {
 
       {activeTab === 'vehicles' && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {filteredVehicles.length === 0 && <EmptyState title="Keine Fahrzeuge sichtbar" text="Sobald AutoAid Fahrzeuge synchronisiert oder manuell Fahrzeuge angelegt sind, erscheinen sie hier." />}
-          {filteredVehicles.map((vehicle) => {
-            const status = statusByVehicle.get(vehicle.id);
-            const latestTrip = latestTripByVehicle.get(vehicle.id);
-            const state = normalizeStatus(vehicle, status);
-            return (
-              <a key={vehicle.id} href={`/fuhrpark/fahrzeug/${vehicle.id}`} style={{ ...opcCardStyle, padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0, 1.25fr) 160px 150px 150px 130px', gap: '16px', alignItems: 'center', textDecoration: 'none', color: OPC_BRAND.text }}>
-                <div style={{ display: 'flex', gap: '13px', alignItems: 'center', minWidth: 0 }}>
-                  <div style={{ width: '42px', height: '42px', borderRadius: '15px', border: `1px solid ${OPC_BRAND.border}`, background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><CarFront size={20} /></div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.035em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vehicle.display_name || 'Fahrzeug'}</div>
-                    <div style={{ marginTop: '4px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {vehicle.license_plate || 'Kennzeichen offen'} · {[vehicle.make, vehicle.model, vehicle.model_year].filter(Boolean).join(' ') || 'Modell offen'}
-                    </div>
-                  </div>
-                </div>
-                <StatusPill state={state} />
-                <div style={{ fontSize: '13px', fontWeight: 720 }}><Fuel size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />{formatFuel(status?.fuel_level_percent)}</div>
-                <div style={{ fontSize: '13px', fontWeight: 720 }}><Gauge size={14} style={{ verticalAlign: '-2px', marginRight: '6px' }} />{formatKm(status?.odometer_km)}</div>
-                <div style={{ color: OPC_BRAND.muted, fontSize: '12px', fontWeight: 650, textAlign: 'right' }}>{latestTrip ? `${formatKm(latestTrip.distance_km)} letzte Fahrt` : formatDate(status?.last_seen_at)}</div>
-              </a>
-            );
-          })}
+          <SectionHeader title="Fahrzeuge" text="Aktive Fahrzeuge, Status, Tank, Kilometerstand und letzte Nutzung." action={<a href="/einstellungen" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><Plus size={16} /> AutoAid verbinden</a>} />
+          {filteredVehicles.length === 0 && (
+            <EmptyState
+              title="Noch keine Fahrzeuge erfasst"
+              text="Lege die Fahrzeuge über AutoAid an oder verbinde zuerst die AutoAid-Integration. Danach erscheinen Fahrzeugstatus, Tankstand, Kilometerstand und Fahrten automatisch hier."
+              actions={(
+                <>
+                  <a href="/einstellungen" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>AutoAid verbinden</a>
+                  <a href="/fuhrpark/karte" style={{ ...opcBlackButtonStyle, width: 'auto' }}>Live Map öffnen</a>
+                </>
+              )}
+            />
+          )}
+          {filteredVehicles.map((vehicle) => (
+            <VehicleRow key={vehicle.id} vehicle={vehicle} status={statusByVehicle.get(vehicle.id)} latestTrip={latestTripByVehicle.get(vehicle.id)} />
+          ))}
         </section>
       )}
 
       {activeTab === 'logbook' && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {trips.length === 0 && <EmptyState title="Noch keine Fahrten" text="AutoAid-Fahrten erscheinen hier nach dem Pull-Worker beziehungsweise der Push-Synchronisation." />}
+          <SectionHeader title="Fahrtenbuch" text="Letzte Fahrten mit Start, Ziel, Distanz und Klassifikation." />
+          {trips.length === 0 && <EmptyState title="Noch keine Fahrten erfasst" text="Nach der AutoAid-Synchronisation erscheinen Fahrten, Distanzen, Start- und Zielinformationen hier." />}
           {trips.map((trip) => {
             const vehicle = vehicles.find((entry) => entry.id === trip.vehicle_id);
             return (
@@ -320,7 +495,8 @@ export default function OPCFleetOverviewPage() {
 
       {activeTab === 'maintenance' && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {workOrders.length === 0 && <EmptyState title="Keine offenen Wartungen" text="Offene Arbeiten, Fehler und Reparaturempfehlungen erscheinen hier." />}
+          <SectionHeader title="Wartung" text="Offene Arbeiten, Fehlercodes und Empfehlungen." action={<a href="/fuhrpark/wartung" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><Wrench size={16} /> Wartung öffnen</a>} />
+          {workOrders.length === 0 && <EmptyState title="Keine offenen Wartungen" text="Sobald ein Fehlercode, eine Serviceempfehlung oder ein manueller Wartungsauftrag entsteht, erscheint er hier." />}
           {workOrders.map((order) => {
             const vehicle = vehicles.find((entry) => entry.id === order.vehicle_id);
             return (
@@ -340,13 +516,14 @@ export default function OPCFleetOverviewPage() {
 
       {activeTab === 'handover' && (
         <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {handovers.length === 0 && <EmptyState title="Keine Übergaben erfasst" text="Mitarbeitende können Fahrzeugübernahmen, Rückgaben und Probleme hier dokumentieren." />}
+          <SectionHeader title="Übergaben" text="Übernahmen, Rückgaben, Kontrollen und Problemberichte." />
+          {handovers.length === 0 && <EmptyState title="Keine Übergaben erfasst" text="Wenn Mitarbeitende ein Fahrzeug übernehmen, zurückgeben oder ein Problem melden, wird der Eintrag hier sichtbar." />}
           {handovers.map((log) => {
             const vehicle = vehicles.find((entry) => entry.id === log.vehicle_id);
             return (
               <div key={log.id} style={{ ...opcCardStyle, padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 140px 120px 120px', gap: '16px', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: '15px', fontWeight: 840 }}>{vehicle?.display_name || 'Fahrzeug'} · {log.action || 'Eintrag'}</div>
+                  <div style={{ fontSize: '15px', fontWeight: 840 }}>{vehicle?.display_name || 'Fahrzeug'} · {actionLabel(log.action)}</div>
                   <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', fontWeight: 620 }}>{log.note || log.location_text || 'Keine Notiz'}</div>
                 </div>
                 <div style={{ fontSize: '13px', fontWeight: 720 }}>{formatDate(log.occurred_at)}</div>
@@ -358,9 +535,63 @@ export default function OPCFleetOverviewPage() {
         </section>
       )}
 
+      <section style={{ marginTop: '24px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '16px' }} className="opc-fleet-bottom-grid">
+        <div>
+          <SectionHeader title="Letzte Fahrten" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {lastTrips.length === 0 && <EmptyState title="Keine Fahrten im Verlauf" text="Der Fahrtenverlauf wird gefüllt, sobald AutoAid-Fahrten verarbeitet werden." />}
+            {lastTrips.map((trip) => {
+              const vehicle = vehicles.find((entry) => entry.id === trip.vehicle_id);
+              return (
+                <div key={`latest-${trip.id}`} style={{ ...opcCardStyle, padding: '16px', display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 820 }}>{vehicle?.display_name || 'Fahrzeug'}</div>
+                    <div style={{ color: OPC_BRAND.muted, fontSize: '12px', fontWeight: 620, marginTop: '4px' }}>{trip.start_address || 'Start offen'} → {trip.end_address || 'Ziel offen'}</div>
+                  </div>
+                  <div style={{ fontSize: '13px', fontWeight: 760 }}>{formatKm(trip.distance_km)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <SectionHeader title="Letzte Meldungen" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {lastHandovers.length === 0 && <EmptyState title="Keine Meldungen" text="Übergaben, Rückgaben und Problemberichte werden hier als Verlauf angezeigt." />}
+            {lastHandovers.map((log) => {
+              const vehicle = vehicles.find((entry) => entry.id === log.vehicle_id);
+              return (
+                <div key={`latest-handover-${log.id}`} style={{ ...opcCardStyle, padding: '16px', display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 820 }}>{vehicle?.display_name || 'Fahrzeug'} · {actionLabel(log.action)}</div>
+                    <div style={{ color: OPC_BRAND.muted, fontSize: '12px', fontWeight: 620, marginTop: '4px' }}>{log.note || log.location_text || 'Keine Notiz'}</div>
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: OPC_BRAND.muted }}>{formatDate(log.occurred_at)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
       <style>{opcResponsiveStyle}</style>
       <style>{`
-        @media (max-width: 980px) {
+        @media (max-width: 1180px) {
+          .opc-fleet-workflow-grid,
+          .opc-fleet-bottom-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .opc-fleet-today-grid,
+          .opc-fleet-actions-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+        @media (max-width: 760px) {
+          .opc-fleet-today-grid,
+          .opc-fleet-actions-grid {
+            grid-template-columns: 1fr !important;
+          }
           a[href^="/fuhrpark/fahrzeug/"] {
             grid-template-columns: 1fr !important;
             gap: 10px !important;
