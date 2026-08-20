@@ -4,6 +4,7 @@ import OPCFleetOverviewPage from './OPCFleetOverviewPage';
 import OPCFleetMapPage from './OPCFleetMapPage';
 import OPCFleetMaintenancePage from './OPCFleetMaintenancePage';
 import OPCFleetVehicleDetailPage from './OPCFleetVehicleDetailPage';
+import OPCFleetVehicleDemoPage from './OPCFleetVehicleDemoPage';
 import type { UserRole } from '../lib/supabase';
 
 const allowedRoles: UserRole[] = ['owner', 'admin', 'dispatch', 'employee'];
@@ -102,6 +103,14 @@ export function OPCFleetVehicleDetailRoutePage({ vehicleId }: { vehicleId: strin
   return (
     <FleetShell currentPath="/fuhrpark">
       <OPCFleetVehicleDetailPage vehicleId={vehicleId} />
+    </FleetShell>
+  );
+}
+
+export function OPCFleetVehicleDemoRoutePage() {
+  return (
+    <FleetShell currentPath="/fuhrpark">
+      <OPCFleetVehicleDemoPage />
     </FleetShell>
   );
 }
