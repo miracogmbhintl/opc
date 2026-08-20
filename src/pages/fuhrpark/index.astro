@@ -1,6 +1,6 @@
 ---
 import MirakaDashboardShell from '../../components/MirakaDashboardShell';
-import OPCFleetMapPage from '../../components/OPCFleetMapPage';
+import OPCFleetOverviewPage from '../../components/OPCFleetOverviewPage';
 import '../../styles/miraka-portal.css';
 import '../../styles/miraka-dashboard.css';
 ---
@@ -51,11 +51,11 @@ import '../../styles/miraka-dashboard.css';
 <body>
   <MirakaDashboardShell
     client:only="react"
-    requiredRole={['owner', 'admin']}
+    requiredRole={['owner', 'admin', 'dispatch', 'employee']}
     currentPath="/fuhrpark"
     fullWidth={true}
   >
-    <OPCFleetMapPage client:only="react" />
+    <OPCFleetOverviewPage client:only="react" />
   </MirakaDashboardShell>
 </body>
 </html>
