@@ -1,6 +1,5 @@
 ---
-import MirakaDashboardShell from '../../components/MirakaDashboardShell';
-import OPCFleetMaintenancePage from '../../components/OPCFleetMaintenancePage';
+import { OPCFleetMaintenanceRoutePage } from '../../components/OPCFleetRoutePages';
 import '../../styles/miraka-portal.css';
 import '../../styles/miraka-dashboard.css';
 ---
@@ -49,13 +48,6 @@ import '../../styles/miraka-dashboard.css';
   <title>Fuhrpark Wartung | Orange Pro Clean</title>
 </head>
 <body>
-  <MirakaDashboardShell
-    client:only="react"
-    requiredRole={['owner', 'admin']}
-    currentPath="/fuhrpark"
-    fullWidth={true}
-  >
-    <OPCFleetMaintenancePage client:only="react" />
-  </MirakaDashboardShell>
+  <OPCFleetMaintenanceRoutePage client:only="react" />
 </body>
 </html>
