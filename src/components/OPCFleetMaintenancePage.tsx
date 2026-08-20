@@ -1,42 +1,59 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { AlertTriangle, CarFront, CheckCircle2, Gauge, Plus, Search, ShieldAlert, Wrench } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CarFront, CheckCircle2, RefreshCw, Search, ShieldAlert, Wrench } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
   OPC_BRAND,
-  OPCMetricCard,
   OPCMetricsGrid,
+  OPCMetricCard,
   OPCPageShell,
   OPCTabs,
+  OPCToolbar,
   opcBlackButtonStyle,
   opcCardStyle,
   opcInputWithIconStyle,
   opcResponsiveStyle,
-  opcSearchIconStyle,
   opcSecondaryButtonStyle,
+  opcSelectStyle,
 } from './opc/OPCPageTop';
 
-type FleetVehicle = {
+type TabKey = 'due' | 'orders' | 'dtc' | 'healthy';
+
+type Vehicle = {
   id: string;
-  display_name?: string | null;
+  display_name: string;
   license_plate?: string | null;
   make?: string | null;
   model?: string | null;
   status?: string | null;
 };
 
-type VehicleStatus = {
-  vehicle_id: string;
+type WorkOrder = {
+  id: string;
+  vehicle_id?: string | null;
+  title?: string | null;
+  description?: string | null;
+  category?: string | null;
+  priority?: string | null;
   status?: string | null;
-  last_seen_at?: string | null;
-  odometer_km?: number | null;
-  fuel_level_percent?: number | null;
-  range_km?: number | null;
-  oil_level_percent?: number | null;
-  battery_voltage?: number | null;
-  dtc_active_count?: number | null;
+  scheduled_for?: string | null;
+  estimated_cost?: number | null;
+  service_provider?: string | null;
 };
 
-type DtcCode = {
+type ComponentHealth = {
+  id: string;
+  vehicle_id?: string | null;
+  component_type?: string | null;
+  component_position?: string | null;
+  condition_status?: string | null;
+  condition_percent?: number | null;
+  measurement_value?: number | null;
+  measurement_unit?: string | null;
+  next_inspection_at?: string | null;
+  notes?: string | null;
+};
+
+type Dtc = {
   id: string;
   vehicle_id?: string | null;
   code?: string | null;
@@ -46,33 +63,6 @@ type DtcCode = {
   last_seen_at?: string | null;
 };
 
-type WorkOrder = {
-  id: string;
-  vehicle_id?: string | null;
-  work_order_number?: string | null;
-  title?: string | null;
-  description?: string | null;
-  category?: string | null;
-  priority?: string | null;
-  status?: string | null;
-  scheduled_for?: string | null;
-  estimated_cost?: number | null;
-};
-
-type ComponentHealth = {
-  id: string;
-  vehicle_id?: string | null;
-  component_type?: string | null;
-  condition_status?: string | null;
-  condition_percent?: number | null;
-  measurement_value?: number | null;
-  measurement_unit?: string | null;
-  next_inspection_at?: string | null;
-  notes?: string | null;
-};
-
-type TabKey = 'due' | 'work' | 'errors';
-
 function formatDate(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
@@ -80,332 +70,215 @@ function formatDate(value?: string | null) {
   return date.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function vehicleName(vehicle?: FleetVehicle) {
-  if (!vehicle) return 'Unbekanntes Fahrzeug';
-  return vehicle.display_name || vehicle.license_plate || 'OPC Fahrzeug';
+function statusTone(status?: string | null) {
+  const raw = String(status || '').toLowerCase();
+  if (raw.includes('critical') || raw.includes('service_due')) return 'critical';
+  if (raw.includes('monitor') || raw.includes('warning') || raw.includes('open')) return 'warning';
+  if (raw.includes('ok') || raw.includes('completed')) return 'ok';
+  return 'neutral';
 }
 
-function statusLabel(value?: string | null) {
-  const clean = String(value || '').toLowerCase();
-  if (clean === 'critical') return 'Kritisch';
-  if (clean === 'service_due') return 'Service fällig';
-  if (clean === 'monitor') return 'Beobachten';
-  if (clean === 'warning') return 'Warnung';
-  if (clean === 'open') return 'Offen';
-  if (clean === 'planned') return 'Geplant';
-  if (clean === 'in_progress') return 'In Arbeit';
-  if (clean === 'ok') return 'OK';
-  return value || 'Offen';
+function Pill({ children, tone = 'neutral' }: { children: React.ReactNode; tone?: 'neutral' | 'warning' | 'critical' | 'ok' }) {
+  const color = tone === 'critical' ? OPC_BRAND.red : tone === 'warning' ? OPC_BRAND.amber : tone === 'ok' ? OPC_BRAND.green : OPC_BRAND.muted;
+  return <span style={{ display: 'inline-flex', height: '26px', padding: '0 10px', borderRadius: '999px', border: `1px solid ${OPC_BRAND.border}`, color, background: '#FFFFFF', fontSize: '12px', fontWeight: 820, alignItems: 'center' }}>{children}</span>;
 }
 
-function VehicleLine({
-  vehicle,
-  title,
-  meta,
-  badge,
-  icon,
-  actionHref,
-}: {
-  vehicle?: FleetVehicle;
-  title: string;
-  meta: ReactNode;
-  badge?: string;
-  icon: ReactNode;
-  actionHref?: string;
-}) {
+function EmptyState({ title, text }: { title: string; text: string }) {
   return (
-    <article
-      style={{
-        ...opcCardStyle,
-        padding: '18px 20px',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(220px, 1fr) minmax(0, 1.4fr) 150px',
-        gap: '16px',
-        alignItems: 'center',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-        <span
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 14,
-            border: `1px solid ${OPC_BRAND.border}`,
-            display: 'grid',
-            placeItems: 'center',
-            background: '#FAFAFA',
-            flexShrink: 0,
-          }}
-        >
-          {icon}
-        </span>
-        <div style={{ minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 15, fontWeight: 840, letterSpacing: '-0.025em' }}>{vehicleName(vehicle)}</h3>
-          <p style={{ margin: '5px 0 0', color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>
-            {vehicle?.license_plate || 'Kein Kennzeichen'} · {vehicle?.make || 'Marke offen'} {vehicle?.model || ''}
-          </p>
-        </div>
-      </div>
-
-      <div style={{ minWidth: 0 }}>
-        <strong style={{ display: 'block', fontSize: 14, fontWeight: 820, color: OPC_BRAND.text }}>{title}</strong>
-        <div style={{ marginTop: 6, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650, lineHeight: 1.45 }}>{meta}</div>
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
-        {badge && (
-          <span
-            style={{
-              padding: '7px 10px',
-              borderRadius: 999,
-              border: `1px solid ${OPC_BRAND.border}`,
-              background: '#FAFAFA',
-              color: OPC_BRAND.text,
-              fontSize: 11,
-              fontWeight: 820,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {badge}
-          </span>
-        )}
-        {actionHref && (
-          <a
-            href={actionHref}
-            style={{
-              ...opcSecondaryButtonStyle,
-              width: 'auto',
-              minWidth: 92,
-              height: 40,
-              fontSize: 12,
-            }}
-          >
-            Details
-          </a>
-        )}
-      </div>
-    </article>
+    <div style={{ ...opcCardStyle, padding: '28px', textAlign: 'center' }}>
+      <div style={{ fontSize: '16px', fontWeight: 850, letterSpacing: '-0.03em', marginBottom: '8px' }}>{title}</div>
+      <div style={{ color: OPC_BRAND.muted, fontSize: '14px', lineHeight: 1.55 }}>{text}</div>
+    </div>
   );
 }
 
 export default function OPCFleetMaintenancePage() {
+  const [activeTab, setActiveTab] = useState<TabKey>('due');
+  const [query, setQuery] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<TabKey>('due');
   const [error, setError] = useState('');
-  const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
-  const [statuses, setStatuses] = useState<VehicleStatus[]>([]);
-  const [dtcs, setDtcs] = useState<DtcCode[]>([]);
-  const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
-  const [healthRows, setHealthRows] = useState<ComponentHealth[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [orders, setOrders] = useState<WorkOrder[]>([]);
+  const [components, setComponents] = useState<ComponentHealth[]>([]);
+  const [dtcs, setDtcs] = useState<Dtc[]>([]);
 
-  async function loadData(refresh = false) {
-    if (refresh) setRefreshing(true);
+  const loadMaintenance = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true);
     else setLoading(true);
     setError('');
 
     try {
-      const [vehicleResult, statusResult, dtcResult, workResult, healthResult] = await Promise.all([
-        supabase.from('opc_fleet_vehicles').select('id, display_name, license_plate, make, model, status').order('display_name'),
-        supabase.from('opc_vehicle_status_current').select('*'),
-        supabase.from('opc_vehicle_dtc_codes').select('id, vehicle_id, code, description, severity, status, last_seen_at').in('status', ['active', 'review']).order('last_seen_at', { ascending: false }).limit(80),
-        supabase.from('opc_maintenance_work_orders').select('*').in('status', ['open', 'planned', 'in_progress', 'waiting_parts']).order('scheduled_for', { ascending: true, nullsFirst: false }).limit(80),
-        supabase.from('opc_vehicle_component_health').select('*').in('condition_status', ['monitor', 'service_due', 'critical']).order('measured_at', { ascending: false }).limit(80),
+      const vehiclesResult = await supabase.from('opc_fleet_vehicles').select('id, display_name, license_plate, make, model, status').order('display_name', { ascending: true });
+      if (vehiclesResult.error) throw vehiclesResult.error;
+      setVehicles((vehiclesResult.data || []) as Vehicle[]);
+
+      const [ordersResult, componentsResult, dtcResult] = await Promise.all([
+        supabase.from('opc_maintenance_work_orders').select('id, vehicle_id, title, description, category, priority, status, scheduled_for, estimated_cost, service_provider').order('created_at', { ascending: false }).limit(100),
+        supabase.from('opc_vehicle_component_health').select('id, vehicle_id, component_type, component_position, condition_status, condition_percent, measurement_value, measurement_unit, next_inspection_at, notes').order('measured_at', { ascending: false }).limit(100),
+        supabase.from('opc_vehicle_dtc_codes').select('id, vehicle_id, code, description, severity, status, last_seen_at').order('last_seen_at', { ascending: false }).limit(100),
       ]);
 
-      if (vehicleResult.error) throw vehicleResult.error;
-      if (statusResult.error) throw statusResult.error;
-      if (dtcResult.error) throw dtcResult.error;
-      if (workResult.error) throw workResult.error;
-      if (healthResult.error) throw healthResult.error;
-
-      setVehicles((vehicleResult.data || []) as FleetVehicle[]);
-      setStatuses((statusResult.data || []) as VehicleStatus[]);
-      setDtcs((dtcResult.data || []) as DtcCode[]);
-      setWorkOrders((workResult.data || []) as WorkOrder[]);
-      setHealthRows((healthResult.data || []) as ComponentHealth[]);
+      if (!ordersResult.error) setOrders((ordersResult.data || []) as WorkOrder[]);
+      if (!componentsResult.error) setComponents((componentsResult.data || []) as ComponentHealth[]);
+      if (!dtcResult.error) setDtcs((dtcResult.data || []) as Dtc[]);
     } catch (err: any) {
       setError(err?.message || 'Wartungsdaten konnten nicht geladen werden.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }
-
-  useEffect(() => {
-    void loadData(false);
   }, []);
 
+  useEffect(() => {
+    void loadMaintenance();
+  }, [loadMaintenance]);
+
   const vehicleById = useMemo(() => {
-    const map = new Map<string, FleetVehicle>();
+    const map = new Map<string, Vehicle>();
     vehicles.forEach((vehicle) => map.set(vehicle.id, vehicle));
     return map;
   }, [vehicles]);
 
-  const statusByVehicle = useMemo(() => {
-    const map = new Map<string, VehicleStatus>();
-    statuses.forEach((status) => map.set(status.vehicle_id, status));
-    return map;
-  }, [statuses]);
+  const dueComponents = useMemo(() => components.filter((item) => ['monitor', 'service_due', 'critical'].includes(String(item.condition_status || '').toLowerCase())), [components]);
+  const openOrders = useMemo(() => orders.filter((order) => !['completed', 'cancelled'].includes(String(order.status || '').toLowerCase())), [orders]);
+  const activeDtcs = useMemo(() => dtcs.filter((dtc) => String(dtc.status || 'active').toLowerCase() === 'active'), [dtcs]);
+  const healthyVehicles = useMemo(() => vehicles.filter((vehicle) => {
+    const hasDue = dueComponents.some((entry) => entry.vehicle_id === vehicle.id);
+    const hasDtc = activeDtcs.some((entry) => entry.vehicle_id === vehicle.id);
+    const hasOrder = openOrders.some((entry) => entry.vehicle_id === vehicle.id);
+    return !hasDue && !hasDtc && !hasOrder;
+  }), [activeDtcs, dueComponents, openOrders, vehicles]);
 
-  const dueVehicleIds = useMemo(() => {
-    const ids = new Set<string>();
-    healthRows.forEach((row) => row.vehicle_id && ids.add(row.vehicle_id));
-    dtcs.forEach((row) => row.vehicle_id && ids.add(row.vehicle_id));
-    workOrders.forEach((row) => row.vehicle_id && ids.add(row.vehicle_id));
-    statuses.forEach((status) => {
-      if ((status.dtc_active_count || 0) > 0 || Number(status.fuel_level_percent || 100) < 15 || Number(status.oil_level_percent || 100) < 25) {
-        ids.add(status.vehicle_id);
-      }
-    });
-    return ids;
-  }, [dtcs, healthRows, statuses, workOrders]);
-
-  const lowerSearch = search.trim().toLowerCase();
-  const matchesVehicle = (vehicle?: FleetVehicle) => {
-    if (!lowerSearch) return true;
-    const haystack = `${vehicle?.display_name || ''} ${vehicle?.license_plate || ''} ${vehicle?.make || ''} ${vehicle?.model || ''}`.toLowerCase();
-    return haystack.includes(lowerSearch);
+  const matchesQuery = (vehicleId?: string | null, text = '') => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return true;
+    const vehicle = vehicleId ? vehicleById.get(vehicleId) : undefined;
+    return [vehicle?.display_name, vehicle?.license_plate, vehicle?.make, vehicle?.model, text].filter(Boolean).join(' ').toLowerCase().includes(needle);
   };
 
-  const filteredDueVehicles = vehicles.filter((vehicle) => dueVehicleIds.has(vehicle.id) && matchesVehicle(vehicle));
-  const filteredWorkOrders = workOrders.filter((row) => matchesVehicle(vehicleById.get(row.vehicle_id || '')) || `${row.title || ''} ${row.description || ''}`.toLowerCase().includes(lowerSearch));
-  const filteredDtcs = dtcs.filter((row) => matchesVehicle(vehicleById.get(row.vehicle_id || '')) || `${row.code || ''} ${row.description || ''}`.toLowerCase().includes(lowerSearch));
-
-  const healthyCount = Math.max(vehicles.length - dueVehicleIds.size, 0);
-  const criticalCount = dtcs.filter((row) => row.severity === 'critical').length + healthRows.filter((row) => row.condition_status === 'critical').length;
+  const filteredDue = dueComponents.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.component_type} ${entry.notes}`) && (priorityFilter === 'all' || String(entry.condition_status) === priorityFilter));
+  const filteredOrders = openOrders.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.title} ${entry.description}`) && (priorityFilter === 'all' || String(entry.priority) === priorityFilter));
+  const filteredDtcs = activeDtcs.filter((entry) => matchesQuery(entry.vehicle_id, `${entry.code} ${entry.description}`) && (priorityFilter === 'all' || String(entry.severity) === priorityFilter));
 
   return (
     <OPCPageShell>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 22 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'flex-start', marginBottom: '22px' }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 860, letterSpacing: '0.20em', textTransform: 'uppercase', color: OPC_BRAND.muted, marginBottom: 8 }}>OPC Fuhrpark</div>
-          <h1 style={{ margin: 0, fontSize: 34, lineHeight: 1, fontWeight: 880, letterSpacing: '-0.055em' }}>Wartung & Diagnose</h1>
-          <p style={{ margin: '10px 0 0', color: OPC_BRAND.muted, fontSize: 14, fontWeight: 650 }}>
-            Fahrzeugzustand, AutoAid-Fehlercodes, Wartungsarbeiten und Reparaturempfehlungen.
-          </p>
+          <h1 style={{ margin: 0, fontSize: '30px', fontWeight: 860, letterSpacing: '-0.055em' }}>Wartung</h1>
+          <p style={{ margin: '7px 0 0', color: OPC_BRAND.muted, fontSize: '14px', fontWeight: 620 }}>Fällige Arbeiten, Fehlercodes und Reparaturempfehlungen.</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <a href="/fuhrpark" style={{ ...opcSecondaryButtonStyle, width: 'auto', minWidth: 130 }}>Fuhrpark</a>
-          <a href="/fuhrpark/karte" style={{ ...opcBlackButtonStyle, width: 'auto', minWidth: 132 }}><CarFront size={16} /> Live Map</a>
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <a href="/fuhrpark" style={{ ...opcSecondaryButtonStyle, width: 'auto' }}><CarFront size={16} /> Fahrzeuge</a>
+          <button type="button" onClick={() => void loadMaintenance(true)} disabled={refreshing} style={{ ...opcBlackButtonStyle, width: 'auto' }}><RefreshCw size={16} /> {refreshing ? 'Laden...' : 'Aktualisieren'}</button>
         </div>
       </div>
 
       <OPCMetricsGrid>
-        <OPCMetricCard label="Fahrzeuge fällig" value={dueVehicleIds.size} icon={<Wrench size={18} />} tone={dueVehicleIds.size ? 'warning' : 'success'} />
-        <OPCMetricCard label="Offene Arbeiten" value={workOrders.length} icon={<Gauge size={18} />} tone={workOrders.length ? 'warning' : 'neutral'} />
-        <OPCMetricCard label="Kritische Fehler" value={criticalCount} icon={<ShieldAlert size={18} />} tone={criticalCount ? 'danger' : 'success'} />
-        <OPCMetricCard label="Ohne Aufmerksamkeit" value={healthyCount} icon={<CheckCircle2 size={18} />} tone="success" />
+        <OPCMetricCard label="Fahrzeuge fällig" value={loading ? '—' : dueComponents.length} icon={<Wrench size={19} />} tone="warning" />
+        <OPCMetricCard label="Offene Arbeiten" value={loading ? '—' : openOrders.length} icon={<AlertTriangle size={19} />} />
+        <OPCMetricCard label="Aktive Fehler" value={loading ? '—' : activeDtcs.length} icon={<ShieldAlert size={19} />} tone="danger" />
+        <OPCMetricCard label="Ohne Aufmerksamkeit" value={loading ? '—' : healthyVehicles.length} icon={<CheckCircle2 size={19} />} tone="success" />
       </OPCMetricsGrid>
 
-      <section style={{ ...opcCardStyle, padding: 18, marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 180px', gap: 12 }}>
-          <div style={{ position: 'relative' }}>
-            <Search size={18} style={opcSearchIconStyle} />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Fahrzeug, Kennzeichen, Fehler oder Empfehlung suchen"
-              style={opcInputWithIconStyle}
-            />
-          </div>
-          <button type="button" onClick={() => void loadData(true)} disabled={refreshing} style={opcBlackButtonStyle}>
-            <Plus size={16} /> {refreshing ? 'Laden...' : 'Neu laden'}
-          </button>
+      <OPCToolbar columns="minmax(0, 1fr) 180px 160px">
+        <div style={{ position: 'relative' }}>
+          <Search size={17} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: OPC_BRAND.faint }} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fahrzeug, Kennzeichen, Fehler oder Empfehlung suchen" style={opcInputWithIconStyle} />
         </div>
+        <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)} style={opcSelectStyle}>
+          <option value="all">Alle Prioritäten</option>
+          <option value="critical">Kritisch</option>
+          <option value="warning">Warnung</option>
+          <option value="attention">Aufmerksamkeit</option>
+          <option value="service_due">Service fällig</option>
+          <option value="monitor">Beobachten</option>
+        </select>
+        <button type="button" onClick={() => void loadMaintenance(true)} style={opcBlackButtonStyle}><RefreshCw size={16} /> Neu laden</button>
+      </OPCToolbar>
+
+      <OPCTabs tabs={[
+        { key: 'due', label: `Fällige Wartung · ${dueComponents.length}`, active: activeTab === 'due', onClick: () => setActiveTab('due') },
+        { key: 'orders', label: `Wartungsliste · ${openOrders.length}`, active: activeTab === 'orders', onClick: () => setActiveTab('orders') },
+        { key: 'dtc', label: `Aktive Fehler · ${activeDtcs.length}`, active: activeTab === 'dtc', onClick: () => setActiveTab('dtc') },
+        { key: 'healthy', label: `Okay · ${healthyVehicles.length}`, active: activeTab === 'healthy', onClick: () => setActiveTab('healthy') },
+      ]} />
+
+      {error && <div style={{ ...opcCardStyle, padding: '14px 16px', color: OPC_BRAND.red, marginBottom: '16px', fontWeight: 720 }}>{error}</div>}
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        {activeTab === 'due' && filteredDue.length === 0 && <EmptyState title="Keine passenden Wartungsdaten" text="Komponentenzustände von AutoAid oder manuelle Prüfungen erscheinen hier." />}
+        {activeTab === 'due' && filteredDue.map((item) => {
+          const vehicle = item.vehicle_id ? vehicleById.get(item.vehicle_id) : undefined;
+          const tone = statusTone(item.condition_status);
+          return (
+            <div key={item.id} style={{ ...opcCardStyle, padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 140px 130px 150px', gap: '16px', alignItems: 'center' }} className="opc-maintenance-row">
+              <div>
+                <div style={{ fontSize: '15px', fontWeight: 850 }}>{vehicle?.display_name || 'Fahrzeug'} · {item.component_type || 'Komponente'}</div>
+                <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', lineHeight: 1.45 }}>{vehicle?.license_plate || 'Kennzeichen offen'} · {item.notes || 'Prüfung empfohlen'}</div>
+              </div>
+              <Pill tone={tone === 'critical' ? 'critical' : tone === 'warning' ? 'warning' : 'neutral'}>{item.condition_status || 'unknown'}</Pill>
+              <div style={{ fontSize: '13px', fontWeight: 720 }}>{item.condition_percent ? `${Math.round(Number(item.condition_percent))}%` : item.measurement_value ? `${item.measurement_value} ${item.measurement_unit || ''}` : '—'}</div>
+              <a href={vehicle ? `/fuhrpark/fahrzeug/${vehicle.id}` : '/fuhrpark'} style={{ ...opcSecondaryButtonStyle, height: '42px' }}>Details öffnen</a>
+            </div>
+          );
+        })}
+
+        {activeTab === 'orders' && filteredOrders.length === 0 && <EmptyState title="Keine offenen Arbeiten" text="Geplante Reparaturen, Services und Diagnosen erscheinen hier." />}
+        {activeTab === 'orders' && filteredOrders.map((order) => {
+          const vehicle = order.vehicle_id ? vehicleById.get(order.vehicle_id) : undefined;
+          return (
+            <div key={order.id} style={{ ...opcCardStyle, padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 140px 130px 150px', gap: '16px', alignItems: 'center' }} className="opc-maintenance-row">
+              <div>
+                <div style={{ fontSize: '15px', fontWeight: 850 }}>{order.title || 'Wartungsarbeit'}</div>
+                <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', lineHeight: 1.45 }}>{vehicle?.display_name || 'Fahrzeug'} · {vehicle?.license_plate || 'Kennzeichen offen'} · {order.description || 'Keine Beschreibung'}</div>
+              </div>
+              <Pill tone={statusTone(order.priority) === 'critical' ? 'critical' : 'warning'}>{order.priority || 'warning'}</Pill>
+              <div style={{ fontSize: '13px', fontWeight: 720 }}>{order.status || 'open'}</div>
+              <a href={vehicle ? `/fuhrpark/fahrzeug/${vehicle.id}` : '/fuhrpark'} style={{ ...opcSecondaryButtonStyle, height: '42px' }}>Details öffnen</a>
+            </div>
+          );
+        })}
+
+        {activeTab === 'dtc' && filteredDtcs.length === 0 && <EmptyState title="Keine aktiven Fehlercodes" text="AutoAid-DTCs erscheinen hier, sobald der Pull-Worker Daten schreibt." />}
+        {activeTab === 'dtc' && filteredDtcs.map((dtc) => {
+          const vehicle = dtc.vehicle_id ? vehicleById.get(dtc.vehicle_id) : undefined;
+          return (
+            <div key={dtc.id} style={{ ...opcCardStyle, padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 140px 130px 150px', gap: '16px', alignItems: 'center' }} className="opc-maintenance-row">
+              <div>
+                <div style={{ fontSize: '15px', fontWeight: 850 }}>{dtc.code || 'Fehlercode'} · {vehicle?.display_name || 'Fahrzeug'}</div>
+                <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px', lineHeight: 1.45 }}>{dtc.description || 'Keine Beschreibung'} · zuletzt {formatDate(dtc.last_seen_at)}</div>
+              </div>
+              <Pill tone={statusTone(dtc.severity) === 'critical' ? 'critical' : 'warning'}>{dtc.severity || 'unknown'}</Pill>
+              <div style={{ fontSize: '13px', fontWeight: 720 }}>{dtc.status || 'active'}</div>
+              <a href={vehicle ? `/fuhrpark/fahrzeug/${vehicle.id}` : '/fuhrpark'} style={{ ...opcSecondaryButtonStyle, height: '42px' }}>Details öffnen</a>
+            </div>
+          );
+        })}
+
+        {activeTab === 'healthy' && healthyVehicles.length === 0 && <EmptyState title="Keine Fahrzeuge ohne Aufmerksamkeit" text="Sobald Fahrzeuge ohne Warnungen vorhanden sind, werden sie hier angezeigt." />}
+        {activeTab === 'healthy' && healthyVehicles.map((vehicle) => (
+          <div key={vehicle.id} style={{ ...opcCardStyle, padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 140px 150px', gap: '16px', alignItems: 'center' }} className="opc-maintenance-row">
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 850 }}>{vehicle.display_name}</div>
+              <div style={{ marginTop: '5px', color: OPC_BRAND.muted, fontSize: '13px' }}>{vehicle.license_plate || 'Kennzeichen offen'} · {[vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Fahrzeugdaten offen'}</div>
+            </div>
+            <Pill tone="ok">Okay</Pill>
+            <a href={`/fuhrpark/fahrzeug/${vehicle.id}`} style={{ ...opcSecondaryButtonStyle, height: '42px' }}>Details öffnen</a>
+          </div>
+        ))}
       </section>
 
-      <OPCTabs
-        tabs={[
-          { key: 'due', label: `Fällige Wartung · ${filteredDueVehicles.length}`, active: activeTab === 'due', onClick: () => setActiveTab('due') },
-          { key: 'work', label: `Wartungsliste · ${filteredWorkOrders.length}`, active: activeTab === 'work', onClick: () => setActiveTab('work') },
-          { key: 'errors', label: `Aktive Fehler · ${filteredDtcs.length}`, active: activeTab === 'errors', onClick: () => setActiveTab('errors') },
-        ]}
-      />
-
-      {error && <div style={{ ...opcCardStyle, borderColor: '#FCA5A5', background: '#FEF2F2', color: OPC_BRAND.red, padding: 16, marginBottom: 16, fontWeight: 720 }}>{error}</div>}
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {activeTab === 'due' && filteredDueVehicles.map((vehicle) => {
-          const status = statusByVehicle.get(vehicle.id);
-          const components = healthRows.filter((row) => row.vehicle_id === vehicle.id);
-          const activeDtcs = dtcs.filter((row) => row.vehicle_id === vehicle.id);
-          const openWork = workOrders.filter((row) => row.vehicle_id === vehicle.id);
-          const recommendation = components[0]?.notes || activeDtcs[0]?.description || openWork[0]?.title || 'Fahrzeug prüfen und nächsten Service festlegen.';
-          return (
-            <VehicleLine
-              key={vehicle.id}
-              vehicle={vehicle}
-              title={recommendation}
-              icon={<Wrench size={18} />}
-              badge={statusLabel(components[0]?.condition_status || activeDtcs[0]?.severity || openWork[0]?.priority || 'Prüfen')}
-              actionHref={`/fuhrpark/fahrzeug/${vehicle.id}`}
-              meta={
-                <>
-                  Tank {status?.fuel_level_percent != null ? `${Math.round(Number(status.fuel_level_percent))}%` : '—'} · Fehler {status?.dtc_active_count || activeDtcs.length} · Kilometer {status?.odometer_km != null ? `${Math.round(Number(status.odometer_km)).toLocaleString('de-CH')} km` : '—'}
-                </>
-              }
-            />
-          );
-        })}
-
-        {activeTab === 'work' && filteredWorkOrders.map((order) => {
-          const vehicle = vehicleById.get(order.vehicle_id || '');
-          return (
-            <VehicleLine
-              key={order.id}
-              vehicle={vehicle}
-              title={order.title || 'Wartungsarbeit'}
-              icon={<Wrench size={18} />}
-              badge={statusLabel(order.status)}
-              actionHref={vehicle ? `/fuhrpark/fahrzeug/${vehicle.id}` : undefined}
-              meta={
-                <>
-                  {order.category || 'Arbeit'} · Priorität {statusLabel(order.priority)} · Termin {formatDate(order.scheduled_for)} · Kostenschätzung {order.estimated_cost ? `CHF ${Number(order.estimated_cost).toFixed(2)}` : '—'}
-                </>
-              }
-            />
-          );
-        })}
-
-        {activeTab === 'errors' && filteredDtcs.map((dtc) => {
-          const vehicle = vehicleById.get(dtc.vehicle_id || '');
-          return (
-            <VehicleLine
-              key={dtc.id}
-              vehicle={vehicle}
-              title={`${dtc.code || 'Fehlercode'} · ${dtc.description || 'Keine Beschreibung hinterlegt'}`}
-              icon={<AlertTriangle size={18} />}
-              badge={statusLabel(dtc.severity)}
-              actionHref={vehicle ? `/fuhrpark/fahrzeug/${vehicle.id}` : undefined}
-              meta={<>Status {statusLabel(dtc.status)} · zuletzt gesehen {formatDate(dtc.last_seen_at)}</>}
-            />
-          );
-        })}
-
-        {!loading && activeTab === 'due' && filteredDueVehicles.length === 0 && <EmptyState />}
-        {!loading && activeTab === 'work' && filteredWorkOrders.length === 0 && <EmptyState />}
-        {!loading && activeTab === 'errors' && filteredDtcs.length === 0 && <EmptyState />}
-        {loading && <EmptyState text="Wartungsdaten werden geladen..." />}
-      </div>
-
-      <style>{`${opcResponsiveStyle}
+      <style>{opcResponsiveStyle}</style>
+      <style>{`
         @media (max-width: 980px) {
-          article[style*="grid-template-columns"] {
+          .opc-maintenance-row {
             grid-template-columns: 1fr !important;
+            gap: 10px !important;
           }
         }
       `}</style>
     </OPCPageShell>
-  );
-}
-
-function EmptyState({ text = 'Keine passenden Wartungsdaten.' }: { text?: string }) {
-  return (
-    <section style={{ ...opcCardStyle, padding: '42px 18px', textAlign: 'center' }}>
-      <CheckCircle2 size={22} color={OPC_BRAND.muted} />
-      <div style={{ marginTop: 12, color: OPC_BRAND.muted, fontSize: 14, fontWeight: 760 }}>{text}</div>
-    </section>
   );
 }
