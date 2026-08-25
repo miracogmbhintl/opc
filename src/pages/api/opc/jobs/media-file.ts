@@ -7,17 +7,15 @@ import {
 export const prerender = false;
 
 const JOB_MEDIA_BUCKET = 'opc-job-media';
-const ACTIVE_ASSIGNMENT_STATUSES = new Set([
-  'assigned',
-  'accepted',
-  'confirmed',
-  'scheduled',
-  'on_site',
-  'onsite',
-  'in_progress',
-  'started',
-  'running',
-  'completed',
+const INACTIVE_ASSIGNMENT_STATUSES = new Set([
+  'removed',
+  'unassigned',
+  'cancelled',
+  'canceled',
+  'deleted',
+  'inactive',
+  'rejected',
+  'declined',
 ]);
 
 function clean(value: unknown) {
@@ -110,7 +108,7 @@ async function canViewJob(
   return (assignments || []).some((row: any) => {
     const employeeId = clean(row?.employee_id);
     const status = clean(row?.status || 'assigned').toLowerCase();
-    return employeeIds.has(employeeId) && ACTIVE_ASSIGNMENT_STATUSES.has(status);
+    return employeeIds.has(employeeId) && !INACTIVE_ASSIGNMENT_STATUSES.has(status);
   });
 }
 
