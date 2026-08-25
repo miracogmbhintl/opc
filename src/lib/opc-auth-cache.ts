@@ -38,7 +38,6 @@ type StaffRoleRow = {
   can_access_portal?: boolean | null;
   can_manage_jobs?: boolean | null;
   can_view_all_jobs?: boolean | null;
-  can_manage_calendar?: boolean | null;
 };
 
 let authProfileRequestInFlight: Promise<UserProfile | null> | null = null;
@@ -314,8 +313,11 @@ async function fetchActiveStaffRoleByUser(
   userId: string,
   email?: string | null,
 ): Promise<StaffRoleRow | null> {
+  // Only select columns that are proven to exist in the checked-in production
+  // schema history. Optional compatibility permissions remain in cached or
+  // legacy profile metadata until the live schema audit verifies them.
   const fields =
-    'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs,can_manage_calendar';
+    'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs';
 
   const byUser = await withAuthTimeout(
     supabase
@@ -414,7 +416,9 @@ async function fetchLiveOpcAuthProfile(cachedProfile: UserProfile | null): Promi
       employee_id: staffRole.employee_id || null,
       can_manage_jobs: staffRole.can_manage_jobs === true,
       can_view_all_jobs: staffRole.can_view_all_jobs === true,
-      can_manage_calendar: staffRole.can_manage_calendar === true,
+      can_manage_calendar:
+        sameUserCache?.can_manage_calendar === true ||
+        (legacyProfile as any)?.can_manage_calendar === true,
       created_at: '',
       updated_at: '',
     };
