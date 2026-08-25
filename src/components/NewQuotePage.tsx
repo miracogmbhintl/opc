@@ -184,163 +184,52 @@ function AdvancedTextArea({
   wide?: boolean;
   rows?: number;
 }) {
-  const textareaRef =
-    useRef<HTMLTextAreaElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  function formatSelectedLines(
-    mode: 'bullet' | 'plain',
-  ) {
+  function formatSelectedLines(mode: 'bullet' | 'plain') {
     const textarea = textareaRef.current;
-
     if (!textarea) return;
-
-    const start =
-      textarea.selectionStart ?? 0;
-
-    const end =
-      textarea.selectionEnd ?? start;
-
-    const lineStart =
-      value.lastIndexOf(
-        '\n',
-        Math.max(0, start - 1),
-      ) + 1;
-
-    const nextBreak =
-      value.indexOf('\n', end);
-
-    const lineEnd =
-      nextBreak === -1
-        ? value.length
-        : nextBreak;
-
-    const selected =
-      value.slice(lineStart, lineEnd);
-
-    const lines =
-      selected
-        ? selected.split('\n')
-        : [''];
-
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? start;
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const nextBreak = value.indexOf('\n', end);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    const selected = value.slice(lineStart, lineEnd);
+    const lines = selected ? selected.split('\n') : [''];
     const replacement = lines
       .map((line) => {
-        const plain = line.replace(
-          /^\s*[•*-]\s*/,
-          '',
-        );
-
-        return mode === 'bullet'
-          ? `• ${plain}`
-          : plain;
+        const plain = line.replace(/^\s*[•*-]\s*/, '');
+        return mode === 'bullet' ? `• ${plain}` : plain;
       })
       .join('\n');
 
-    onChange(
-      `${value.slice(0, lineStart)}` +
-      `${replacement}` +
-      `${value.slice(lineEnd)}`,
-    );
-
+    onChange(`${value.slice(0, lineStart)}${replacement}${value.slice(lineEnd)}`);
     requestAnimationFrame(() => {
       textarea.focus();
-
-      textarea.setSelectionRange(
-        lineStart,
-        lineStart + replacement.length,
-      );
+      textarea.setSelectionRange(lineStart, lineStart + replacement.length);
     });
   }
 
   return (
-    <div
-      className={
-        wide ? 'opc-wide' : undefined
-      }
-    >
+    <div className={wide ? 'opc-wide' : undefined}>
       <Label>{label}</Label>
-
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 6,
-          marginBottom: 7,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() =>
-            formatSelectedLines('bullet')
-          }
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          • Aufzählung
-        </button>
-
-        <button
-          type="button"
-          onClick={() =>
-            formatSelectedLines('plain')
-          }
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          Text
-        </button>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 7 }}>
+        <button type="button" onClick={() => formatSelectedLines('bullet')} style={{ border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.text, borderRadius: 9, padding: '6px 9px', fontSize: 12, fontWeight: 760, cursor: 'pointer' }}>• Aufzählung</button>
+        <button type="button" onClick={() => formatSelectedLines('plain')} style={{ border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.text, borderRadius: 9, padding: '6px 9px', fontSize: 12, fontWeight: 760, cursor: 'pointer' }}>Text</button>
       </div>
-
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(event) =>
-          onChange(event.target.value)
-        }
-        rows={rows}
-        style={textareaStyle}
-      />
+      <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} rows={rows} style={textareaStyle} />
     </div>
   );
 }
 
 export default function NewQuotePage() {
   const [form, setForm] = useState<FormState>(() => ({
-    clientId: '',
-    clientSiteId: '',
-    title: 'Neue Offerte',
-    quoteType: 'standard',
-    status: 'draft',
-    issueDate: todayInput(),
-    validUntil: addDays(todayInput(), 14),
-    priceMode: 'excl',
-    itemTitle: 'Neue Position',
-    description: '',
-    quantity: '1',
-    unit: 'pauschal',
-    unitPrice: '0',
-    discount: '0',
-    taxRate: '8.1',
+    clientId: '', clientSiteId: '', title: 'Neue Offerte', quoteType: 'standard', status: 'draft',
+    issueDate: todayInput(), validUntil: addDays(todayInput(), 14), priceMode: 'excl', itemTitle: 'Neue Position',
+    description: '', quantity: '1', unit: 'pauschal', unitPrice: '0', discount: '0', taxRate: '8.1',
     introText: 'Vielen Dank für Ihre Anfrage. Gerne unterbreiten wir Ihnen unsere Offerte.',
     termsText: 'Die Offerte ist freibleibend bis zur schriftlichen Bestätigung. Termine werden gemeinsam vereinbart.',
-    paymentTerms: 'Zahlbar gemäss Vereinbarung.',
-    customerNotes: '',
-    internalNotes: '',
+    paymentTerms: 'Zahlbar gemäss Vereinbarung.', customerNotes: '', internalNotes: '',
   }));
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
@@ -359,10 +248,7 @@ export default function NewQuotePage() {
   }, []);
 
   useEffect(() => {
-    if (!form.clientId) {
-      setSites([]);
-      return;
-    }
+    if (!form.clientId) { setSites([]); return; }
     void loadSites(form.clientId);
   }, [form.clientId]);
 
@@ -384,51 +270,34 @@ export default function NewQuotePage() {
   async function loadClients(preselectClientId = '') {
     setLoadingClients(true);
     try {
-      const { data, error } = await supabase
-        .from('opc_client_overview')
-        .select('client_id,contact_id,billing_name,company_name,full_name,billing_email,email,primary_site_id,primary_site_name,primary_site_address,primary_site_postal_code,primary_site_city')
-        .order('billing_name', { ascending: true })
-        .limit(300);
+      const { data, error } = await supabase.from('opc_client_overview').select('client_id,contact_id,billing_name,company_name,full_name,billing_email,email,primary_site_id,primary_site_name,primary_site_address,primary_site_postal_code,primary_site_city').order('billing_name', { ascending: true }).limit(300);
       if (error) throw error;
       const rows = (data || []) as ClientOption[];
       setClients(rows);
-      if (preselectClientId && rows.some((client) => getClientId(client) === preselectClientId)) {
-        setForm((current) => ({ ...current, clientId: preselectClientId }));
-      }
+      if (preselectClientId && rows.some((client) => getClientId(client) === preselectClientId)) setForm((current) => ({ ...current, clientId: preselectClientId }));
     } catch (error: any) {
       setErrorMessage(error?.message || 'Kunden konnten nicht geladen werden.');
-    } finally {
-      setLoadingClients(false);
-    }
+    } finally { setLoadingClients(false); }
   }
 
   async function loadSites(clientId: string) {
     setLoadingSites(true);
     try {
-      const { data, error } = await supabase
-        .from('opc_client_sites')
-        .select('id,client_id,contact_id,site_name,address_text,postal_code,city,country')
-        .eq('client_id', clientId)
-        .order('site_name', { ascending: true });
+      const { data, error } = await supabase.from('opc_client_sites').select('id,client_id,contact_id,site_name,address_text,postal_code,city,country').eq('client_id', clientId).order('site_name', { ascending: true });
       if (error) throw error;
       const loaded = (data || []) as SiteOption[];
       setSites(loaded);
       setForm((current) => {
         if (current.clientSiteId && loaded.some((site) => site.id === current.clientSiteId)) return current;
-        const fallback = loaded[0]?.id || '';
-        return { ...current, clientSiteId: fallback };
+        return { ...current, clientSiteId: loaded[0]?.id || '' };
       });
     } catch (error: any) {
       setSites([]);
       setErrorMessage(error?.message || 'Standorte konnten nicht geladen werden.');
-    } finally {
-      setLoadingSites(false);
-    }
+    } finally { setLoadingSites(false); }
   }
 
-  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
+  function update<K extends keyof FormState>(key: K, value: FormState[K]) { setForm((current) => ({ ...current, [key]: value })); }
 
   function validate() {
     if (!form.clientId) return 'Bitte Kunde auswählen.';
@@ -441,38 +310,21 @@ export default function NewQuotePage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
-
     setErrorMessage('');
     setSuccessMessage('');
     const validation = validate();
-    if (validation) {
-      setErrorMessage(validation);
-      return;
-    }
-
+    if (validation) { setErrorMessage(validation); return; }
     setSaving(true);
 
     try {
-      const clientSnapshot = selectedClient
-        ? {
-            client_id: form.clientId,
-            billing_name: selectedClient.billing_name,
-            company_name: selectedClient.company_name,
-            full_name: selectedClient.full_name,
-            email: selectedClient.email || selectedClient.billing_email,
-          }
-        : {};
-
-      const siteSnapshot = selectedSite
-        ? {
-            client_site_id: selectedSite.id,
-            site_name: selectedSite.site_name,
-            address_text: selectedSite.address_text || selectedSite.address,
-            postal_code: selectedSite.postal_code,
-            city: selectedSite.city,
-            country: selectedSite.country,
-          }
-        : {};
+      const clientSnapshot = selectedClient ? {
+        client_id: form.clientId, billing_name: selectedClient.billing_name, company_name: selectedClient.company_name,
+        full_name: selectedClient.full_name, email: selectedClient.email || selectedClient.billing_email,
+      } : {};
+      const siteSnapshot = selectedSite ? {
+        client_site_id: selectedSite.id, site_name: selectedSite.site_name, address_text: selectedSite.address_text || selectedSite.address,
+        postal_code: selectedSite.postal_code, city: selectedSite.city, country: selectedSite.country,
+      } : {};
 
       const quotePayload = {
         client_id: form.clientId,
@@ -500,50 +352,30 @@ export default function NewQuotePage() {
         tax_rate: roundMoney(totals.taxRate),
         tax_chf: roundMoney(totals.tax),
         total_chf: roundMoney(totals.total),
-        metadata: {
-          created_from: 'offerte_neu_page',
-          price_input_mode: form.priceMode,
-        },
+        metadata: { created_from: 'offerte_neu_page', price_input_mode: form.priceMode },
       };
-
-      const { data: quote, error: quoteError } = await supabase
-        .from('opc_quotes')
-        .insert(quotePayload)
-        .select('id, quote_number')
-        .single();
-
-      if (quoteError) throw quoteError;
 
       const itemPayload = {
-        quote_id: quote.id,
-        sort_order: 1,
-        item_type: 'service',
-        title: clean(form.itemTitle),
-        description: form.description || null,
-        quantity: totals.quantity,
-        unit: form.unit || 'pauschal',
-        unit_price_chf: roundMoney(totals.unitExcl),
-        discount_chf: 0,
-        tax_rate: roundMoney(totals.taxRate),
-        subtotal_chf: roundMoney(totals.subtotal),
-        tax_chf: roundMoney(totals.tax),
-        total_chf: roundMoney(totals.total),
-        metadata: {
-          input_price_mode: form.priceMode,
-          input_price_chf: parseMoney(form.unitPrice),
-        },
+        sort_order: 1, item_type: 'service', title: clean(form.itemTitle), description: form.description || null,
+        quantity: totals.quantity, unit: form.unit || 'pauschal', unit_price_chf: roundMoney(totals.unitExcl),
+        discount_chf: 0, tax_rate: roundMoney(totals.taxRate), subtotal_chf: roundMoney(totals.subtotal),
+        tax_chf: roundMoney(totals.tax), total_chf: roundMoney(totals.total),
+        metadata: { input_price_mode: form.priceMode, input_price_chf: parseMoney(form.unitPrice) },
       };
 
-      const { error: itemError } = await supabase.from('opc_quote_items').insert(itemPayload);
-      if (itemError) throw itemError;
+      const { data, error } = await supabase.rpc('opc_create_quote_atomic', {
+        p_quote: quotePayload,
+        p_items: [itemPayload],
+      });
+      if (error) throw error;
+      const quote = data?.quote;
+      if (!quote?.id) throw new Error('Offerte wurde ohne ID zurückgegeben.');
 
       setSuccessMessage('Offerte wurde erstellt.');
       window.location.href = `${baseUrl}/offerte/${quote.id}`;
     } catch (error: any) {
       setErrorMessage(error?.message || 'Offerte konnte nicht erstellt werden.');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
   return (
@@ -551,31 +383,16 @@ export default function NewQuotePage() {
       <OPCPageShell>
         <form onSubmit={handleSubmit} className="opc-new-doc-page" style={{ fontFamily: pageFont }}>
           <div className="opc-new-doc-topbar">
-            <a href={`${baseUrl}/offerten`} className="opc-back-pill">
-              <ArrowLeft size={16} /> Zurück
-            </a>
-
+            <a href={`${baseUrl}/offerten`} className="opc-back-pill"><ArrowLeft size={16} /> Zurück</a>
             <div className="opc-new-doc-top-actions">
-              <a href={`${baseUrl}/kunden`} className="opc-button light">
-                <UserRound size={16} /> Kunde auswählen
-              </a>
-              <button type="submit" disabled={saving} className="opc-button dark">
-                <Save size={16} /> {saving ? 'Speichert...' : 'Offerte erstellen'}
-              </button>
+              <a href={`${baseUrl}/kunden`} className="opc-button light"><UserRound size={16} /> Kunde auswählen</a>
+              <button type="submit" disabled={saving} className="opc-button dark"><Save size={16} /> {saving ? 'Speichert...' : 'Offerte erstellen'}</button>
             </div>
           </div>
 
           <section className="opc-new-doc-hero" style={cardStyle}>
-            <div>
-              <p>Offerte</p>
-              <h1>Neue Offerte</h1>
-              <span>{getClientName(selectedClient) || 'Kunde noch nicht gewählt'}</span>
-            </div>
-            <div className="opc-new-doc-total-box">
-              <span>Total inkl. MWST</span>
-              <strong>{formatMoney(totals.total)}</strong>
-              <em>Preisangaben: {form.priceMode === 'incl' ? 'inkl. MWST' : 'exkl. MWST'}</em>
-            </div>
+            <div><p>Offerte</p><h1>Neue Offerte</h1><span>{getClientName(selectedClient) || 'Kunde noch nicht gewählt'}</span></div>
+            <div className="opc-new-doc-total-box"><span>Total inkl. MWST</span><strong>{formatMoney(totals.total)}</strong><em>Preisangaben: {form.priceMode === 'incl' ? 'inkl. MWST' : 'exkl. MWST'}</em></div>
           </section>
 
           {errorMessage ? <div className="opc-alert error">{errorMessage}</div> : null}
@@ -590,57 +407,19 @@ export default function NewQuotePage() {
 
           <Section title="Kunde & Offertenkopf" icon={<UserRound size={17} />}>
             <div className="opc-grid two">
-              <div>
-                <Label required>Kunde</Label>
-                <select value={form.clientId} onChange={(event) => update('clientId', event.target.value)} disabled={loadingClients} style={inputStyle}>
-                  <option value="">{loadingClients ? 'Kunden werden geladen...' : 'Kunden auswählen'}</option>
-                  {clients.map((client) => <option key={getClientId(client)} value={getClientId(client)}>{getClientName(client)}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label>Standort</Label>
-                <select value={form.clientSiteId} onChange={(event) => update('clientSiteId', event.target.value)} disabled={!form.clientId || loadingSites || sites.length === 0} style={inputStyle}>
-                  <option value="">{!form.clientId ? 'Zuerst Kunde auswählen' : loadingSites ? 'Standorte werden geladen...' : 'Kein Standort'}</option>
-                  {sites.map((site) => <option key={site.id} value={site.id}>{getSiteLabel(site)}</option>)}
-                </select>
-              </div>
-              <div>
-                <Label required>Titel</Label>
-                <input value={form.title} onChange={(event) => update('title', event.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <Label>Status</Label>
-                <select value={form.status} onChange={(event) => update('status', event.target.value)} style={inputStyle}>
-                  <option value="draft">Entwurf</option>
-                  <option value="ready">Bereit</option>
-                  <option value="sent">Gesendet</option>
-                  <option value="accepted">Angenommen</option>
-                </select>
-              </div>
-              <div>
-                <Label>Datum</Label>
-                <input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <Label>Gültig bis</Label>
-                <input type="date" value={form.validUntil} onChange={(event) => update('validUntil', event.target.value)} style={inputStyle} />
-              </div>
+              <div><Label required>Kunde</Label><select value={form.clientId} onChange={(event) => update('clientId', event.target.value)} disabled={loadingClients} style={inputStyle}><option value="">{loadingClients ? 'Kunden werden geladen...' : 'Kunden auswählen'}</option>{clients.map((client) => <option key={getClientId(client)} value={getClientId(client)}>{getClientName(client)}</option>)}</select></div>
+              <div><Label>Standort</Label><select value={form.clientSiteId} onChange={(event) => update('clientSiteId', event.target.value)} disabled={!form.clientId || loadingSites || sites.length === 0} style={inputStyle}><option value="">{!form.clientId ? 'Zuerst Kunde auswählen' : loadingSites ? 'Standorte werden geladen...' : 'Kein Standort'}</option>{sites.map((site) => <option key={site.id} value={site.id}>{getSiteLabel(site)}</option>)}</select></div>
+              <div><Label required>Titel</Label><input value={form.title} onChange={(event) => update('title', event.target.value)} style={inputStyle} /></div>
+              <div><Label>Status</Label><select value={form.status} onChange={(event) => update('status', event.target.value)} style={inputStyle}><option value="draft">Entwurf</option><option value="ready">Bereit</option><option value="sent">Gesendet</option><option value="accepted">Angenommen</option></select></div>
+              <div><Label>Datum</Label><input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} style={inputStyle} /></div>
+              <div><Label>Gültig bis</Label><input type="date" value={form.validUntil} onChange={(event) => update('validUntil', event.target.value)} style={inputStyle} /></div>
             </div>
           </Section>
 
           <Section title="Position & Preis" icon={<Plus size={17} />}>
             <div className="opc-grid two">
-              <div>
-                <Label required>Position</Label>
-                <input value={form.itemTitle} onChange={(event) => update('itemTitle', event.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <Label>Preisangaben</Label>
-                <select value={form.priceMode} onChange={(event) => update('priceMode', event.target.value as FormState['priceMode'])} style={inputStyle}>
-                  <option value="excl">Preise exkl. MWST eingeben</option>
-                  <option value="incl">Preise inkl. MWST eingeben</option>
-                </select>
-              </div>
+              <div><Label required>Position</Label><input value={form.itemTitle} onChange={(event) => update('itemTitle', event.target.value)} style={inputStyle} /></div>
+              <div><Label>Preisangaben</Label><select value={form.priceMode} onChange={(event) => update('priceMode', event.target.value as FormState['priceMode'])} style={inputStyle}><option value="excl">Preise exkl. MWST eingeben</option><option value="incl">Preise inkl. MWST eingeben</option></select></div>
             </div>
             <div className="opc-grid four">
               <div><Label>Menge</Label><input value={form.quantity} onChange={(event) => update('quantity', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
@@ -648,50 +427,15 @@ export default function NewQuotePage() {
               <div><Label>Preis CHF</Label><input value={form.unitPrice} onChange={(event) => update('unitPrice', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
               <div><Label>MWST %</Label><input value={form.taxRate} onChange={(event) => update('taxRate', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
             </div>
-            <AdvancedTextArea
-              label="Leistungsbeschreibung"
-              value={form.description}
-              onChange={(value) =>
-                update('description', value)
-              }
-              wide
-            />
+            <AdvancedTextArea label="Leistungsbeschreibung" value={form.description} onChange={(value) => update('description', value)} wide />
           </Section>
 
           <Section title="Texte" icon={<FileText size={17} />}>
             <div className="opc-grid two">
-              <AdvancedTextArea
-                label="Einleitung"
-                value={form.introText}
-                onChange={(value) =>
-                  update('introText', value)
-                }
-              />
-
-              <AdvancedTextArea
-                label="Bedingungen"
-                value={form.termsText}
-                onChange={(value) =>
-                  update('termsText', value)
-                }
-              />
-
-              <AdvancedTextArea
-                label="Zahlungsbedingungen"
-                value={form.paymentTerms}
-                onChange={(value) =>
-                  update('paymentTerms', value)
-                }
-              />
-
-              <AdvancedTextArea
-                label="Interne Notizen"
-                value={form.internalNotes}
-                onChange={(value) =>
-                  update('internalNotes', value)
-                }
-                wide
-              />
+              <AdvancedTextArea label="Einleitung" value={form.introText} onChange={(value) => update('introText', value)} />
+              <AdvancedTextArea label="Bedingungen" value={form.termsText} onChange={(value) => update('termsText', value)} />
+              <AdvancedTextArea label="Zahlungsbedingungen" value={form.paymentTerms} onChange={(value) => update('paymentTerms', value)} />
+              <AdvancedTextArea label="Interne Notizen" value={form.internalNotes} onChange={(value) => update('internalNotes', value)} wide />
             </div>
           </Section>
 
@@ -700,7 +444,6 @@ export default function NewQuotePage() {
             <button type="submit" disabled={saving} className="opc-button dark">{saving ? 'Speichert...' : 'Offerte erstellen'}</button>
           </div>
         </form>
-
         <style>{`${opcResponsiveStyle}${sharedCss}`}</style>
       </OPCPageShell>
     </MirakaDashboardShell>
