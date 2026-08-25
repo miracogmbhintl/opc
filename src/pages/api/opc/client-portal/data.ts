@@ -7,6 +7,8 @@ import {
 export const prerender = false;
 
 type AnyRow = Record<string, any>;
+type LoadWarning = { section: string; message: string };
+type RowsResult = { rows: AnyRow[]; warning: LoadWarning | null };
 
 function metadata(row: AnyRow | null | undefined) {
   const value = row?.metadata;
@@ -46,17 +48,34 @@ function serializeAccess(access: any) {
   };
 }
 
-async function rows(request: PromiseLike<{ data: any; error: any }>, label: string) {
+function emptyRows(): RowsResult {
+  return { rows: [], warning: null };
+}
+
+async function rows(request: PromiseLike<{ data: any; error: any }>, label: string): Promise<RowsResult> {
   try {
     const result = await request;
+
     if (result.error) {
-      console.warn(`[opc/client-portal/data] ${label}:`, result.error.message);
-      return [] as AnyRow[];
+      const message = String(result.error.message || result.error);
+      console.error(`[opc/client-portal/data] ${label}:`, message);
+      return {
+        rows: [],
+        warning: { section: label, message },
+      };
     }
-    return Array.isArray(result.data) ? result.data as AnyRow[] : [];
+
+    return {
+      rows: Array.isArray(result.data) ? result.data as AnyRow[] : [],
+      warning: null,
+    };
   } catch (error: any) {
-    console.warn(`[opc/client-portal/data] ${label}:`, error?.message || error);
-    return [] as AnyRow[];
+    const message = String(error?.message || error || 'Unbekannter Datenfehler');
+    console.error(`[opc/client-portal/data] ${label}:`, message);
+    return {
+      rows: [],
+      warning: { section: label, message },
+    };
   }
 }
 
@@ -117,6 +136,12 @@ function clientVisibleDocument(row: AnyRow) {
   return !['internal', 'private', 'draft'].includes(status);
 }
 
+function warningList(results: RowsResult[]) {
+  return results
+    .map((result) => result.warning)
+    .filter((warning): warning is LoadWarning => Boolean(warning));
+}
+
 export const GET: APIRoute = async ({ request, locals }) => {
   try {
     const authenticated = await authenticateOpcClientPortalRequest(request, locals);
@@ -131,7 +156,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const { serviceClient, access } = authenticated;
     const clientId = access.clientId;
 
-    const [sitesRaw, jobsRaw, ticketsRaw, quotesRaw, invoicesRaw, documentsRaw] = await Promise.all([
+    const [sitesResult, jobsResult, ticketsResult, quotesResult, invoicesResult, documentsResult] = await Promise.all([
       rows(
         serviceClient
           .from('opc_client_sites')
@@ -151,7 +176,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
               .limit(300),
             'Aufträge',
           )
-        : Promise.resolve([]),
+        : Promise.resolve(emptyRows()),
       access.permissions.canViewDamageReports
         ? rows(
             serviceClient
@@ -162,7 +187,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
               .limit(300),
             'Anfragen',
           )
-        : Promise.resolve([]),
+        : Promise.resolve(emptyRows()),
       access.permissions.canViewInvoices
         ? rows(
             serviceClient
@@ -173,7 +198,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
               .limit(200),
             'Offerten',
           )
-        : Promise.resolve([]),
+        : Promise.resolve(emptyRows()),
       access.permissions.canViewInvoices
         ? rows(
             serviceClient
@@ -184,7 +209,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
               .limit(300),
             'Rechnungen',
           )
-        : Promise.resolve([]),
+        : Promise.resolve(emptyRows()),
       access.permissions.canViewReports
         ? rows(
             serviceClient
@@ -195,13 +220,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
               .limit(300),
             'Dokumente',
           )
-        : Promise.resolve([]),
+        : Promise.resolve(emptyRows()),
     ]);
 
-    const jobs = jobsRaw.map(sanitizeJob);
+    const jobs = jobsResult.rows.map(sanitizeJob);
     const jobIds = jobs.map((job) => String(job.id || '')).filter(Boolean);
 
-    const reportsRaw = access.permissions.canViewReports && jobIds.length
+    const reportsResult = access.permissions.canViewReports && jobIds.length
       ? await rows(
           serviceClient
             .from('opc_job_reports')
@@ -211,19 +236,32 @@ export const GET: APIRoute = async ({ request, locals }) => {
             .limit(300),
           'Berichte',
         )
-      : [];
+      : emptyRows();
+
+    const allResults = [
+      sitesResult,
+      jobsResult,
+      ticketsResult,
+      quotesResult,
+      invoicesResult,
+      documentsResult,
+      reportsResult,
+    ];
+    const warnings = warningList(allResults);
 
     return opcClientPortalJson({
       ok: true,
+      partial: warnings.length > 0,
+      warnings,
       portal: serializeAccess(access),
       data: {
-        sites: sitesRaw,
+        sites: sitesResult.rows,
         jobs,
-        reports: reportsRaw.filter(clientVisibleReport).map(sanitizeDocument),
-        tickets: ticketsRaw.map((row) => stripPrivateFields(row, ['internal_notes', 'private_notes', 'created_by', 'updated_by'])),
-        quotes: quotesRaw.filter(clientVisibleQuote).map(sanitizeDocument),
-        invoices: invoicesRaw.filter(clientVisibleInvoice).map(sanitizeDocument),
-        documents: documentsRaw.filter(clientVisibleDocument).map(sanitizeDocument),
+        reports: reportsResult.rows.filter(clientVisibleReport).map(sanitizeDocument),
+        tickets: ticketsResult.rows.map((row) => stripPrivateFields(row, ['internal_notes', 'private_notes', 'created_by', 'updated_by'])),
+        quotes: quotesResult.rows.filter(clientVisibleQuote).map(sanitizeDocument),
+        invoices: invoicesResult.rows.filter(clientVisibleInvoice).map(sanitizeDocument),
+        documents: documentsResult.rows.filter(clientVisibleDocument).map(sanitizeDocument),
       },
     });
   } catch (error: any) {
