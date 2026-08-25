@@ -22,10 +22,11 @@ const MANAGED_TABLES = new Set([
 ]);
 
 const JOB_RPCS = new Set([
-  'opc_delete_service_job',
   'opc_append_job_note',
   'opc_get_job_assignments',
 ]);
+
+const UUID_FILTER = /^eq\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -55,6 +56,7 @@ function resolveTarget(request: Request) {
       kind: 'rpc' as const,
       name: rpc,
       pathAndQuery: `${parsed.pathname}${parsed.search}`,
+      searchParams: parsed.searchParams,
     };
   }
 
@@ -68,12 +70,51 @@ function resolveTarget(request: Request) {
     kind: 'table' as const,
     name: table,
     pathAndQuery: `${parsed.pathname}${parsed.search}`,
+    searchParams: parsed.searchParams,
   };
 }
 
 function copyHeader(source: Headers, target: Headers, name: string) {
   const value = source.get(name);
   if (value) target.set(name, value);
+}
+
+function hasScopedMutationFilter(target: ReturnType<typeof resolveTarget>) {
+  if (!target || target.kind !== 'table') return false;
+
+  const idFilter = target.searchParams.get('id') || '';
+  const jobFilter = target.searchParams.get('job_id') || '';
+  const assignmentFilter = target.searchParams.get('assignment_id') || '';
+
+  return [idFilter, jobFilter, assignmentFilter].some((value) => UUID_FILTER.test(value));
+}
+
+function tableMethods(table: string) {
+  if (READ_ONLY_TABLES.has(table)) return new Set(['GET', 'HEAD']);
+
+  // Service-job creation and deletion have purpose-built APIs with stronger
+  // invariants. The bridge may only read or patch an explicitly scoped job.
+  if (table === 'opc_service_jobs' || table === 'opc_jobs') {
+    return new Set(['GET', 'HEAD', 'PATCH']);
+  }
+
+  return new Set(['GET', 'HEAD', 'POST', 'PATCH', 'DELETE']);
+}
+
+function parseJsonBody(body: string | undefined) {
+  if (!body) return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
+}
+
+function bodyHasJobScope(body: unknown) {
+  if (Array.isArray(body)) return body.length > 0 && body.every(bodyHasJobScope);
+  if (!body || typeof body !== 'object') return false;
+  const row = body as Record<string, unknown>;
+  return Boolean(row.job_id || row.id || row.assignment_id);
 }
 
 const handler: APIRoute = async ({ request, locals }) => {
@@ -85,12 +126,9 @@ const handler: APIRoute = async ({ request, locals }) => {
     }
 
     const method = request.method.toUpperCase();
-    const allowedMethods =
-      target.kind === 'rpc'
-        ? new Set(['GET', 'HEAD', 'POST'])
-        : READ_ONLY_TABLES.has(target.name)
-          ? new Set(['GET', 'HEAD'])
-          : new Set(['GET', 'HEAD', 'POST', 'PATCH', 'DELETE']);
+    const allowedMethods = target.kind === 'rpc'
+      ? new Set(['GET', 'HEAD', 'POST'])
+      : tableMethods(target.name);
 
     if (!allowedMethods.has(method)) {
       return json({ error: 'Unsupported job data operation.' }, 405);
@@ -114,6 +152,24 @@ const handler: APIRoute = async ({ request, locals }) => {
       );
     }
 
+    let body: string | undefined;
+    if (method !== 'GET' && method !== 'HEAD') {
+      body = await request.text();
+    }
+
+    if (target.kind === 'table' && ['PATCH', 'DELETE'].includes(method)) {
+      if (!hasScopedMutationFilter(target)) {
+        return json({ error: 'Manager mutation requires an explicit UUID record/job filter.' }, 400);
+      }
+    }
+
+    if (target.kind === 'table' && method === 'POST') {
+      const parsedBody = parseJsonBody(body);
+      if (!bodyHasJobScope(parsedBody)) {
+        return json({ error: 'Manager insert requires an explicit job/record scope.' }, 400);
+      }
+    }
+
     const upstreamHeaders = new Headers({
       apikey: authenticated.serviceKey,
       Authorization: `Bearer ${authenticated.serviceKey}`,
@@ -126,7 +182,6 @@ const handler: APIRoute = async ({ request, locals }) => {
     copyHeader(request.headers, upstreamHeaders, 'range');
     copyHeader(request.headers, upstreamHeaders, 'range-unit');
 
-    const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text();
     const upstream = await fetch(`${authenticated.url}${target.pathAndQuery}`, {
       method,
       headers: upstreamHeaders,
@@ -156,12 +211,7 @@ const handler: APIRoute = async ({ request, locals }) => {
     console.error('[opc/jobs/manager-proxy] failed', error);
     return json(
       {
-        error:
-          error?.message ||
-          error?.details ||
-          error?.hint ||
-          error?.code ||
-          'Manager job operation failed.',
+        error: error?.message || 'Manager job operation failed.',
       },
       500,
     );
