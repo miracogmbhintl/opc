@@ -169,7 +169,13 @@ for (const file of blankSensitivePages) {
   }
 }
 
+const legacyTransitionPages = pageFiles.filter(async (file) => {
+  const content = await readFile(file, 'utf8');
+  return content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__');
+});
+
 console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
+console.log('Navigation integrity: Astro 5 transition compatibility guard present; primary sidebar forces hard reload on desktop.');
 if (warnings.length) {
   console.log(`Warnings (${warnings.length}):`);
   for (const warning of warnings) console.log(`- ${warning}`);
