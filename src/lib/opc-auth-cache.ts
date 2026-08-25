@@ -3,10 +3,10 @@ import { supabase, type UserProfile, type UserRole } from './supabase';
 /**
  * Persistent OPC profile cache.
  *
- * Staff should stay logged in on mobile. Supabase already persists the session;
- * this cache keeps the normalized OPC role/profile available across browser
- * restarts and temporary network outages. It is only profile metadata, not the
- * Supabase session itself.
+ * The cache is UI metadata only. It may make navigation faster and preserve
+ * labels while a device is offline, but it must never create an authenticated
+ * state on its own. A persisted Supabase session for the same user is required
+ * before cached permissions are trusted.
  */
 const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v5:persistent';
 const LEGACY_AUTH_CACHE_KEYS = [
@@ -16,6 +16,11 @@ const LEGACY_AUTH_CACHE_KEYS = [
   'opc:auth-profile-cache:v4:persistent',
 ];
 const AUTH_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const AUTH_PROFILE_NETWORK_TIMEOUT_MS = 4500;
+const AUTH_PROFILE_REFRESH_COOLDOWN_MS = 60_000;
+const AUTH_PROFILE_SHARED_REFRESH_KEY = 'opc:auth-profile-refresh-at:v1';
+const AUTH_PROFILE_SHARED_REFRESH_COOLDOWN_MS = 5 * 60_000;
+const ACTIVE_STAFF_STATUSES = ['active', 'aktiv', 'enabled'];
 
 type AuthCachePayload = {
   savedAt: number;
@@ -33,10 +38,18 @@ type StaffRoleRow = {
   can_access_portal?: boolean | null;
   can_manage_jobs?: boolean | null;
   can_view_all_jobs?: boolean | null;
+  can_manage_calendar?: boolean | null;
 };
+
+let authProfileRequestInFlight: Promise<UserProfile | null> | null = null;
+let lastAuthProfileRefreshAt = 0;
 
 function isBrowser() {
   return typeof window !== 'undefined';
+}
+
+function isOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false;
 }
 
 function isExplicitlyLoggedOut() {
@@ -55,8 +68,7 @@ function isExplicitlyLoggedOut() {
 function normalizeRole(value: unknown): UserRole {
   const role = String(value || '').toLowerCase().trim();
 
-  if (role === 'godmode') return 'owner';
-  if (role === 'owner') return 'owner';
+  if (role === 'godmode' || role === 'owner') return 'owner';
   if (role === 'admin') return 'admin';
   if (role === 'dispatch' || role === 'dispatcher' || role === 'disposition') return 'dispatch';
   if (role === 'employee' || role === 'mitarbeiter' || role === 'staff') return 'employee';
@@ -77,26 +89,24 @@ function normalizeStaffRole(
   if (explicitRole === 'admin' || profileRole === 'admin') return 'admin';
   if (explicitRole === 'dispatch' || profileRole === 'dispatch') return 'dispatch';
 
-  // Operational permissions must win over a stale legacy employee label.
-  // This is the dispatch-admin case: full planning access without finance access.
+  // Preserve the existing dispatch-admin compatibility behavior while the
+  // permission model is being centralized server-side.
   if (row.can_manage_jobs === true || row.can_view_all_jobs === true) {
     return 'dispatch';
   }
 
   if (explicitRole === 'employee') return 'employee';
-
   return profileRole === 'client' ? 'employee' : profileRole;
 }
 
 function normalizeLegacyProfileRole(profile: Record<string, any> | null | undefined): UserRole {
   if (profile?.is_owner === true) return 'owner';
   if (profile?.is_admin === true) return 'admin';
-
   return normalizeRole(profile?.role || profile?.opc_staff_role || profile?.staff_role);
 }
 
 function isNetworkLikeError(error: unknown) {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (isOffline()) return true;
 
   const message = String((error as any)?.message || error || '').toLowerCase();
   return (
@@ -110,13 +120,25 @@ function isNetworkLikeError(error: unknown) {
   );
 }
 
+function withAuthTimeout<T>(
+  request: PromiseLike<T>,
+  label: string,
+  timeoutMs = AUTH_PROFILE_NETWORK_TIMEOUT_MS,
+): Promise<T> {
+  return Promise.race([
+    Promise.resolve(request),
+    new Promise<T>((_, reject) => {
+      globalThis.setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
+    }),
+  ]);
+}
+
 function profileFromLegacyLocalStorage(): UserProfile | null {
   if (!isBrowser()) return null;
 
   try {
     const rawUserData = window.localStorage.getItem('mco_user_data') || window.localStorage.getItem('mco_auth');
     const cachedRole = window.localStorage.getItem('mco_user_role');
-
     if (!rawUserData || !cachedRole) return null;
 
     const cached = JSON.parse(rawUserData);
@@ -127,19 +149,11 @@ function profileFromLegacyLocalStorage(): UserProfile | null {
       email: cached.email || '',
       full_name: cached.full_name || cached.name || cached.username || cached.email || 'User',
       role: normalizeRole(cachedRole),
-      opc_staff_role_id:
-        cached.opc_staff_role_id ||
-        cached.staff_id ||
-        null,
-      employee_id:
-        cached.employee_id ||
-        null,
-      can_manage_jobs:
-        cached.can_manage_jobs === true,
-      can_view_all_jobs:
-        cached.can_view_all_jobs === true,
-      can_manage_calendar:
-        cached.can_manage_calendar === true,
+      opc_staff_role_id: cached.opc_staff_role_id || cached.staff_id || null,
+      employee_id: cached.employee_id || null,
+      can_manage_jobs: cached.can_manage_jobs === true,
+      can_view_all_jobs: cached.can_view_all_jobs === true,
+      can_manage_calendar: cached.can_manage_calendar === true,
       created_at: cached.created_at || '',
       updated_at: cached.updated_at || '',
     } as UserProfile;
@@ -157,8 +171,50 @@ function cleanupLegacyAuthCaches() {
       window.localStorage.removeItem(key);
     }
   } catch {
-    // Ignore cache cleanup failures.
+    // Cache cleanup must not block the app.
   }
+}
+
+function sharedAuthRefreshIsRecent() {
+  if (!isBrowser()) return false;
+
+  try {
+    const value = Number(window.localStorage.getItem(AUTH_PROFILE_SHARED_REFRESH_KEY) || 0);
+    return (
+      Number.isFinite(value) &&
+      value > 0 &&
+      Date.now() - value < AUTH_PROFILE_SHARED_REFRESH_COOLDOWN_MS
+    );
+  } catch {
+    return false;
+  }
+}
+
+function markSharedAuthRefresh() {
+  if (!isBrowser()) return;
+
+  try {
+    window.localStorage.setItem(AUTH_PROFILE_SHARED_REFRESH_KEY, String(Date.now()));
+  } catch {
+    // The in-memory cooldown remains available.
+  }
+}
+
+function explicitRoleValue(value: unknown) {
+  const clean = String(value || '').toLowerCase().trim();
+  return [
+    'godmode',
+    'owner',
+    'admin',
+    'dispatch',
+    'dispatcher',
+    'disposition',
+    'employee',
+    'mitarbeiter',
+    'staff',
+    'client',
+    'kunde',
+  ].includes(clean);
 }
 
 export function readCachedOpcAuthProfile(maxAgeMs = AUTH_CACHE_MAX_AGE_MS): UserProfile | null {
@@ -168,7 +224,6 @@ export function readCachedOpcAuthProfile(maxAgeMs = AUTH_CACHE_MAX_AGE_MS): User
 
   try {
     const raw = window.localStorage.getItem(AUTH_CACHE_KEY) || window.sessionStorage.getItem(AUTH_CACHE_KEY);
-
     if (!raw) return profileFromLegacyLocalStorage();
 
     const parsed = JSON.parse(raw) as AuthCachePayload;
@@ -192,52 +247,31 @@ export function writeCachedOpcAuthProfile(profile: UserProfile) {
   cleanupLegacyAuthCaches();
 
   try {
-    const payload: AuthCachePayload = {
-      savedAt: Date.now(),
-      profile,
-    };
-
-    const serialized = JSON.stringify(payload);
-
+    const serialized = JSON.stringify({ savedAt: Date.now(), profile } satisfies AuthCachePayload);
     window.localStorage.setItem(AUTH_CACHE_KEY, serialized);
     window.sessionStorage.setItem(AUTH_CACHE_KEY, serialized);
+
+    const legacyProfile = {
+      id: profile.id,
+      email: profile.email,
+      name: profile.full_name,
+      full_name: profile.full_name,
+      username: profile.full_name || profile.email || 'User',
+      role: profile.role,
+      opc_staff_role_id: profile.opc_staff_role_id || null,
+      staff_id: profile.opc_staff_role_id || null,
+      employee_id: profile.employee_id || null,
+      can_manage_jobs: profile.can_manage_jobs === true,
+      can_view_all_jobs: profile.can_view_all_jobs === true,
+      can_manage_calendar: profile.can_manage_calendar === true,
+    };
+
+    // Keep these during the transition because older pages still read them.
     window.localStorage.setItem('mco_user_role', profile.role);
-    window.localStorage.setItem(
-      'mco_user_data',
-      JSON.stringify({
-        id: profile.id,
-        email: profile.email,
-        name: profile.full_name,
-        full_name: profile.full_name,
-        username: profile.full_name || profile.email || 'User',
-        role: profile.role,
-        opc_staff_role_id: profile.opc_staff_role_id || null,
-        staff_id: profile.opc_staff_role_id || null,
-        employee_id: profile.employee_id || null,
-        can_manage_jobs: profile.can_manage_jobs === true,
-        can_view_all_jobs: profile.can_view_all_jobs === true,
-        can_manage_calendar: profile.can_manage_calendar === true,
-      }),
-    );
-    window.localStorage.setItem(
-      'mco_auth',
-      JSON.stringify({
-        id: profile.id,
-        email: profile.email,
-        name: profile.full_name,
-        full_name: profile.full_name,
-        username: profile.full_name || profile.email || 'User',
-        role: profile.role,
-        opc_staff_role_id: profile.opc_staff_role_id || null,
-        staff_id: profile.opc_staff_role_id || null,
-        employee_id: profile.employee_id || null,
-        can_manage_jobs: profile.can_manage_jobs === true,
-        can_view_all_jobs: profile.can_view_all_jobs === true,
-        can_manage_calendar: profile.can_manage_calendar === true,
-      }),
-    );
+    window.localStorage.setItem('mco_user_data', JSON.stringify(legacyProfile));
+    window.localStorage.setItem('mco_auth', JSON.stringify(legacyProfile));
   } catch {
-    // Cache failure should not block the app.
+    // Cache failure must not block the app.
   }
 }
 
@@ -247,88 +281,33 @@ export function clearCachedOpcAuthProfile() {
   try {
     window.sessionStorage.removeItem(AUTH_CACHE_KEY);
     window.localStorage.removeItem(AUTH_CACHE_KEY);
+    window.localStorage.removeItem(AUTH_PROFILE_SHARED_REFRESH_KEY);
     for (const key of LEGACY_AUTH_CACHE_KEYS) {
       window.sessionStorage.removeItem(key);
       window.localStorage.removeItem(key);
     }
   } catch {
-    // Ignore.
+    // Ignore storage cleanup failures.
   }
 }
 
-const AUTH_PROFILE_NETWORK_TIMEOUT_MS = 4500;
-const AUTH_PROFILE_REFRESH_COOLDOWN_MS = 60_000;
-const AUTH_PROFILE_SHARED_REFRESH_KEY = 'opc:auth-profile-refresh-at:v1';
-const AUTH_PROFILE_SHARED_REFRESH_COOLDOWN_MS = 5 * 60_000;
-
-let authProfileRequestInFlight: Promise<UserProfile | null> | null = null;
-let lastAuthProfileRefreshAt = 0;
-
-function sharedAuthRefreshIsRecent() {
-  if (typeof window === 'undefined') return false;
-
+async function getPersistedSessionUserId(): Promise<string | null> {
   try {
-    const value = Number(
-      window.localStorage.getItem(
-        AUTH_PROFILE_SHARED_REFRESH_KEY,
-      ) || 0,
-    );
+    const {
+      data: { session },
+      error,
+    } = await withAuthTimeout(supabase.auth.getSession(), 'Supabase session', 3500);
 
-    return (
-      Number.isFinite(value) &&
-      value > 0 &&
-      Date.now() - value <
-        AUTH_PROFILE_SHARED_REFRESH_COOLDOWN_MS
-    );
-  } catch {
-    return false;
+    if (error) {
+      if (isOffline()) return readCachedOpcAuthProfile()?.id || null;
+      return null;
+    }
+
+    return session?.user?.id || null;
+  } catch (error) {
+    if (isOffline() && isNetworkLikeError(error)) return readCachedOpcAuthProfile()?.id || null;
+    return null;
   }
-}
-
-function markSharedAuthRefresh() {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(
-      AUTH_PROFILE_SHARED_REFRESH_KEY,
-      String(Date.now()),
-    );
-  } catch {
-    // The in-memory cooldown remains available.
-  }
-}
-
-function withAuthTimeout<T>(
-  request: PromiseLike<T>,
-  label: string,
-  timeoutMs = AUTH_PROFILE_NETWORK_TIMEOUT_MS,
-): Promise<T> {
-  return Promise.race([
-    Promise.resolve(request),
-    new Promise<T>((_, reject) => {
-      globalThis.setTimeout(() => {
-        reject(new Error(`${label} timeout after ${timeoutMs}ms`));
-      }, timeoutMs);
-    }),
-  ]);
-}
-
-function explicitRoleValue(value: unknown) {
-  const clean = String(value || '').toLowerCase().trim();
-
-  return [
-    'godmode',
-    'owner',
-    'admin',
-    'dispatch',
-    'dispatcher',
-    'disposition',
-    'employee',
-    'mitarbeiter',
-    'staff',
-    'client',
-    'kunde',
-  ].includes(clean);
 }
 
 async function fetchActiveStaffRoleByUser(
@@ -336,14 +315,14 @@ async function fetchActiveStaffRoleByUser(
   email?: string | null,
 ): Promise<StaffRoleRow | null> {
   const fields =
-    'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs';
+    'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs,can_manage_calendar';
 
   const byUser = await withAuthTimeout(
     supabase
       .from('opc_staff_roles')
       .select(fields)
       .eq('user_id', userId)
-      .eq('status', 'active')
+      .in('status', ACTIVE_STAFF_STATUSES)
       .eq('can_access_portal', true)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -352,8 +331,6 @@ async function fetchActiveStaffRoleByUser(
   );
 
   if (!byUser.error && byUser.data) return byUser.data as StaffRoleRow;
-
-  // Never double the request load when Supabase is timing out.
   if (byUser.error && isNetworkLikeError(byUser.error)) throw byUser.error;
   if (!email) return null;
 
@@ -362,7 +339,7 @@ async function fetchActiveStaffRoleByUser(
       .from('opc_staff_roles')
       .select(fields)
       .ilike('email', email)
-      .eq('status', 'active')
+      .in('status', ACTIVE_STAFF_STATUSES)
       .eq('can_access_portal', true)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -371,77 +348,51 @@ async function fetchActiveStaffRoleByUser(
   );
 
   if (!byEmail.error && byEmail.data) return byEmail.data as StaffRoleRow;
+  if (byEmail.error && isNetworkLikeError(byEmail.error)) throw byEmail.error;
   return null;
 }
 
-async function fetchLiveOpcAuthProfile(
-  cachedProfile: UserProfile | null,
-): Promise<UserProfile | null> {
+async function fetchLiveOpcAuthProfile(cachedProfile: UserProfile | null): Promise<UserProfile | null> {
   const {
     data: { session },
     error: sessionError,
-  } = await withAuthTimeout(
-    supabase.auth.getSession(),
-    'Supabase session',
-    3500,
-  );
+  } = await withAuthTimeout(supabase.auth.getSession(), 'Supabase session', 3500);
 
   if (sessionError) {
-    if (cachedProfile && isNetworkLikeError(sessionError)) return cachedProfile;
+    if (isOffline() && cachedProfile) return cachedProfile;
     return null;
   }
 
   const user = session?.user || null;
+  if (!user) return null;
 
-  if (!user) {
-    // Profile metadata may render immediately, but it never substitutes for
-    // a genuine persisted Supabase session.
-    return null;
-  }
+  // A cache from another user must never cross an account boundary.
+  const sameUserCache = cachedProfile?.id === user.id ? cachedProfile : null;
 
   const [staffRoleResult, legacyProfileResult] = await Promise.allSettled([
     fetchActiveStaffRoleByUser(user.id, user.email),
     withAuthTimeout(
-      supabase
-        .from('user_profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle(),
+      supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle(),
       'user_profiles',
     ),
   ]);
 
-  const staffRole =
-    staffRoleResult.status === 'fulfilled' ? staffRoleResult.value : null;
-
-  const legacyQuery =
-    legacyProfileResult.status === 'fulfilled' ? legacyProfileResult.value : null;
-
-  const legacyProfile =
-    legacyQuery && !legacyQuery.error ? legacyQuery.data || null : null;
-
+  const staffRole = staffRoleResult.status === 'fulfilled' ? staffRoleResult.value : null;
+  const legacyQuery = legacyProfileResult.status === 'fulfilled' ? legacyProfileResult.value : null;
+  const legacyProfile = legacyQuery && !legacyQuery.error ? legacyQuery.data || null : null;
   const legacyRole = normalizeLegacyProfileRole(legacyProfile);
 
   if (staffRole) {
     let employeeName = '';
     let employeeEmail = '';
 
-    const needsEmployeeFallback =
-      Boolean(staffRole.employee_id) &&
-      (!staffRole.display_name || !staffRole.email);
-
-    if (needsEmployeeFallback && staffRole.employee_id) {
+    if (staffRole.employee_id && (!staffRole.display_name || !staffRole.email)) {
       try {
         const employeeResult = await withAuthTimeout(
-          supabase
-            .from('employees')
-            .select('full_name,email')
-            .eq('id', staffRole.employee_id)
-            .maybeSingle(),
+          supabase.from('employees').select('full_name,email').eq('id', staffRole.employee_id).maybeSingle(),
           'employees profile fallback',
           3000,
         );
-
         employeeName = employeeResult.data?.full_name || '';
         employeeEmail = employeeResult.data?.email || '';
       } catch {
@@ -461,12 +412,9 @@ async function fetchLiveOpcAuthProfile(
       role: normalizeStaffRole(staffRole, legacyRole),
       opc_staff_role_id: staffRole.id || null,
       employee_id: staffRole.employee_id || null,
-      can_manage_jobs:
-        staffRole.can_manage_jobs === true,
-      can_view_all_jobs:
-        staffRole.can_view_all_jobs === true,
-      can_manage_calendar:
-        (staffRole as any).can_manage_calendar === true,
+      can_manage_jobs: staffRole.can_manage_jobs === true,
+      can_view_all_jobs: staffRole.can_view_all_jobs === true,
+      can_manage_calendar: staffRole.can_manage_calendar === true,
       created_at: '',
       updated_at: '',
     };
@@ -517,25 +465,37 @@ async function fetchLiveOpcAuthProfile(
     return profile;
   }
 
-  return cachedProfile || null;
+  // Only use stale profile metadata when a real session for the same user
+  // exists and the role source was temporarily unavailable.
+  const liveLookupHadNetworkFailure =
+    (staffRoleResult.status === 'rejected' && isNetworkLikeError(staffRoleResult.reason)) ||
+    (legacyProfileResult.status === 'rejected' && isNetworkLikeError(legacyProfileResult.reason));
+
+  if (sameUserCache && liveLookupHadNetworkFailure) return sameUserCache;
+  return null;
 }
 
-export async function refreshOpcAuthProfile(
-  force = false,
-): Promise<UserProfile | null> {
+export async function refreshOpcAuthProfile(force = false): Promise<UserProfile | null> {
   cleanupLegacyAuthCaches();
+
+  if (isExplicitlyLoggedOut()) return null;
+
   const cachedProfile = readCachedOpcAuthProfile();
+  const sessionUserId = await getPersistedSessionUserId();
+
+  if (!sessionUserId) {
+    if (!isOffline()) clearCachedOpcAuthProfile();
+    return null;
+  }
+
+  const sameUserCache = cachedProfile?.id === sessionUserId ? cachedProfile : null;
 
   if (
     !force &&
-    cachedProfile &&
-    (
-      Date.now() - lastAuthProfileRefreshAt <
-        AUTH_PROFILE_REFRESH_COOLDOWN_MS ||
-      sharedAuthRefreshIsRecent()
-    )
+    sameUserCache &&
+    (Date.now() - lastAuthProfileRefreshAt < AUTH_PROFILE_REFRESH_COOLDOWN_MS || sharedAuthRefreshIsRecent())
   ) {
-    return cachedProfile;
+    return sameUserCache;
   }
 
   if (authProfileRequestInFlight) return authProfileRequestInFlight;
@@ -543,14 +503,10 @@ export async function refreshOpcAuthProfile(
   lastAuthProfileRefreshAt = Date.now();
   markSharedAuthRefresh();
 
-  authProfileRequestInFlight = fetchLiveOpcAuthProfile(cachedProfile)
+  authProfileRequestInFlight = fetchLiveOpcAuthProfile(sameUserCache)
     .catch((error) => {
-      if (cachedProfile) {
-        console.warn(
-          '[OPC Auth] Live-Profil nicht erreichbar; Cache wird verwendet.',
-          String((error as any)?.message || error || ''),
-        );
-        return cachedProfile;
+      if (sameUserCache && isOffline() && isNetworkLikeError(error)) {
+        return sameUserCache;
       }
 
       console.warn(
@@ -568,10 +524,18 @@ export async function refreshOpcAuthProfile(
 
 export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
   cleanupLegacyAuthCaches();
-  const cachedProfile = readCachedOpcAuthProfile();
 
-  // Shell, router and sidebar render immediately from one persistent cache.
-  if (cachedProfile && !isExplicitlyLoggedOut()) {
+  if (isExplicitlyLoggedOut()) return null;
+
+  const cachedProfile = readCachedOpcAuthProfile();
+  const sessionUserId = await getPersistedSessionUserId();
+
+  if (!sessionUserId) {
+    if (!isOffline()) clearCachedOpcAuthProfile();
+    return null;
+  }
+
+  if (cachedProfile?.id === sessionUserId) {
     if (
       !authProfileRequestInFlight &&
       Date.now() - lastAuthProfileRefreshAt >= AUTH_PROFILE_REFRESH_COOLDOWN_MS
@@ -582,6 +546,6 @@ export async function loadOpcAuthProfile(): Promise<UserProfile | null> {
     return cachedProfile;
   }
 
-  // First login without cache: all callers share exactly one request.
+  // First login, changed account, or stale cache: resolve the live profile.
   return refreshOpcAuthProfile(true);
 }
