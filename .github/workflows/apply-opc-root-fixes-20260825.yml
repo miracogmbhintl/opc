@@ -1,0 +1,41 @@
+name: Apply OPC root fixes 20260825
+
+on:
+  push:
+    branches:
+      - fix/zero-downtime-core-stabilization-20260825
+    paths:
+      - .github/workflows/apply-opc-root-fixes-20260825.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout stabilization branch
+        uses: actions/checkout@v6
+        with:
+          ref: fix/zero-downtime-core-stabilization-20260825
+          fetch-depth: 0
+
+      - name: Apply root fixes
+        run: node scripts/apply-opc-root-fixes-20260825.mjs
+
+      - name: Verify patched invariants
+        run: |
+          grep -q "OPC_OPERATION_TIME_ZONE = 'Europe/Zurich'" src/pages/api/opc/create-service-job.ts
+          ! grep -q 'delete copy.recurring_series_id' src/pages/api/opc/create-service-job.ts
+          ! grep -q 'new Date(`${dateOnly}T${time}:00`).toISOString()' src/pages/api/opc/create-service-job.ts
+          grep -q "timeZone: 'Europe/Zurich'" src/lib/opc-employee-api.ts
+
+      - name: Commit patch and remove temporary patcher
+        run: |
+          git config user.name "OPC Stabilization Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/pages/api/opc/create-service-job.ts src/lib/opc-employee-api.ts
+          git rm scripts/apply-opc-root-fixes-20260825.mjs .github/workflows/apply-opc-root-fixes-20260825.yml
+          git commit -m "Fix Zurich scheduling and strict service job inserts"
+          git push origin HEAD:fix/zero-downtime-core-stabilization-20260825
