@@ -1,161 +1,146 @@
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 
-// UUID validation regex
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isValidUUID(value: string): boolean {
   return UUID_REGEX.test(value);
 }
 
-// GET /api/work-os/metrics - Get workspace/board metrics
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'private, no-store, max-age=0',
+    },
+  });
+}
+
 export const GET: APIRoute = async ({ locals, url }) => {
   try {
-    // 1. Get session from locals
     const session = locals?.runtime?.session || locals?.session;
-    
-    if (!session?.user) {
-      return new Response(JSON.stringify({ error: 'Not authenticated' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
+
+    if (!session?.user || !session?.access_token) {
+      return json({ error: 'Not authenticated' }, 401);
     }
 
-    // 2. Create request-scoped authenticated Supabase client
-    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseAnonKey) {
-      return new Response(JSON.stringify({ error: 'Server configuration error' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return json({ error: 'Server configuration error' }, 500);
     }
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
-          Authorization: `Bearer ${session.access_token}`
-        }
-      }
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
     });
 
-    // 3. Query parameters
     const workspaceId = url.searchParams.get('workspace_id');
     const boardId = url.searchParams.get('board_id');
 
-    // 4. Validate UUIDs if provided
     if (workspaceId && !isValidUUID(workspaceId)) {
-      return new Response(JSON.stringify({ error: 'Invalid workspace_id format' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return json({ error: 'Invalid workspace_id format' }, 400);
     }
 
     if (boardId && !isValidUUID(boardId)) {
-      return new Response(JSON.stringify({ error: 'Invalid board_id format' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return json({ error: 'Invalid board_id format' }, 400);
     }
 
-    // 5. Build metrics response
-    const metrics: any = {};
+    const metrics: Record<string, number> = {};
 
-    // Count workspaces if no filters
     if (!workspaceId && !boardId) {
-      const { count: workspaceCount } = await supabase
+      const { count, error } = await supabase
         .from('work_os_workspaces')
-        .select('*', { count: 'exact', head: true });
-      
-      metrics.total_workspaces = workspaceCount || 0;
+        .select('id', { count: 'exact', head: true });
+      if (error) throw error;
+      metrics.total_workspaces = count || 0;
     }
 
-    // Count boards
-    let boardQuery = supabase
-      .from('work_os_boards')
-      .select('*', { count: 'exact', head: true });
-
-    if (workspaceId) {
-      boardQuery = boardQuery.eq('workspace_id', workspaceId);
-    }
-
-    const { count: boardCount } = await boardQuery;
-    metrics.total_boards = boardCount || 0;
-
-    // Count items
-    let itemQuery = supabase
-      .from('work_os_items')
-      .select('*', { count: 'exact', head: true });
+    let boardIds: string[] = [];
 
     if (boardId) {
-      itemQuery = itemQuery.eq('board_id', boardId);
+      const { data, error } = await supabase
+        .from('work_os_boards')
+        .select('id')
+        .eq('id', boardId)
+        .limit(1);
+      if (error) throw error;
+      boardIds = (data || []).map((row) => String(row.id));
+      metrics.total_boards = boardIds.length;
     } else if (workspaceId) {
-      // Need to get boards first, then filter items
-      const { data: boards } = await supabase
+      const { data, error } = await supabase
         .from('work_os_boards')
         .select('id')
         .eq('workspace_id', workspaceId);
-      
-      if (boards && boards.length > 0) {
-        const boardIds = boards.map(b => b.id);
-        itemQuery = itemQuery.in('board_id', boardIds);
-      }
+      if (error) throw error;
+      boardIds = (data || []).map((row) => String(row.id));
+      metrics.total_boards = boardIds.length;
+    } else {
+      const { data, error, count } = await supabase
+        .from('work_os_boards')
+        .select('id', { count: 'exact' });
+      if (error) throw error;
+      boardIds = (data || []).map((row) => String(row.id));
+      metrics.total_boards = count || 0;
     }
 
-    const { count: itemCount } = await itemQuery;
-    metrics.total_items = itemCount || 0;
+    let taskIds: string[] = [];
 
-    // Count comments
-    let commentQuery = supabase
-      .from('work_os_comments')
-      .select('*', { count: 'exact', head: true });
-
-    if (boardId) {
-      // Get items from board first
-      const { data: items } = await supabase
-        .from('work_os_items')
-        .select('id')
-        .eq('board_id', boardId);
-      
-      if (items && items.length > 0) {
-        const itemIds = items.map(i => i.id);
-        commentQuery = commentQuery.in('item_id', itemIds);
-      }
-    } else if (workspaceId) {
-      // Get boards, then items, then filter comments
-      const { data: boards } = await supabase
-        .from('work_os_boards')
-        .select('id')
-        .eq('workspace_id', workspaceId);
-      
-      if (boards && boards.length > 0) {
-        const boardIds = boards.map(b => b.id);
-        const { data: items } = await supabase
-          .from('work_os_items')
+    if (boardId || workspaceId) {
+      if (boardIds.length === 0) {
+        metrics.total_items = 0;
+      } else {
+        const { data, error } = await supabase
+          .from('work_os_tasks')
           .select('id')
           .in('board_id', boardIds);
-        
-        if (items && items.length > 0) {
-          const itemIds = items.map(i => i.id);
-          commentQuery = commentQuery.in('item_id', itemIds);
-        }
+        if (error) throw error;
+        taskIds = (data || []).map((row) => String(row.id));
+        metrics.total_items = taskIds.length;
       }
+    } else {
+      const { data, error, count } = await supabase
+        .from('work_os_tasks')
+        .select('id', { count: 'exact' });
+      if (error) throw error;
+      taskIds = (data || []).map((row) => String(row.id));
+      metrics.total_items = count || 0;
     }
 
-    const { count: commentCount } = await commentQuery;
-    metrics.total_comments = commentCount || 0;
+    if (boardId || workspaceId) {
+      if (taskIds.length === 0) {
+        metrics.total_comments = 0;
+      } else {
+        const { count, error } = await supabase
+          .from('work_os_comments')
+          .select('id', { count: 'exact', head: true })
+          .in('task_id', taskIds);
+        if (error) throw error;
+        metrics.total_comments = count || 0;
+      }
+    } else {
+      const { count, error } = await supabase
+        .from('work_os_comments')
+        .select('id', { count: 'exact', head: true });
+      if (error) throw error;
+      metrics.total_comments = count || 0;
+    }
 
-    return new Response(JSON.stringify({ metrics }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
-
+    return json({ metrics });
   } catch (error) {
-    console.error('[Work OS API] Metrics GET error:', error);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    console.error(
+      '[Work OS API] Metrics GET error:',
+      error instanceof Error ? error.message : error,
+    );
+    return json({ error: 'Internal server error' }, 500);
   }
 };
