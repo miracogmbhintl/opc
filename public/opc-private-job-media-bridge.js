@@ -4,6 +4,7 @@
 
   const marker = '/storage/v1/object/public/opc-job-media/';
   const endpoint = '/api/opc/jobs/media-file?path=';
+  const originalOpen = window.open.bind(window);
 
   function protectedUrl(raw) {
     const value = String(raw || '').trim();
@@ -43,6 +44,11 @@
       }
     }
   }
+
+  window.open = (url, target, features) => {
+    const replacement = protectedUrl(url);
+    return originalOpen(replacement || url, target, features);
+  };
 
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
