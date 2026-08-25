@@ -1,8 +1,3 @@
-
-
-
-
-
 import {defineConfig} from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import react from '@astrojs/react';
@@ -48,6 +43,77 @@ function injectDevScript(options = {}) {
   };
 }
 
+// OPC_VIEW_TRANSITION_COMPAT_V2
+// A legacy no-motion shim is still embedded in older page shells. Astro 5 can call
+// document.startViewTransition() with an options object ({ update, types }) instead
+// of only a callback function. The legacy shim ignored options.update(), preventing
+// the DOM swap and leaving a blank page. Repair that shim globally without enabling
+// visual motion or changing normal full-page navigation.
+function injectOpcRuntimeSafety() {
+  const runtimeScript = String.raw`
+    (() => {
+      const installOpcViewTransitionCompatibility = () => {
+        if (typeof window === 'undefined' || typeof document === 'undefined') return;
+        if (!window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
+
+        const noMotionTransition = (transitionInput) => {
+          const update =
+            typeof transitionInput === 'function'
+              ? transitionInput
+              : transitionInput && typeof transitionInput.update === 'function'
+                ? transitionInput.update
+                : null;
+
+          let updateCallbackDone;
+
+          try {
+            updateCallbackDone = Promise.resolve(update ? update() : undefined);
+          } catch (error) {
+            updateCallbackDone = Promise.reject(error);
+          }
+
+          const ready = Promise.resolve();
+          const finished = updateCallbackDone.then(() => undefined);
+          const requestedTypes =
+            transitionInput && typeof transitionInput === 'object' && Array.isArray(transitionInput.types)
+              ? transitionInput.types
+              : [];
+
+          return {
+            ready,
+            updateCallbackDone,
+            finished,
+            skipTransition() {},
+            types: new Set(requestedTypes),
+          };
+        };
+
+        try {
+          Object.defineProperty(document, 'startViewTransition', {
+            configurable: true,
+            writable: true,
+            value: noMotionTransition,
+          });
+        } catch {
+          document.startViewTransition = noMotionTransition;
+        }
+      };
+
+      installOpcViewTransitionCompatibility();
+      document.addEventListener('astro:page-load', installOpcViewTransitionCompatibility);
+    })();
+  `;
+
+  return {
+    name: 'opc-runtime-safety',
+    hooks: {
+      'astro:config:setup': ({injectScript}) => {
+        injectScript('page', runtimeScript);
+      },
+    },
+  };
+}
+
 // https://astro.build/config
 export default defineConfig({
   base: '',
@@ -68,6 +134,7 @@ export default defineConfig({
   integrations: [
     react(),
     injectDevScript({scriptPath: '/generated/dev-only.js'}),
+    injectOpcRuntimeSafety(),
   ],
   vite: {
     plugins: [tailwindcss(), patchViteErrorOverlay()],
@@ -101,12 +168,3 @@ export default defineConfig({
     },
   },
 });
-
-
-
-
-
-
-
-
-
