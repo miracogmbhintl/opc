@@ -56,59 +56,17 @@ type FormState = {
 };
 
 const BRAND = {
-  text: '#111827',
-  muted: '#6B7280',
-  faint: '#9CA3AF',
-  border: '#E5E7EB',
-  black: '#0F1115',
-  card: '#FFFFFF',
-  soft: '#FAFAFA',
-  green: '#166534',
-  red: '#B91C1C',
-  amber: '#92400E',
+  text: '#111827', muted: '#6B7280', faint: '#9CA3AF', border: '#E5E7EB', black: '#0F1115',
+  card: '#FFFFFF', soft: '#FAFAFA', green: '#166534', red: '#B91C1C', amber: '#92400E',
 };
 
 const pageFont = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
+const cardStyle: CSSProperties = { background: BRAND.card, border: `1px solid ${BRAND.border}`, borderRadius: '20px', boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)' };
+const inputStyle: CSSProperties = { width: '100%', minHeight: 48, border: `1px solid ${BRAND.border}`, borderRadius: 14, background: '#FFFFFF', color: BRAND.text, padding: '10px 13px', fontSize: 14, fontWeight: 620, fontFamily: pageFont, outline: 'none', boxSizing: 'border-box' };
+const textareaStyle: CSSProperties = { ...inputStyle, minHeight: 110, resize: 'vertical', lineHeight: 1.45 };
 
-const cardStyle: CSSProperties = {
-  background: BRAND.card,
-  border: `1px solid ${BRAND.border}`,
-  borderRadius: '20px',
-  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
-};
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  minHeight: 48,
-  border: `1px solid ${BRAND.border}`,
-  borderRadius: 14,
-  background: '#FFFFFF',
-  color: BRAND.text,
-  padding: '10px 13px',
-  fontSize: 14,
-  fontWeight: 620,
-  fontFamily: pageFont,
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const textareaStyle: CSSProperties = {
-  ...inputStyle,
-  minHeight: 110,
-  resize: 'vertical',
-  lineHeight: 1.45,
-};
-
-// OPC_NEW_INVOICE_EDITOR_V2_20260819
-const DEFAULT_INVOICE_PAYMENT_TERMS =
-  'Bitte begleichen Sie den Rechnungsbetrag innerhalb von 10 Tagen ab Rechnungsdatum. ' +
-  'Der dazugehörige QR-Zahlteil befindet sich auf der letzten Seite. ' +
-  'Die Verrechnung erfolgt auf Grundlage des bestätigten Auftrags und des vereinbarten Leistungsumfangs.';
-
-const DEFAULT_INVOICE_CLOSING_TEXT =
-  'Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\n' +
-  'Freundliche Grüsse\n' +
-  'Orange Pro Clean GmbH';
+const DEFAULT_INVOICE_PAYMENT_TERMS = 'Bitte begleichen Sie den Rechnungsbetrag innerhalb von 10 Tagen ab Rechnungsdatum. Der dazugehörige QR-Zahlteil befindet sich auf der letzten Seite. Die Verrechnung erfolgt auf Grundlage des bestätigten Auftrags und des vereinbarten Leistungsumfangs.';
+const DEFAULT_INVOICE_CLOSING_TEXT = 'Bei Fragen stehen wir Ihnen gerne zur Verfügung.\n\nFreundliche Grüsse\nOrange Pro Clean GmbH';
 
 function todayInput() {
   const date = new Date();
@@ -123,10 +81,7 @@ function addDays(inputDate: string, days: number) {
   return local.toISOString().slice(0, 10);
 }
 
-function clean(value: unknown) {
-  return String(value ?? '').trim();
-}
-
+function clean(value: unknown) { return String(value ?? '').trim(); }
 function parseMoney(value: unknown) {
   const raw = clean(value);
   if (!raw) return 0;
@@ -134,25 +89,13 @@ function parseMoney(value: unknown) {
   const number = Number(normalized);
   return Number.isFinite(number) ? number : 0;
 }
-
-function roundMoney(value: number) {
-  return Number((Number.isFinite(value) ? value : 0).toFixed(2));
-}
-
+function roundMoney(value: number) { return Number((Number.isFinite(value) ? value : 0).toFixed(2)); }
 function formatMoney(value: number | string | null | undefined) {
   const amount = Number(value || 0);
   return new Intl.NumberFormat('de-CH', { style: 'currency', currency: 'CHF' }).format(Number.isFinite(amount) ? amount : 0);
 }
-
-function getClientId(client: ClientOption) {
-  return client.client_id || client.id || '';
-}
-
-function getClientName(client?: ClientOption | null) {
-  if (!client) return '';
-  return client.billing_name || client.company_name || client.full_name || client.email || client.billing_email || 'Kunde';
-}
-
+function getClientId(client: ClientOption) { return client.client_id || client.id || ''; }
+function getClientName(client?: ClientOption | null) { return client ? client.billing_name || client.company_name || client.full_name || client.email || client.billing_email || 'Kunde' : ''; }
 function getSiteLabel(site?: SiteOption | null) {
   if (!site) return '';
   const address = site.address_text || site.address || '';
@@ -163,274 +106,71 @@ function getSiteLabel(site?: SiteOption | null) {
 function Label({ children, required = false }: { children: ReactNode; required?: boolean }) {
   return <label className="opc-new-doc-label">{children}{required ? <span> *</span> : null}</label>;
 }
-
 function Section({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="opc-new-doc-card" style={cardStyle}>
-      <div className="opc-new-doc-section-header">
-        {icon ? <div className="opc-new-doc-section-icon">{icon}</div> : null}
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  );
+  return <section className="opc-new-doc-card" style={cardStyle}><div className="opc-new-doc-section-header">{icon ? <div className="opc-new-doc-section-icon">{icon}</div> : null}<h2>{title}</h2></div>{children}</section>;
 }
 
-function AdvancedTextArea({
-  label,
-  value,
-  onChange,
-  wide = false,
-  rows = 5,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  wide?: boolean;
-  rows?: number;
-}) {
-  const textareaRef =
-    useRef<HTMLTextAreaElement | null>(null);
+function AdvancedTextArea({ label, value, onChange, wide = false, rows = 5 }: { label: string; value: string; onChange: (value: string) => void; wide?: boolean; rows?: number }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  function formatSelectedLines(
-    mode: 'bullet' | 'plain' | 'heading',
-  ) {
+  function formatSelectedLines(mode: 'bullet' | 'plain' | 'heading') {
     const textarea = textareaRef.current;
-
     if (!textarea) return;
-
-    const start =
-      textarea.selectionStart ?? 0;
-
-    const end =
-      textarea.selectionEnd ?? start;
-
-    const lineStart =
-      value.lastIndexOf(
-        '\n',
-        Math.max(0, start - 1),
-      ) + 1;
-
-    const nextBreak =
-      value.indexOf('\n', end);
-
-    const lineEnd =
-      nextBreak === -1
-        ? value.length
-        : nextBreak;
-
-    const selected =
-      value.slice(lineStart, lineEnd);
-
-    const lines =
-      selected
-        ? selected.split('\n')
-        : [''];
-
-    const replacement = lines
-      .map((line) => {
-        const plain = line.replace(
-          /^\s*[•*-]\s*/,
-          '',
-        );
-
-        if (mode === 'bullet') return `• ${plain}`;
-        if (mode === 'heading') return `## ${plain}`;
-        return plain;
-      })
-      .join('\n');
-
-    onChange(
-      `${value.slice(0, lineStart)}` +
-      `${replacement}` +
-      `${value.slice(lineEnd)}`,
-    );
-
-    requestAnimationFrame(() => {
-      textarea.focus();
-
-      textarea.setSelectionRange(
-        lineStart,
-        lineStart + replacement.length,
-      );
-    });
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? start;
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const nextBreak = value.indexOf('\n', end);
+    const lineEnd = nextBreak === -1 ? value.length : nextBreak;
+    const lines = (value.slice(lineStart, lineEnd) || '').split('\n');
+    const replacement = lines.map((line) => {
+      const plain = line.replace(/^\s*(?:[•*-]\s+|#{1,3}\s+)/, '').trimEnd();
+      if (mode === 'bullet') return `• ${plain}`;
+      if (mode === 'heading') return `## ${plain}`;
+      return plain;
+    }).join('\n');
+    onChange(`${value.slice(0, lineStart)}${replacement}${value.slice(lineEnd)}`);
+    requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(lineStart, lineStart + replacement.length); });
   }
 
-  return (
-    <div
-      className={
-        wide ? 'opc-wide' : undefined
-      }
-    >
-      <Label>{label}</Label>
+  function formatBold() {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? start;
+    const selected = value.slice(start, end);
+    const replacement = selected ? `**${selected}**` : '****';
+    onChange(`${value.slice(0, start)}${replacement}${value.slice(end)}`);
+    requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(selected ? start : start + 2, selected ? start + replacement.length : start + 2); });
+  }
 
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 6,
-          marginBottom: 7,
-        }}
-      >
-        <button
-          type="button"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => formatSelectedLines('heading')}
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          Überschrift
-        </button>
-
-        <button
-          type="button"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            const textarea = textareaRef.current;
-            if (!textarea) return;
-            const start = textarea.selectionStart ?? 0;
-            const end = textarea.selectionEnd ?? start;
-            const selected = value.slice(start, end);
-            const replacement = selected ? `**${selected}**` : '****';
-            onChange(`${value.slice(0, start)}${replacement}${value.slice(end)}`);
-            requestAnimationFrame(() => {
-              textarea.focus();
-              if (selected) {
-                textarea.setSelectionRange(start, start + replacement.length);
-              } else {
-                textarea.setSelectionRange(start + 2, start + 2);
-              }
-            });
-          }}
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          Fett
-        </button>
-
-        <button
-          type="button"
-          onClick={() =>
-            formatSelectedLines('bullet')
-          }
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          • Aufzählung
-        </button>
-
-        <button
-          type="button"
-          onClick={() =>
-            formatSelectedLines('plain')
-          }
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          Normaler Text
-        </button>
-
-        <button
-          type="button"
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            const textarea = textareaRef.current;
-            if (!textarea) return;
-            const start = textarea.selectionStart ?? value.length;
-            const end = textarea.selectionEnd ?? start;
-            onChange(`${value.slice(0, start)}\n\n${value.slice(end)}`);
-            requestAnimationFrame(() => {
-              textarea.focus();
-              textarea.setSelectionRange(start + 2, start + 2);
-            });
-          }}
-          style={{
-            border: `1px solid ${BRAND.border}`,
-            background: '#FFFFFF',
-            color: BRAND.text,
-            borderRadius: 9,
-            padding: '6px 9px',
-            fontSize: 12,
-            fontWeight: 760,
-            cursor: 'pointer',
-          }}
-        >
-          Absatzabstand
-        </button>
-      </div>
-
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(event) =>
-          onChange(event.target.value)
-        }
-        rows={rows}
-        style={textareaStyle}
-      />
-
-      <span style={{ display: 'block', marginTop: 7, color: BRAND.muted, fontSize: 11, lineHeight: 1.4 }}>
-        Leerzeilen, Überschriften, Aufzählungen und fett markierter Text werden im Rechnungs-PDF übernommen. Das Feld darf leer bleiben.
-      </span>
+  return <div className={wide ? 'opc-wide' : undefined}>
+    <Label>{label}</Label>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 7 }}>
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => formatSelectedLines('heading')} style={editorToolStyle}>Überschrift</button>
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={formatBold} style={editorToolStyle}>Fett</button>
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => formatSelectedLines('bullet')} style={editorToolStyle}>• Aufzählung</button>
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => formatSelectedLines('plain')} style={editorToolStyle}>Normaler Text</button>
+      <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => {
+        const textarea = textareaRef.current; if (!textarea) return;
+        const start = textarea.selectionStart ?? value.length; const end = textarea.selectionEnd ?? start;
+        onChange(`${value.slice(0, start)}\n\n${value.slice(end)}`);
+        requestAnimationFrame(() => { textarea.focus(); textarea.setSelectionRange(start + 2, start + 2); });
+      }} style={editorToolStyle}>Absatzabstand</button>
     </div>
-  );
+    <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} rows={rows} style={textareaStyle} />
+    <span style={{ display: 'block', marginTop: 7, color: BRAND.muted, fontSize: 11, lineHeight: 1.4 }}>Leerzeilen, Überschriften, Aufzählungen und fett markierter Text werden im Rechnungs-PDF übernommen. Das Feld darf leer bleiben.</span>
+  </div>;
 }
+
+const editorToolStyle: CSSProperties = { border: `1px solid ${BRAND.border}`, background: '#FFFFFF', color: BRAND.text, borderRadius: 9, padding: '6px 9px', fontSize: 12, fontWeight: 760, cursor: 'pointer' };
 
 export default function NewInvoicePage() {
   const [form, setForm] = useState<FormState>(() => ({
-    clientId: '',
-    clientSiteId: '',
-    quoteId: '',
-    title: 'Neue Rechnung',
-    invoiceType: 'standard',
-    status: 'draft',
-    issueDate: todayInput(),
-    dueDate: addDays(todayInput(), 10),
-    itemTitle: 'Neue Position',
-    description: '',
-    serviceDescription: '',
-    quantity: '1',
-    unit: 'pauschal',
-    unitPrice: '0',
-    discount: '0',
-    taxRate: '8.1',
-    paid: '0',
+    clientId: '', clientSiteId: '', quoteId: '', title: 'Neue Rechnung', invoiceType: 'standard', status: 'draft',
+    issueDate: todayInput(), dueDate: addDays(todayInput(), 10), itemTitle: 'Neue Position', description: '', serviceDescription: '',
+    quantity: '1', unit: 'pauschal', unitPrice: '0', discount: '0', taxRate: '8.1', paid: '0',
     introText: 'Vielen Dank für Ihren Auftrag. Nachfolgend stellen wir Ihnen hiermit die Ausführung der vereinbarten Reinigungsleistung in Rechnung.',
-    paymentTerms: DEFAULT_INVOICE_PAYMENT_TERMS,
-    closingText: DEFAULT_INVOICE_CLOSING_TEXT,
-    internalNotes: '',
+    paymentTerms: DEFAULT_INVOICE_PAYMENT_TERMS, closingText: DEFAULT_INVOICE_CLOSING_TEXT, internalNotes: '',
   }));
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [sites, setSites] = useState<SiteOption[]>([]);
@@ -451,10 +191,7 @@ export default function NewInvoicePage() {
   }, []);
 
   useEffect(() => {
-    if (!form.clientId) {
-      setSites([]);
-      return;
-    }
+    if (!form.clientId) { setSites([]); return; }
     void loadSites(form.clientId);
   }, [form.clientId]);
 
@@ -477,45 +214,25 @@ export default function NewInvoicePage() {
   async function loadClients(preselectClientId = '') {
     setLoadingClients(true);
     try {
-      const { data, error } = await supabase
-        .from('opc_client_overview')
-        .select('client_id,contact_id,billing_name,company_name,full_name,billing_email,email')
-        .order('billing_name', { ascending: true })
-        .limit(300);
+      const { data, error } = await supabase.from('opc_client_overview').select('client_id,contact_id,billing_name,company_name,full_name,billing_email,email').order('billing_name', { ascending: true }).limit(300);
       if (error) throw error;
       const rows = (data || []) as ClientOption[];
       setClients(rows);
-      if (preselectClientId && rows.some((client) => getClientId(client) === preselectClientId)) {
-        setForm((current) => ({ ...current, clientId: preselectClientId }));
-      }
-    } catch (error: any) {
-      setErrorMessage(error?.message || 'Kunden konnten nicht geladen werden.');
-    } finally {
-      setLoadingClients(false);
-    }
+      if (preselectClientId && rows.some((client) => getClientId(client) === preselectClientId)) setForm((current) => ({ ...current, clientId: preselectClientId }));
+    } catch (error: any) { setErrorMessage(error?.message || 'Kunden konnten nicht geladen werden.'); }
+    finally { setLoadingClients(false); }
   }
 
   async function loadSites(clientId: string) {
     setLoadingSites(true);
     try {
-      const { data, error } = await supabase
-        .from('opc_client_sites')
-        .select('id,client_id,contact_id,site_name,address_text,postal_code,city,country')
-        .eq('client_id', clientId)
-        .order('site_name', { ascending: true });
+      const { data, error } = await supabase.from('opc_client_sites').select('id,client_id,contact_id,site_name,address_text,postal_code,city,country').eq('client_id', clientId).order('site_name', { ascending: true });
       if (error) throw error;
       const loaded = (data || []) as SiteOption[];
       setSites(loaded);
-      setForm((current) => {
-        if (current.clientSiteId && loaded.some((site) => site.id === current.clientSiteId)) return current;
-        return { ...current, clientSiteId: loaded[0]?.id || '' };
-      });
-    } catch (error: any) {
-      setSites([]);
-      setErrorMessage(error?.message || 'Standorte konnten nicht geladen werden.');
-    } finally {
-      setLoadingSites(false);
-    }
+      setForm((current) => current.clientSiteId && loaded.some((site) => site.id === current.clientSiteId) ? current : { ...current, clientSiteId: loaded[0]?.id || '' });
+    } catch (error: any) { setSites([]); setErrorMessage(error?.message || 'Standorte konnten nicht geladen werden.'); }
+    finally { setLoadingSites(false); }
   }
 
   async function loadQuotePrefill(quoteId: string) {
@@ -528,44 +245,20 @@ export default function NewInvoicePage() {
       const quote = quoteResponse.data as QuoteRow | null;
       const item = ((itemsResponse.data || []) as QuoteItem[])[0] || null;
       if (!quote) return;
-      const sourceServiceDescription = [
-        quote.service_description_text,
-        quote.scope_text,
-      ]
-        .filter((value) => value !== null && value !== undefined && String(value).trim())
-        .map((value) => String(value))
-        .join('\n\n');
-
+      const sourceServiceDescription = [quote.service_description_text, quote.scope_text].filter((value) => value !== null && value !== undefined && String(value).trim()).map(String).join('\n\n');
       setForm((current) => ({
-        ...current,
-        quoteId,
-        clientId: quote.client_id || current.clientId,
-        clientSiteId: quote.client_site_id || current.clientSiteId,
+        ...current, quoteId, clientId: quote.client_id || current.clientId, clientSiteId: quote.client_site_id || current.clientSiteId,
         title: `Rechnung zu ${quote.quote_number || quote.title || 'Offerte'}`,
         itemTitle: clean(item?.title) || clean(quote.title) || 'Position',
-        description:
-          item?.description === null || item?.description === undefined
-            ? ''
-            : String(item.description),
-        serviceDescription: sourceServiceDescription,
-        quantity: String(item?.quantity || 1),
-        unit: item?.unit || 'pauschal',
-        unitPrice: String(item?.unit_price_chf || quote.subtotal_chf || 0),
-        taxRate: String(item?.tax_rate || quote.tax_rate || 8.1),
-        paymentTerms:
-          quote.payment_terms === null || quote.payment_terms === undefined
-            ? current.paymentTerms
-            : String(quote.payment_terms),
+        description: item?.description === null || item?.description === undefined ? '' : String(item.description),
+        serviceDescription: sourceServiceDescription, quantity: String(item?.quantity || 1), unit: item?.unit || 'pauschal',
+        unitPrice: String(item?.unit_price_chf || quote.subtotal_chf || 0), taxRate: String(item?.tax_rate || quote.tax_rate || 8.1),
+        paymentTerms: quote.payment_terms === null || quote.payment_terms === undefined ? current.paymentTerms : String(quote.payment_terms),
       }));
-    } catch (error: any) {
-      setErrorMessage(error?.message || 'Offerte konnte nicht für Rechnung übernommen werden.');
-    }
+    } catch (error: any) { setErrorMessage(error?.message || 'Offerte konnte nicht für Rechnung übernommen werden.'); }
   }
 
-  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
-
+  function update<K extends keyof FormState>(key: K, value: FormState[K]) { setForm((current) => ({ ...current, [key]: value })); }
   function validate() {
     if (!form.clientId) return 'Bitte Kunde auswählen.';
     if (!clean(form.title)) return 'Bitte Titel erfassen.';
@@ -577,226 +270,98 @@ export default function NewInvoicePage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (saving) return;
-    setErrorMessage('');
-    setSuccessMessage('');
+    setErrorMessage(''); setSuccessMessage('');
     const validation = validate();
-    if (validation) {
-      setErrorMessage(validation);
-      return;
-    }
+    if (validation) { setErrorMessage(validation); return; }
     setSaving(true);
+
     try {
-      const clientSnapshot = selectedClient
-        ? {
-            client_id: form.clientId,
-            billing_name: selectedClient.billing_name,
-            company_name: selectedClient.company_name,
-            full_name: selectedClient.full_name,
-            email: selectedClient.email || selectedClient.billing_email,
-          }
-        : {};
-      const siteSnapshot = selectedSite
-        ? {
-            client_site_id: selectedSite.id,
-            site_name: selectedSite.site_name,
-            address_text: selectedSite.address_text || selectedSite.address,
-            postal_code: selectedSite.postal_code,
-            city: selectedSite.city,
-            country: selectedSite.country,
-          }
-        : {};
+      const clientSnapshot = selectedClient ? {
+        client_id: form.clientId, billing_name: selectedClient.billing_name, company_name: selectedClient.company_name,
+        full_name: selectedClient.full_name, email: selectedClient.email || selectedClient.billing_email,
+      } : {};
+      const siteSnapshot = selectedSite ? {
+        client_site_id: selectedSite.id, site_name: selectedSite.site_name, address_text: selectedSite.address_text || selectedSite.address,
+        postal_code: selectedSite.postal_code, city: selectedSite.city, country: selectedSite.country,
+      } : {};
 
       const invoicePayload = {
-        quote_id: form.quoteId || null,
-        client_id: form.clientId,
+        quote_id: form.quoteId || null, client_id: form.clientId,
         contact_id: selectedSite?.contact_id || selectedClient?.contact_id || null,
-        client_site_id: form.clientSiteId || null,
-        status: form.status,
-        invoice_type: form.invoiceType,
-        title: clean(form.title),
-        language: 'de',
-        currency: 'CHF',
-        issue_date: form.issueDate,
-        due_date: form.dueDate || null,
-        client_snapshot: clientSnapshot,
-        site_snapshot: siteSnapshot,
-        intro_text: form.introText,
-        payment_terms: form.paymentTerms,
-        internal_notes: form.internalNotes || null,
-        subtotal_chf: roundMoney(totals.subtotal),
-        discount_chf: roundMoney(totals.discount),
-        tax_rate: roundMoney(totals.taxRate),
-        tax_chf: roundMoney(totals.tax),
-        total_chf: roundMoney(totals.total),
-        paid_chf: roundMoney(totals.paid),
-        balance_chf: roundMoney(totals.balance),
-        metadata: {
-          created_from: 'rechnung_neu_page',
-          source_quote_id: form.quoteId || null,
-          invoice_editor_version: 2,
-          invoice_scope_text: form.serviceDescription,
-          invoice_closing_text: form.closingText,
-        },
+        client_site_id: form.clientSiteId || null, status: form.status, invoice_type: form.invoiceType,
+        title: clean(form.title), language: 'de', currency: 'CHF', issue_date: form.issueDate, due_date: form.dueDate || null,
+        client_snapshot: clientSnapshot, site_snapshot: siteSnapshot, intro_text: form.introText, payment_terms: form.paymentTerms,
+        internal_notes: form.internalNotes || null, subtotal_chf: roundMoney(totals.subtotal), discount_chf: roundMoney(totals.discount),
+        tax_rate: roundMoney(totals.taxRate), tax_chf: roundMoney(totals.tax), total_chf: roundMoney(totals.total),
+        paid_chf: roundMoney(totals.paid), balance_chf: roundMoney(totals.balance),
+        metadata: { created_from: 'rechnung_neu_page', source_quote_id: form.quoteId || null, invoice_editor_version: 2, invoice_scope_text: form.serviceDescription, invoice_closing_text: form.closingText },
       };
-
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('opc_invoices')
-        .insert(invoicePayload)
-        .select('id, invoice_number')
-        .single();
-      if (invoiceError) throw invoiceError;
 
       const itemPayload = {
-        invoice_id: invoice.id,
-        sort_order: 1,
-        title: clean(form.itemTitle),
-        description: form.description || null,
-        quantity: totals.quantity,
-        unit: form.unit || 'pauschal',
-        unit_price_chf: roundMoney(totals.unitPrice),
-        discount_chf: 0,
-        tax_rate: roundMoney(totals.taxRate),
-        subtotal_chf: roundMoney(totals.subtotal),
-        tax_chf: roundMoney(totals.tax),
-        total_chf: roundMoney(totals.total),
-        metadata: {},
+        sort_order: 1, title: clean(form.itemTitle), description: form.description || null, quantity: totals.quantity,
+        unit: form.unit || 'pauschal', unit_price_chf: roundMoney(totals.unitPrice), discount_chf: 0,
+        tax_rate: roundMoney(totals.taxRate), subtotal_chf: roundMoney(totals.subtotal), tax_chf: roundMoney(totals.tax), total_chf: roundMoney(totals.total), metadata: {},
       };
-      const { error: itemError } = await supabase.from('opc_invoice_items').insert(itemPayload);
-      if (itemError) throw itemError;
+
+      const { data, error } = await supabase.rpc('opc_create_invoice_atomic', { p_invoice: invoicePayload, p_items: [itemPayload] });
+      if (error) throw error;
+      const invoice = data?.invoice;
+      if (!invoice?.id) throw new Error('Rechnung wurde ohne ID zurückgegeben.');
 
       setSuccessMessage('Rechnung wurde erstellt.');
       window.location.href = `${baseUrl}/rechnung/${invoice.id}`;
-    } catch (error: any) {
-      setErrorMessage(error?.message || 'Rechnung konnte nicht erstellt werden.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (error: any) { setErrorMessage(error?.message || 'Rechnung konnte nicht erstellt werden.'); }
+    finally { setSaving(false); }
   }
 
-  return (
-    <MirakaDashboardShell requiredRole={['owner']} currentPath="/rechnung/neu" fullWidth hideTopBar>
-      <OPCPageShell>
-        <form onSubmit={handleSubmit} className="opc-new-doc-page" style={{ fontFamily: pageFont }}>
-          <div className="opc-new-doc-topbar">
-            <a href={`${baseUrl}/rechnung`} className="opc-back-pill"><ArrowLeft size={16} /> Zurück</a>
-            <div className="opc-new-doc-top-actions">
-              <a href={`${baseUrl}/kunden`} className="opc-button light"><UserRound size={16} /> Kunde auswählen</a>
-              <button type="submit" disabled={saving} className="opc-button dark"><Save size={16} /> {saving ? 'Speichert...' : 'Rechnung erstellen'}</button>
-            </div>
-          </div>
+  return <MirakaDashboardShell requiredRole={['owner']} currentPath="/rechnung/neu" fullWidth hideTopBar>
+    <OPCPageShell>
+      <form onSubmit={handleSubmit} className="opc-new-doc-page" style={{ fontFamily: pageFont }}>
+        <div className="opc-new-doc-topbar">
+          <a href={`${baseUrl}/rechnung`} className="opc-back-pill"><ArrowLeft size={16} /> Zurück</a>
+          <div className="opc-new-doc-top-actions"><a href={`${baseUrl}/kunden`} className="opc-button light"><UserRound size={16} /> Kunde auswählen</a><button type="submit" disabled={saving} className="opc-button dark"><Save size={16} /> {saving ? 'Speichert...' : 'Rechnung erstellen'}</button></div>
+        </div>
 
-          <section className="opc-new-doc-hero" style={cardStyle}>
-            <div>
-              <p>Rechnung</p>
-              <h1>Neue Rechnung</h1>
-              <span>{getClientName(selectedClient) || 'Kunde noch nicht gewählt'}</span>
-            </div>
-            <div className="opc-new-doc-total-box">
-              <span>Total inkl. MWST</span>
-              <strong>{formatMoney(totals.total)}</strong>
-              <em>Offen: {formatMoney(totals.balance)}</em>
-            </div>
-          </section>
+        <section className="opc-new-doc-hero" style={cardStyle}><div><p>Rechnung</p><h1>Neue Rechnung</h1><span>{getClientName(selectedClient) || 'Kunde noch nicht gewählt'}</span></div><div className="opc-new-doc-total-box"><span>Total inkl. MWST</span><strong>{formatMoney(totals.total)}</strong><em>Offen: {formatMoney(totals.balance)}</em></div></section>
+        {errorMessage ? <div className="opc-alert error">{errorMessage}</div> : null}
+        {successMessage ? <div className="opc-alert success"><Check size={16} />{successMessage}</div> : null}
 
-          {errorMessage ? <div className="opc-alert error">{errorMessage}</div> : null}
-          {successMessage ? <div className="opc-alert success"><Check size={16} />{successMessage}</div> : null}
+        <div className="opc-new-doc-metrics">
+          <div style={cardStyle}><Receipt size={18} /><strong>{form.status === 'draft' ? 'Entwurf' : 'Bereit'}</strong><span>Status</span></div>
+          <div style={cardStyle}><CalendarDays size={18} /><strong>{form.issueDate}</strong><span>Datum</span></div>
+          <div style={cardStyle}><WalletCards size={18} /><strong>{formatMoney(totals.subtotal)}</strong><span>Exkl. MWST</span></div>
+          <div style={cardStyle}><Building2 size={18} /><strong>{getSiteLabel(selectedSite) || 'Kein Standort'}</strong><span>Standort</span></div>
+        </div>
 
-          <div className="opc-new-doc-metrics">
-            <div style={cardStyle}><Receipt size={18} /><strong>{form.status === 'draft' ? 'Entwurf' : 'Bereit'}</strong><span>Status</span></div>
-            <div style={cardStyle}><CalendarDays size={18} /><strong>{form.issueDate}</strong><span>Datum</span></div>
-            <div style={cardStyle}><WalletCards size={18} /><strong>{formatMoney(totals.subtotal)}</strong><span>Exkl. MWST</span></div>
-            <div style={cardStyle}><Building2 size={18} /><strong>{getSiteLabel(selectedSite) || 'Kein Standort'}</strong><span>Standort</span></div>
-          </div>
+        <Section title="Kunde & Rechnungskopf" icon={<UserRound size={17} />}><div className="opc-grid two">
+          <div><Label required>Kunde</Label><select value={form.clientId} onChange={(e) => update('clientId', e.target.value)} disabled={loadingClients} style={inputStyle}><option value="">{loadingClients ? 'Kunden werden geladen...' : 'Kunden auswählen'}</option>{clients.map((client) => <option key={getClientId(client)} value={getClientId(client)}>{getClientName(client)}</option>)}</select></div>
+          <div><Label>Standort</Label><select value={form.clientSiteId} onChange={(e) => update('clientSiteId', e.target.value)} disabled={!form.clientId || loadingSites || sites.length === 0} style={inputStyle}><option value="">{!form.clientId ? 'Zuerst Kunde auswählen' : loadingSites ? 'Standorte werden geladen...' : 'Kein Standort'}</option>{sites.map((site) => <option key={site.id} value={site.id}>{getSiteLabel(site)}</option>)}</select></div>
+          <div><Label required>Titel</Label><input value={form.title} onChange={(e) => update('title', e.target.value)} style={inputStyle} /></div>
+          <div><Label>Status</Label><select value={form.status} onChange={(e) => update('status', e.target.value)} style={inputStyle}><option value="draft">Entwurf</option><option value="ready">Bereit</option><option value="sent">Gesendet</option><option value="paid">Bezahlt</option></select></div>
+          <div><Label>Datum</Label><input type="date" value={form.issueDate} onChange={(e) => update('issueDate', e.target.value)} style={inputStyle} /></div>
+          <div><Label>Fällig bis</Label><input type="date" value={form.dueDate} onChange={(e) => update('dueDate', e.target.value)} style={inputStyle} /></div>
+        </div></Section>
 
-          <Section title="Kunde & Rechnungskopf" icon={<UserRound size={17} />}>
-            <div className="opc-grid two">
-              <div><Label required>Kunde</Label><select value={form.clientId} onChange={(event) => update('clientId', event.target.value)} disabled={loadingClients} style={inputStyle}><option value="">{loadingClients ? 'Kunden werden geladen...' : 'Kunden auswählen'}</option>{clients.map((client) => <option key={getClientId(client)} value={getClientId(client)}>{getClientName(client)}</option>)}</select></div>
-              <div><Label>Standort</Label><select value={form.clientSiteId} onChange={(event) => update('clientSiteId', event.target.value)} disabled={!form.clientId || loadingSites || sites.length === 0} style={inputStyle}><option value="">{!form.clientId ? 'Zuerst Kunde auswählen' : loadingSites ? 'Standorte werden geladen...' : 'Kein Standort'}</option>{sites.map((site) => <option key={site.id} value={site.id}>{getSiteLabel(site)}</option>)}</select></div>
-              <div><Label required>Titel</Label><input value={form.title} onChange={(event) => update('title', event.target.value)} style={inputStyle} /></div>
-              <div><Label>Status</Label><select value={form.status} onChange={(event) => update('status', event.target.value)} style={inputStyle}><option value="draft">Entwurf</option><option value="ready">Bereit</option><option value="sent">Gesendet</option><option value="paid">Bezahlt</option></select></div>
-              <div><Label>Datum</Label><input type="date" value={form.issueDate} onChange={(event) => update('issueDate', event.target.value)} style={inputStyle} /></div>
-              <div><Label>Fällig bis</Label><input type="date" value={form.dueDate} onChange={(event) => update('dueDate', event.target.value)} style={inputStyle} /></div>
-            </div>
-          </Section>
+        <Section title="Position & Preis" icon={<FileText size={17} />}>
+          <div className="opc-grid two"><div><Label required>Position</Label><input value={form.itemTitle} onChange={(e) => update('itemTitle', e.target.value)} style={inputStyle} /></div><div><Label>Rechnungstyp</Label><select value={form.invoiceType} onChange={(e) => update('invoiceType', e.target.value)} style={inputStyle}><option value="standard">Standard</option><option value="deposit">Akonto</option><option value="final">Schlussrechnung</option><option value="recurring">Wiederkehrend</option></select></div></div>
+          <div className="opc-grid four"><div><Label>Menge</Label><input value={form.quantity} onChange={(e) => update('quantity', e.target.value)} inputMode="decimal" style={inputStyle} /></div><div><Label>Einheit</Label><input value={form.unit} onChange={(e) => update('unit', e.target.value)} style={inputStyle} /></div><div><Label>Preis exkl. CHF</Label><input value={form.unitPrice} onChange={(e) => update('unitPrice', e.target.value)} inputMode="decimal" style={inputStyle} /></div><div><Label>MWST %</Label><input value={form.taxRate} onChange={(e) => update('taxRate', e.target.value)} inputMode="decimal" style={inputStyle} /></div></div>
+          <div className="opc-grid two"><div><Label>Bezahlt CHF</Label><input value={form.paid} onChange={(e) => update('paid', e.target.value)} inputMode="decimal" style={inputStyle} /></div></div>
+          <AdvancedTextArea label="Beschreibung / Zusatztext der Position (optional)" value={form.description} onChange={(value) => update('description', value)} wide />
+        </Section>
 
-          <Section title="Position & Preis" icon={<FileText size={17} />}>
-            <div className="opc-grid two">
-              <div><Label required>Position</Label><input value={form.itemTitle} onChange={(event) => update('itemTitle', event.target.value)} style={inputStyle} /></div>
-              <div><Label>Rechnungstyp</Label><select value={form.invoiceType} onChange={(event) => update('invoiceType', event.target.value)} style={inputStyle}><option value="standard">Standard</option><option value="deposit">Akonto</option><option value="final">Schlussrechnung</option><option value="recurring">Wiederkehrend</option></select></div>
-            </div>
-            <div className="opc-grid four">
-              <div><Label>Menge</Label><input value={form.quantity} onChange={(event) => update('quantity', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
-              <div><Label>Einheit</Label><input value={form.unit} onChange={(event) => update('unit', event.target.value)} style={inputStyle} /></div>
-              <div><Label>Preis exkl. CHF</Label><input value={form.unitPrice} onChange={(event) => update('unitPrice', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
-              <div><Label>MWST %</Label><input value={form.taxRate} onChange={(event) => update('taxRate', event.target.value)} inputMode="decimal" style={inputStyle} /></div>
-            </div>
-            <div className="opc-grid two"><div><Label>Bezahlt CHF</Label><input value={form.paid} onChange={(event) => update('paid', event.target.value)} inputMode="decimal" style={inputStyle} /></div></div>
-            <AdvancedTextArea
-              label="Beschreibung / Zusatztext der Position (optional)"
-              value={form.description}
-              onChange={(value) =>
-                update('description', value)
-              }
-              wide
-            />
-          </Section>
+        <Section title="Texte" icon={<FileText size={17} />}><div className="opc-grid two">
+          <AdvancedTextArea label="Einleitung" value={form.introText} onChange={(value) => update('introText', value)} />
+          <AdvancedTextArea label="Leistungsbeschreibung" value={form.serviceDescription} onChange={(value) => update('serviceDescription', value)} wide />
+          <AdvancedTextArea label="Zahlungsbedingungen" value={form.paymentTerms} onChange={(value) => update('paymentTerms', value)} />
+          <AdvancedTextArea label="Schlussteil" value={form.closingText} onChange={(value) => update('closingText', value)} wide />
+          <AdvancedTextArea label="Interne Notizen" value={form.internalNotes} onChange={(value) => update('internalNotes', value)} wide />
+        </div></Section>
 
-          <Section title="Texte" icon={<FileText size={17} />}>
-            <div className="opc-grid two">
-              <AdvancedTextArea
-                label="Einleitung"
-                value={form.introText}
-                onChange={(value) =>
-                  update('introText', value)
-                }
-              />
-
-              <AdvancedTextArea
-                label="Leistungsbeschreibung"
-                value={form.serviceDescription}
-                onChange={(value) =>
-                  update('serviceDescription', value)
-                }
-                wide
-              />
-
-              <AdvancedTextArea
-                label="Zahlungsbedingungen"
-                value={form.paymentTerms}
-                onChange={(value) =>
-                  update('paymentTerms', value)
-                }
-              />
-
-              <AdvancedTextArea
-                label="Schlussteil"
-                value={form.closingText}
-                onChange={(value) =>
-                  update('closingText', value)
-                }
-                wide
-              />
-
-              <AdvancedTextArea
-                label="Interne Notizen"
-                value={form.internalNotes}
-                onChange={(value) =>
-                  update('internalNotes', value)
-                }
-                wide
-              />
-            </div>
-          </Section>
-
-          <div className="opc-bottom-actions" style={cardStyle}>
-            <a href={`${baseUrl}/rechnung`} className="opc-button light">Abbrechen</a>
-            <button type="submit" disabled={saving} className="opc-button dark">{saving ? 'Speichert...' : 'Rechnung erstellen'}</button>
-          </div>
-        </form>
-        <style>{`${opcResponsiveStyle}${sharedCss}`}</style>
-      </OPCPageShell>
-    </MirakaDashboardShell>
-  );
+        <div className="opc-bottom-actions" style={cardStyle}><a href={`${baseUrl}/rechnung`} className="opc-button light">Abbrechen</a><button type="submit" disabled={saving} className="opc-button dark">{saving ? 'Speichert...' : 'Rechnung erstellen'}</button></div>
+      </form>
+      <style>{`${opcResponsiveStyle}${sharedCss}`}</style>
+    </OPCPageShell>
+  </MirakaDashboardShell>;
 }
 
 const sharedCss = `
@@ -829,7 +394,6 @@ const sharedCss = `
   .opc-wide { grid-column: 1 / -1; }
   .opc-new-doc-label { display: block; color: #374151; font-size: 12px; font-weight: 760; margin-bottom: 7px; }
   .opc-new-doc-label span { color: #D97706; }
-  .opc-full-field { margin-top: 12px; }
   .opc-alert { border-radius: 16px; padding: 14px 16px; font-size: 13px; font-weight: 740; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
   .opc-alert.error { border: 1px solid #FECACA; background: #FEF2F2; color: #B91C1C; }
   .opc-alert.success { border: 1px solid #BBF7D0; background: #F0FDF4; color: #166534; }
