@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { jsonResponse } from '../../../lib/opc-ticket-admin';
+import { validateActiveGeneralQrToken } from '../../../lib/opc-public-qr-access';
 
 export const prerender = false;
 
@@ -85,6 +86,17 @@ function normalizePlace(place: any) {
 export const GET: APIRoute = async ({ request, locals }) => {
   try {
     const url = new URL(request.url);
+    const qrAccess = await validateActiveGeneralQrToken(
+      locals,
+      url.searchParams.get('token'),
+    );
+
+    if (!qrAccess.ok) {
+      return jsonResponse(
+        { ok: false, error: qrAccess.error },
+        qrAccess.status,
+      );
+    }
 
     const placeId =
       sanitizePlaceId(url.searchParams.get('placeId')) ||
@@ -106,13 +118,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const apiKey = getGoogleApiKey(locals);
 
     if (!apiKey) {
+      console.error('[opc/google-place-details] Google Places API key is missing.');
       return jsonResponse(
         {
           ok: false,
-          error:
-            'Google Places API Key fehlt. Bitte GOOGLE_PLACES_API_KEY oder GOOGLE_MAPS_API_KEY in der ENV prüfen.',
+          error: 'Adresssuche ist derzeit nicht verfügbar.',
         },
-        500
+        503
       );
     }
 
@@ -140,33 +152,26 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const googleData = await googleResponse.json().catch(() => ({}));
 
     if (!googleResponse.ok) {
+      console.error('[opc/google-place-details] Google request failed:', googleResponse.status);
       return jsonResponse(
         {
           ok: false,
-          error:
-            googleData?.error?.message ||
-            googleData?.message ||
-            'Google Place Details konnten nicht geladen werden.',
-          google_status: googleResponse.status,
-          google_error: googleData?.error || googleData,
+          error: 'Adresse konnte nicht geladen werden.',
         },
-        googleResponse.status
+        googleResponse.status >= 400 && googleResponse.status < 500 ? 502 : 503
       );
     }
 
     return jsonResponse({
       ok: true,
       place: normalizePlace(googleData),
-      raw: googleData,
     });
   } catch (error) {
+    console.error('[opc/google-place-details] failed:', error);
     return jsonResponse(
       {
         ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Google Place Details konnten nicht geladen werden.',
+        error: 'Adresse konnte nicht geladen werden.',
       },
       500
     );
