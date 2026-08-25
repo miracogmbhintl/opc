@@ -54,21 +54,39 @@ function compactPayload(payload: JsonRecord) {
   return copy;
 }
 
+const OPC_OPERATION_TIME_ZONE = 'Europe/Zurich';
+const OPC_OPERATION_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: OPC_OPERATION_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+function utcDateParts(date: Date) {
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
+
 function toDateOnly(date: Date) {
-  const copy = new Date(date.getTime());
-  const offset = copy.getTimezoneOffset();
-  const local = new Date(copy.getTime() - offset * 60 * 1000);
-  return local.toISOString().slice(0, 10);
+  const { year, month, day } = utcDateParts(date);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function addDays(date: Date, days: number) {
   const copy = new Date(date.getTime());
-  copy.setDate(copy.getDate() + days);
+  copy.setUTCDate(copy.getUTCDate() + days);
   return copy;
 }
 
 function daysInMonth(year: number, monthIndex: number) {
-  return new Date(year, monthIndex + 1, 0).getDate();
+  return new Date(Date.UTC(year, monthIndex + 1, 0, 12)).getUTCDate();
 }
 
 function clampDay(year: number, monthIndex: number, day: number) {
@@ -76,19 +94,86 @@ function clampDay(year: number, monthIndex: number, day: number) {
 }
 
 function parseDateOnly(value: string) {
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
   return date;
 }
 
+function operationZoneParts(date: Date) {
+  const parts = Object.fromEntries(
+    OPC_OPERATION_DATE_TIME_FORMATTER
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second),
+  };
+}
+
 function toIsoDateTime(dateOnly: string, time: string) {
-  return new Date(`${dateOnly}T${time}:00`).toISOString();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly) || !/^\d{2}:\d{2}$/.test(time)) {
+    throw new Error('Datum oder Uhrzeit ist ungültig.');
+  }
+
+  const [year, month, day] = dateOnly.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    throw new Error('Uhrzeit ist ungültig.');
+  }
+
+  const desiredWallClock = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let timestamp = desiredWallClock;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const zoned = operationZoneParts(new Date(timestamp));
+    const representedWallClock = Date.UTC(
+      zoned.year,
+      zoned.month - 1,
+      zoned.day,
+      zoned.hour,
+      zoned.minute,
+      zoned.second,
+    );
+    const correction = desiredWallClock - representedWallClock;
+    if (Math.abs(correction) < 1000) break;
+    timestamp += correction;
+  }
+
+  const finalParts = operationZoneParts(new Date(timestamp));
+  if (
+    finalParts.year !== year ||
+    finalParts.month !== month ||
+    finalParts.day !== day ||
+    finalParts.hour !== hour ||
+    finalParts.minute !== minute
+  ) {
+    throw new Error(
+      `Die lokale Einsatzzeit ${dateOnly} ${time} existiert in Europe/Zurich wegen der Zeitumstellung nicht eindeutig. Bitte eine andere Uhrzeit wählen.`,
+    );
+  }
+
+  return new Date(timestamp).toISOString();
 }
 
 function getTimeFromIso(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '08:00';
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  const parts = operationZoneParts(date);
+  return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
 }
 
 function normalizeJsDayToUserDay(jsDay: number) {
@@ -140,7 +225,7 @@ function buildOccurrenceDates({
 
     let cursor = start;
     while (cursor.getTime() <= end.getTime()) {
-      const userDay = normalizeJsDayToUserDay(cursor.getDay());
+      const userDay = normalizeJsDayToUserDay(cursor.getUTCDay());
       if (weekdays.includes(userDay)) {
         dates.add(toDateOnly(cursor));
       }
@@ -150,24 +235,24 @@ function buildOccurrenceDates({
 
   if (recurrenceType === 'monthly_count') {
     const safeCount = Math.max(1, Math.min(4, Number(monthlyCount || 1)));
-    const startDay = start.getDate();
+    const startDay = start.getUTCDate();
     const step = safeCount === 1 ? 0 : Math.floor(28 / safeCount);
-    let monthCursor = new Date(start.getFullYear(), start.getMonth(), 1);
+    let monthCursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1, 12));
 
     while (monthCursor.getTime() <= end.getTime()) {
-      const year = monthCursor.getFullYear();
-      const month = monthCursor.getMonth();
+      const year = monthCursor.getUTCFullYear();
+      const month = monthCursor.getUTCMonth();
 
       for (let index = 0; index < safeCount; index += 1) {
         const day = clampDay(year, month, startDay + index * step);
-        const candidate = new Date(year, month, day);
+        const candidate = new Date(Date.UTC(year, month, day, 12));
 
         if (candidate.getTime() >= start.getTime() && candidate.getTime() <= end.getTime()) {
           dates.add(toDateOnly(candidate));
         }
       }
 
-      monthCursor = new Date(year, month + 1, 1);
+      monthCursor = new Date(Date.UTC(year, month + 1, 1, 12));
     }
   }
 
@@ -219,53 +304,17 @@ async function insertRecurringSeries(adminClient: any, payload: JsonRecord) {
 }
 
 async function insertJobs(adminClient: any, payloads: JsonRecord[]): Promise<string[]> {
-  const withRecurringColumns = payloads.map((payload) => compactPayload(payload));
-
+  const canonicalPayloads = payloads.map((payload) => compactPayload(payload));
   const { data, error } = await adminClient
     .from('opc_service_jobs')
-    .insert(withRecurringColumns)
+    .insert(canonicalPayloads)
     .select('id');
 
-  if (!error && Array.isArray(data)) {
-    return data.map((row: JsonRecord) => String(row.id)).filter(Boolean);
-  }
-
-  const recurringColumnError = String(error?.message || '').toLowerCase();
-
-  const canFallback =
-    recurringColumnError.includes('recurring_series_id') ||
-    recurringColumnError.includes('occurrence_date') ||
-    recurringColumnError.includes('occurrence_key') ||
-    recurringColumnError.includes('series_version') ||
-    recurringColumnError.includes('quote_id') ||
-    recurringColumnError.includes('order_confirmation_id') ||
-    recurringColumnError.includes('billing_status') ||
-    recurringColumnError.includes('invoice_id');
-
-  if (!canFallback) {
+  if (error || !Array.isArray(data)) {
     throw new Error(error?.message || 'Einsätze konnten nicht erstellt werden.');
   }
 
-  const fallbackPayloads = payloads.map((payload) => {
-    const copy = { ...payload };
-    delete copy.recurring_series_id;
-    delete copy.occurrence_date;
-    delete copy.occurrence_key;
-    delete copy.series_version;
-    delete copy.quote_id;
-    delete copy.order_confirmation_id;
-    delete copy.billing_status;
-    delete copy.invoice_id;
-    return compactPayload(copy);
-  });
-
-  const fallback = await adminClient.from('opc_service_jobs').insert(fallbackPayloads).select('id');
-
-  if (fallback.error || !Array.isArray(fallback.data)) {
-    throw new Error(fallback.error?.message || 'Einsätze konnten nicht erstellt werden.');
-  }
-
-  return fallback.data.map((row: JsonRecord) => String(row.id)).filter(Boolean);
+  return data.map((row: JsonRecord) => String(row.id)).filter(Boolean);
 }
 
 function buildAssignmentVariants({
