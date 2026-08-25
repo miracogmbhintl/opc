@@ -40,6 +40,7 @@ function isInternalOpcPage(pathname: string) {
     '/finanzen',
     '/rechnungsautomationen',
     '/einstellungen',
+    '/work-os',
   ];
 
   return prefixes.some(
@@ -106,7 +107,9 @@ function isClientOpcApi(pathname: string) {
   return prefixes.some((prefix) => matchesApiPrefix(pathname, prefix));
 }
 
-function isRestrictedOpcApi(pathname: string) {
+function isRestrictedInternalApi(pathname: string) {
+  if (pathname.startsWith('/api/work-os/')) return true;
+
   if (!pathname.startsWith('/api/opc/')) return false;
   if (isPublicOpcApi(pathname)) return false;
   if (isClientOpcApi(pathname)) return false;
@@ -128,7 +131,7 @@ function apiAccessResponse(error: string, status: number) {
 
 async function enforceClientPortalSeparation(context: any, pathname: string) {
   const internalPage = isInternalOpcPage(pathname);
-  const restrictedApi = isRestrictedOpcApi(pathname);
+  const restrictedApi = isRestrictedInternalApi(pathname);
 
   if (!internalPage && !restrictedApi) return null;
 
@@ -189,7 +192,17 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
         .maybeSingle(),
     ]);
 
-    if (staffResult.data) return null;
+    if (staffResult.data) {
+      // A small set of legacy Work OS handlers expects a request-scoped
+      // `locals.session`. Populate it from the same user/token that has just
+      // passed the canonical staff check instead of maintaining a second auth
+      // mechanism in those endpoints.
+      context.locals.session = {
+        user,
+        access_token: token,
+      };
+      return null;
+    }
 
     if (restrictedApi) {
       return apiAccessResponse(
