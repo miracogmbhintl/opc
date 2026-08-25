@@ -2,10 +2,12 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 const root = process.cwd();
-const pagesRoot = join(root, 'src', 'pages');
-const routesFile = join(root, 'src', 'lib', 'opc-routes.ts');
+const srcRoot = join(root, 'src');
+const pagesRoot = join(srcRoot, 'pages');
+const componentsRoot = join(srcRoot, 'components');
+const routesFile = join(srcRoot, 'lib', 'opc-routes.ts');
 const astroConfigFile = join(root, 'astro.config.mjs');
-const sidebarFile = join(root, 'src', 'components', 'MirakaSidebar.tsx');
+const sidebarFile = join(componentsRoot, 'MirakaSidebar.tsx');
 
 const failures = [];
 const warnings = [];
@@ -21,6 +23,10 @@ async function walk(dir) {
   }
 
   return files;
+}
+
+function relPath(file) {
+  return relative(root, file).split(sep).join('/');
 }
 
 function routeCandidates(route) {
@@ -55,15 +61,59 @@ function hasValidPageOutput(content) {
   );
 }
 
+function auditLifecycle(file, content, { astroPage = false } = {}) {
+  const rel = relPath(file);
+
+  if (astroPage && /DOMContentLoaded/.test(content)) {
+    failures.push(`${rel}: DOMContentLoaded-only runtime is unsafe after Astro client navigation`);
+  }
+
+  if (/new\s+MutationObserver\s*\(/.test(content) && !/\.disconnect\s*\(/.test(content)) {
+    failures.push(`${rel}: MutationObserver has no disconnect cleanup`);
+  }
+
+  if (/\bsetInterval\s*\(/.test(content) && !/\bclearInterval\s*\(/.test(content)) {
+    failures.push(`${rel}: interval has no clearInterval cleanup`);
+  }
+
+  if (/\.channel\s*\(/.test(content) && !/removeChannel\s*\(/.test(content)) {
+    failures.push(`${rel}: Supabase realtime channel has no removeChannel cleanup`);
+  }
+
+  if (/onAuthStateChange\s*\(/.test(content) && !/unsubscribe\s*\(/.test(content)) {
+    failures.push(`${rel}: Supabase auth subscription has no unsubscribe cleanup`);
+  }
+
+  const addsWindowListener = /window\.addEventListener\s*\(/.test(content);
+  const removesWindowListener = /window\.removeEventListener\s*\(/.test(content);
+  if (addsWindowListener && !removesWindowListener) {
+    warnings.push(`${rel}: window event listener is persistent; verify this is intentional runtime state`);
+  }
+
+  const addsDocumentListener = /document\.addEventListener\s*\(/.test(content);
+  const removesDocumentListener = /document\.removeEventListener\s*\(/.test(content);
+  const explicitAstroRuntime = /astro:(?:page-load|before-swap)/.test(content);
+  if (addsDocumentListener && !removesDocumentListener && !explicitAstroRuntime) {
+    warnings.push(`${rel}: document event listener is persistent; verify this is intentional runtime state`);
+  }
+
+  if (/\bsetTimeout\s*\(/.test(content) && !/\bclearTimeout\s*\(/.test(content)) {
+    warnings.push(`${rel}: one-shot timeout has no explicit unmount cleanup`);
+  }
+}
+
 const allFiles = await walk(pagesRoot);
 const pageFiles = allFiles.filter((file) => file.endsWith('.astro')).sort();
+const componentFiles = (await walk(componentsRoot))
+  .filter((file) => /\.(?:tsx|jsx|ts|js)$/.test(file) && !/\.backup(?:[-.]|$)/.test(file))
+  .sort();
 const routeSource = await readFile(routesFile, 'utf8');
 const astroConfig = await readFile(astroConfigFile, 'utf8');
 const sidebarSource = await readFile(sidebarFile, 'utf8');
 
 for (const file of pageFiles) {
   const content = await readFile(file, 'utf8');
-  const rel = relative(root, file).split(sep).join('/');
+  const rel = relPath(file);
 
   if (!content.trim()) failures.push(`${rel}: empty Astro page`);
   if (!hasValidPageOutput(content)) warnings.push(`${rel}: no obvious render, redirect, or Response output`);
@@ -71,6 +121,13 @@ for (const file of pageFiles) {
   if (content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__') && !content.includes('document.startViewTransition')) {
     failures.push(`${rel}: legacy transition marker without transition implementation`);
   }
+
+  auditLifecycle(file, content, { astroPage: true });
+}
+
+for (const file of componentFiles) {
+  const content = await readFile(file, 'utf8');
+  auditLifecycle(file, content);
 }
 
 const routeMatches = [...routeSource.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*:\s*['"](\/[^'"]*|\/)['"]/g)];
@@ -162,8 +219,9 @@ for (const page of primaryPages) {
   if (!await exists(join(pagesRoot, page))) failures.push(`primary page missing: src/pages/${page}`);
 }
 
-console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
+console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries, ${componentFiles.length} runtime component files.`);
 console.log('Navigation integrity: Astro 5 transition compatibility guard present; primary desktop navigation is hard-reload protected.');
+console.log('Lifecycle integrity: Astro pages and React components checked for unsafe DOMContentLoaded mounts, observer leaks, interval leaks, realtime leaks, and auth subscription leaks.');
 console.log('Security integrity: public diagnostic/test routes are excluded from production.');
 
 if (warnings.length) {
