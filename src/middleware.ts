@@ -82,16 +82,47 @@ function customerPortalDestination(pathname: string) {
   return '/kundenportal';
 }
 
-function isRestrictedOpcApi(pathname: string) {
-  if (!pathname.startsWith('/api/opc/')) return false;
+function matchesApiPrefix(pathname: string, prefix: string) {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
 
-  const allowedClientApiPrefixes = [
+function isPublicOpcApi(pathname: string) {
+  const prefixes = [
+    '/api/opc/public-ticket-link',
+    '/api/opc/create-public-ticket',
+    '/api/opc/google-place-autocomplete',
+    '/api/opc/google-place-details',
+  ];
+
+  return prefixes.some((prefix) => matchesApiPrefix(pathname, prefix));
+}
+
+function isClientOpcApi(pathname: string) {
+  const prefixes = [
     '/api/opc/client-portal',
     '/api/opc/jobs/access',
   ];
 
-  return !allowedClientApiPrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  return prefixes.some((prefix) => matchesApiPrefix(pathname, prefix));
+}
+
+function isRestrictedOpcApi(pathname: string) {
+  if (!pathname.startsWith('/api/opc/')) return false;
+  if (isPublicOpcApi(pathname)) return false;
+  if (isClientOpcApi(pathname)) return false;
+  return true;
+}
+
+function apiAccessResponse(error: string, status: number) {
+  return new Response(
+    JSON.stringify({ ok: false, error }),
+    {
+      status,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'private, no-store, max-age=0',
+      },
+    },
   );
 }
 
@@ -105,7 +136,13 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
     context.cookies.get('sb-access-token')?.value ||
     bearerToken(context.request);
 
-  if (!token) return null;
+  if (!token) {
+    if (restrictedApi) {
+      return apiAccessResponse('Nicht angemeldet.', 401);
+    }
+
+    return null;
+  }
 
   try {
     const url = getOpcSupabaseUrl(context.locals);
@@ -125,7 +162,13 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
       error: userError,
     } = await userClient.auth.getUser();
 
-    if (userError || !user) return null;
+    if (userError || !user) {
+      if (restrictedApi) {
+        return apiAccessResponse('Sitzung ist ungültig oder abgelaufen.', 401);
+      }
+
+      return null;
+    }
 
     const [staffResult, clientResult] = await Promise.all([
       serviceClient
@@ -147,30 +190,27 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
     ]);
 
     if (staffResult.data) return null;
-    if (!clientResult.data) return null;
 
     if (restrictedApi) {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: 'Diese interne Funktion ist für Kundenkonten nicht freigegeben.',
-        }),
-        {
-          status: 403,
-          headers: {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Cache-Control': 'private, no-store, max-age=0',
-          },
-        },
+      return apiAccessResponse(
+        'Diese interne Funktion ist nur für aktive Mitarbeiterkonten freigegeben.',
+        403,
       );
     }
+
+    if (!clientResult.data) return null;
 
     return context.redirect(customerPortalDestination(pathname), 302);
   } catch (error) {
     console.warn(
-      '[OPC Middleware] Client portal separation failed:',
+      '[OPC Middleware] Access separation failed:',
       error instanceof Error ? error.message : error,
     );
+
+    if (restrictedApi) {
+      return apiAccessResponse('Interne Zugriffsprüfung ist fehlgeschlagen.', 503);
+    }
+
     return null;
   }
 }
