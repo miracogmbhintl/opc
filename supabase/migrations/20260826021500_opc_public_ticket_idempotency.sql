@@ -21,6 +21,14 @@ create table if not exists public.opc_public_ticket_submissions (
 create index if not exists opc_public_ticket_submissions_rate_idx
   on public.opc_public_ticket_submissions(public_link_id, client_fingerprint, created_at desc);
 
+-- Second idempotency line of defence. Even if reservation bookkeeping fails after
+-- a ticket insert, the database still rejects another ticket carrying the same
+-- public submission key for the same QR link.
+create unique index if not exists opc_tickets_public_submission_key_unique
+  on public.opc_tickets (public_link_id, ((metadata->>'public_submission_key')))
+  where public_link_id is not null
+    and metadata ? 'public_submission_key';
+
 alter table public.opc_public_ticket_submissions enable row level security;
 revoke all on public.opc_public_ticket_submissions from public, anon, authenticated;
 grant select, insert, update, delete on public.opc_public_ticket_submissions to service_role;
