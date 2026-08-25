@@ -9,7 +9,15 @@ export type OpcOperationalRole = 'owner' | 'admin' | 'dispatch' | 'employee' | '
 
 type AnyRow = Record<string, any>;
 
-const ACTIVE_STATUSES = new Set(['active', 'aktiv']);
+const ACTIVE_STATUSES = new Set(['active', 'aktiv', 'enabled']);
+
+export function normalizeOpcStaffStatus(value: unknown) {
+  return String(value || 'active').trim().toLowerCase();
+}
+
+export function isActiveOpcStaffStatus(value: unknown) {
+  return ACTIVE_STATUSES.has(normalizeOpcStaffStatus(value));
+}
 
 export function normalizeOpcOperationalRole(value: unknown): OpcOperationalRole {
   const role = String(value || '').trim().toLowerCase();
@@ -35,10 +43,7 @@ function profileRole(profile: AnyRow | null): OpcOperationalRole {
 }
 
 function activeStaffRows(rows: AnyRow[]) {
-  return rows.filter((row) => {
-    const status = String(row?.status || 'active').trim().toLowerCase();
-    return ACTIVE_STATUSES.has(status) && row?.can_access_portal !== false;
-  });
+  return rows.filter((row) => isActiveOpcStaffStatus(row?.status) && row?.can_access_portal !== false);
 }
 
 function uniqueStrings(values: unknown[]) {
@@ -135,6 +140,9 @@ export async function resolveOpcJobAccess(
     role = 'employee';
   }
 
+  // Keep existing manager-by-role behavior until the live capability matrix is
+  // audited. Tightening this now could remove production access from users
+  // whose capability flags were never populated even though their role is valid.
   const canManageJobs = isOpcJobManagerRole(role);
   const canViewAllJobs = canManageJobs;
   const canViewAssignedJobs =
