@@ -28,10 +28,7 @@ function routeCandidates(route) {
 
   const clean = route.replace(/^\/+|\/+$/g, '');
   const parts = clean.split('/').filter(Boolean);
-  const direct = [
-    join(pagesRoot, `${clean}.astro`),
-    join(pagesRoot, clean, 'index.astro'),
-  ];
+  const direct = [join(pagesRoot, `${clean}.astro`), join(pagesRoot, clean, 'index.astro')];
 
   for (let i = parts.length - 1; i >= 1; i -= 1) {
     const prefix = parts.slice(0, i).join('/');
@@ -51,7 +48,7 @@ async function exists(path) {
 }
 
 const allFiles = await walk(pagesRoot);
-const pageFiles = allFiles.filter((file) => file.endsWith('.astro'));
+const pageFiles = allFiles.filter((file) => file.endsWith('.astro')).sort();
 const routeSource = await readFile(routesFile, 'utf8');
 const astroConfig = await readFile(astroConfigFile, 'utf8');
 const sidebarSource = await readFile(sidebarFile, 'utf8');
