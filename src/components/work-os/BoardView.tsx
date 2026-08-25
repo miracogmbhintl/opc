@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ArrowLeft, Plus } from 'lucide-react';
+import { baseUrl } from '../../lib/base-url';
 import TaskDetailPanel from './TaskDetailPanel';
 import CreateTaskModal from './CreateTaskModal';
 
@@ -76,7 +77,7 @@ export default function BoardView({ boardId }: BoardViewProps) {
 
   useEffect(() => {
     if (!boardId) {
-      setError('Board ID is required');
+      console.error('[BoardView] Board ID is required');
       setLoading(false);
       return;
     }
@@ -1035,17 +1036,3 @@ export default function BoardView({ boardId }: BoardViewProps) {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
