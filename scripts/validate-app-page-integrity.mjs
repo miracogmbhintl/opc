@@ -33,7 +33,6 @@ function routeCandidates(route) {
     join(pagesRoot, clean, 'index.astro'),
   ];
 
-  // Catch-all routes can serve nested paths such as /kundenportal/*.
   for (let i = parts.length - 1; i >= 1; i -= 1) {
     const prefix = parts.slice(0, i).join('/');
     direct.push(join(pagesRoot, prefix, '[...path].astro'));
@@ -66,10 +65,8 @@ for (const file of pageFiles) {
     warnings.push(`${rel}: no obvious rendered root element`);
   }
 
-  if (content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__')) {
-    if (!content.includes('document.startViewTransition')) {
-      failures.push(`${rel}: legacy transition marker without transition implementation`);
-    }
+  if (content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__') && !content.includes('document.startViewTransition')) {
+    failures.push(`${rel}: legacy transition marker without transition implementation`);
   }
 }
 
@@ -87,8 +84,6 @@ for (const route of routes) {
     }
   }
 
-  // Detail bases such as /mitarbeiter are valid when the list page exists and
-  // their dynamic child lives under the same directory.
   if (!resolved) {
     const clean = route.path.replace(/^\/+|\/+$/g, '');
     const listPage = join(pagesRoot, `${clean}.astro`);
@@ -109,9 +104,7 @@ for (const route of routes) {
     }
   }
 
-  if (!resolved) {
-    failures.push(`OPC_ROUTES.${route.key} -> ${route.path}: no matching Astro page or catch-all route`);
-  }
+  if (!resolved) failures.push(`OPC_ROUTES.${route.key} -> ${route.path}: no matching Astro page or catch-all route`);
 }
 
 const bannedProductionRoutes = [
@@ -160,6 +153,20 @@ const primaryPages = [
 
 for (const page of primaryPages) {
   if (!await exists(join(pagesRoot, page))) failures.push(`primary page missing: src/pages/${page}`);
+}
+
+const blankSensitivePages = pageFiles.filter((file) => {
+  const rel = relative(pagesRoot, file).split(sep).join('/');
+  return !rel.startsWith('api/') && !rel.startsWith('kundenportal/');
+});
+
+for (const file of blankSensitivePages) {
+  const content = await readFile(file, 'utf8');
+  const rel = relative(root, file).split(sep).join('/');
+
+  if (content.includes('client:only="react"') && !content.includes('<body')) {
+    failures.push(`${rel}: client-only React page has no explicit body fallback shell`);
+  }
 }
 
 console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
