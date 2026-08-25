@@ -59,13 +59,51 @@ begin
   limit 1;
 
   if v_existing.id is not null then
+    if v_existing.ticket_id is not null then
+      return jsonb_build_object(
+        'reservation_id', v_existing.id,
+        'existing', true,
+        'state', v_existing.state,
+        'ticket_id', v_existing.ticket_id,
+        'ticket_number', v_existing.ticket_number,
+        'media_warning_count', v_existing.media_warning_count,
+        'updated_at', v_existing.updated_at
+      );
+    end if;
+
+    -- A failed reservation, or a reservation abandoned for more than five
+    -- minutes before a ticket was created, can safely be retried with the same
+    -- idempotency key. It does not count as a second public submission.
+    if v_existing.state = 'failed'
+       or (v_existing.state = 'reserved' and v_existing.updated_at < now() - interval '5 minutes') then
+      update public.opc_public_ticket_submissions
+      set state = 'reserved',
+          client_fingerprint = p_client_fingerprint,
+          updated_at = now(),
+          completed_at = null
+      where id = v_existing.id
+      returning * into v_existing;
+
+      return jsonb_build_object(
+        'reservation_id', v_existing.id,
+        'existing', false,
+        'retry', true,
+        'state', v_existing.state,
+        'ticket_id', null,
+        'ticket_number', null,
+        'media_warning_count', 0,
+        'updated_at', v_existing.updated_at
+      );
+    end if;
+
     return jsonb_build_object(
       'reservation_id', v_existing.id,
       'existing', true,
       'state', v_existing.state,
-      'ticket_id', v_existing.ticket_id,
-      'ticket_number', v_existing.ticket_number,
-      'media_warning_count', v_existing.media_warning_count
+      'ticket_id', null,
+      'ticket_number', null,
+      'media_warning_count', v_existing.media_warning_count,
+      'updated_at', v_existing.updated_at
     );
   end if;
 
@@ -73,7 +111,8 @@ begin
   from public.opc_public_ticket_submissions
   where public_link_id = p_public_link_id
     and client_fingerprint = p_client_fingerprint
-    and created_at >= now() - interval '1 hour';
+    and created_at >= now() - interval '1 hour'
+    and state <> 'failed';
 
   if v_recent_count >= greatest(1, least(coalesce(p_hourly_limit, 10), 50)) then
     raise exception 'RATE_LIMIT: Zu viele Meldungen in kurzer Zeit.'
@@ -99,7 +138,8 @@ begin
     'state', v_created.state,
     'ticket_id', null,
     'ticket_number', null,
-    'media_warning_count', 0
+    'media_warning_count', 0,
+    'updated_at', v_created.updated_at
   );
 end
 $$;
