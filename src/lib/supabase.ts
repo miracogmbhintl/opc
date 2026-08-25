@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 
 let _client: SupabaseClient | null = null;
 
@@ -16,6 +16,21 @@ type OpcRestSnapshot = {
 const OPC_REST_DEDUPE_WINDOW_MS = 15_000;
 const opcRestInFlight = new Map<string, Promise<Response>>();
 const opcRestRecent = new Map<string, OpcRestSnapshot>();
+
+const OPC_AUTH_COOKIE_SYNC_KEY = 'opc:auth-cookie-sync-at:v1';
+const OPC_AUTH_COOKIE_SYNC_INTERVAL_MS = 5 * 60_000;
+const OPC_AUTH_PROFILE_REFRESH_KEY = 'opc:auth-profile-refresh-at:v1';
+const OPC_JOB_ACCESS_CACHE_KEY = '__opc_jobs_access_response_session_v3__';
+const OPC_AUTH_CACHE_KEYS = [
+  'opc:auth-profile-cache:v5:persistent',
+  'opc:auth-profile-cache:v4:persistent',
+  'opc:auth-profile-cache:v3',
+  'opc:auth-profile-cache:v2',
+  'opc:auth-profile-cache',
+];
+
+let opcAuthLifecycleInstalled = false;
+let opcAuthCookieSyncInFlight: Promise<boolean> | null = null;
 
 function responseFromOpcSnapshot(snapshot: OpcRestSnapshot) {
   return new Response(snapshot.body.slice(0), {
@@ -116,6 +131,176 @@ async function opcDedupedFetch(
   }
 }
 
+function setLegacySessionKeys(session: Session) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.removeItem('mco_logged_out');
+    window.sessionStorage.removeItem('mco_logged_out');
+    window.localStorage.setItem('opc_auth_token', session.access_token);
+    window.localStorage.setItem('opc_user_id', session.user.id);
+    window.localStorage.setItem('opc_user_email', session.user.email || '');
+  } catch {
+    // Legacy compatibility storage must never block authentication.
+  }
+}
+
+function clearOpcBrowserAuthState() {
+  if (typeof window === 'undefined') return;
+
+  try {
+    for (const key of OPC_AUTH_CACHE_KEYS) {
+      window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(key);
+    }
+
+    window.localStorage.removeItem(OPC_AUTH_COOKIE_SYNC_KEY);
+    window.localStorage.removeItem(OPC_AUTH_PROFILE_REFRESH_KEY);
+    window.sessionStorage.removeItem(OPC_JOB_ACCESS_CACHE_KEY);
+
+    window.localStorage.removeItem('mco_auth');
+    window.localStorage.removeItem('mco_auth_token');
+    window.localStorage.removeItem('mco_user_role');
+    window.localStorage.removeItem('mco_user_data');
+    window.localStorage.removeItem('opc_auth_token');
+    window.localStorage.removeItem('opc_access');
+    window.localStorage.removeItem('opc_user_id');
+    window.localStorage.removeItem('opc_user_email');
+
+    window.sessionStorage.removeItem('mco_auth_target');
+    window.sessionStorage.removeItem('mco_auth_ready');
+
+    // This marker prevents old compatibility caches from reopening the app
+    // while the SDK has no session. A successful sign-in removes it again.
+    window.localStorage.setItem('mco_logged_out', 'true');
+    window.sessionStorage.setItem('mco_logged_out', 'true');
+  } catch {
+    // A storage failure must not prevent Supabase from signing out.
+  }
+}
+
+async function clearOpcServerSession() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const response = await globalThis.fetch('/api/auth/set-session', {
+      method: 'DELETE',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function syncOpcServerSession(session: Session, force = false) {
+  if (typeof window === 'undefined') return false;
+
+  setLegacySessionKeys(session);
+
+  if (!force) {
+    try {
+      const lastSync = Number(window.localStorage.getItem(OPC_AUTH_COOKIE_SYNC_KEY) || 0);
+      if (
+        Number.isFinite(lastSync) &&
+        lastSync > 0 &&
+        Date.now() - lastSync < OPC_AUTH_COOKIE_SYNC_INTERVAL_MS
+      ) {
+        return true;
+      }
+    } catch {
+      // Continue with a real sync.
+    }
+  }
+
+  if (opcAuthCookieSyncInFlight) return opcAuthCookieSyncInFlight;
+
+  opcAuthCookieSyncInFlight = (async () => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const response = await globalThis.fetch('/api/auth/set-session', {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
+        signal: controller.signal,
+      });
+
+      if (response.ok) {
+        try {
+          window.localStorage.setItem(OPC_AUTH_COOKIE_SYNC_KEY, String(Date.now()));
+        } catch {
+          // The cookie itself is authoritative; timestamp storage is optional.
+        }
+      }
+
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  })().finally(() => {
+    opcAuthCookieSyncInFlight = null;
+  });
+
+  return opcAuthCookieSyncInFlight;
+}
+
+function installOpcAuthLifecycle(client: SupabaseClient) {
+  if (typeof window === 'undefined' || opcAuthLifecycleInstalled) return;
+  opcAuthLifecycleInstalled = true;
+
+  client.auth.onAuthStateChange((event, session) => {
+    // Supabase recommends avoiding awaited SDK work directly inside the auth
+    // callback. Schedule the bridge work on the next task instead.
+    window.setTimeout(() => {
+      if (event === 'SIGNED_OUT' || !session) {
+        if (event === 'SIGNED_OUT') {
+          clearOpcBrowserAuthState();
+          void clearOpcServerSession();
+        }
+        return;
+      }
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        void syncOpcServerSession(session, true);
+      }
+    }, 0);
+  });
+
+  // Repair the server cookie when the app opens with a persisted browser
+  // session. This closes the half-authenticated state after browser restarts.
+  void client.auth.getSession().then(({ data }) => {
+    if (data.session) void syncOpcServerSession(data.session, true);
+  });
+
+  window.addEventListener('online', () => {
+    void client.auth.getSession().then(({ data }) => {
+      if (data.session) void syncOpcServerSession(data.session, true);
+    });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+
+    void client.auth.getSession().then(({ data }) => {
+      if (data.session) void syncOpcServerSession(data.session, false);
+    });
+  });
+}
+
 export function getSupabase(runtimeEnv?: Record<string, string>) {
   if (_client) return _client;
 
@@ -138,22 +323,22 @@ export function getSupabase(runtimeEnv?: Record<string, string>) {
       persistSession: true,
       detectSessionInUrl: true,
       storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    }
+    },
   });
-  
+
+  installOpcAuthLifecycle(_client);
   return _client;
 }
 
 /**
- * ⚠️ Browser-only convenience export
- * Do NOT use in SSR / API / middleware
+ * Browser-only convenience export.
+ * Do not use in SSR / API / middleware.
  */
 export const supabase =
   typeof window !== 'undefined'
     ? getSupabase()
     : (null as never);
 
-// Type definitions and utilities
 export type UserRole = 'owner' | 'admin' | 'dispatch' | 'employee' | 'client';
 
 export interface UserProfile {
@@ -198,13 +383,12 @@ export async function getCurrentUser(runtimeEnv?: Record<string, string>) {
   try {
     const client = getSupabase(runtimeEnv);
     const { data: { user }, error } = await client.auth.getUser();
-    
+
     if (error || !user) {
       return { user: null, profile: null };
     }
 
     const profile = await getUserProfile(user.id, runtimeEnv);
-    
     return { user, profile };
   } catch (error) {
     console.error('Failed to get current user:', error);
@@ -218,7 +402,6 @@ export function getDashboardRoute(role: UserRole): string {
     case 'admin':
     case 'dispatch':
     case 'client':
-      return '/dashboard';
     case 'employee':
       return '/dashboard';
     default:
