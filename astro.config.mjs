@@ -34,8 +34,6 @@ function injectDevScript(options = {}) {
       'astro:config:setup': ({injectScript, command, logger}) => {
         if (command === 'dev') {
           logger.info(`Injecting dev script: ${scriptPath}`);
-
-          // Inject as ES module
           injectScript('page', `import "${scriptPath}";`);
         }
       },
@@ -44,11 +42,11 @@ function injectDevScript(options = {}) {
 }
 
 // OPC_VIEW_TRANSITION_COMPAT_V2
-// A legacy no-motion shim is still embedded in older page shells. Astro 5 can call
-// document.startViewTransition() with an options object ({ update, types }) instead
-// of only a callback function. The legacy shim ignored options.update(), preventing
-// the DOM swap and leaving a blank page. Repair that shim globally without enabling
-// visual motion or changing normal full-page navigation.
+// Legacy page shells replace document.startViewTransition() to suppress motion.
+// Astro 5 may pass { update, types } instead of a plain callback. The old shim
+// ignored update(), so a client-side route change could update the URL without
+// swapping the DOM, leaving the app blank. This global repair preserves no-motion
+// behavior while supporting both forms of the View Transitions API.
 function injectOpcRuntimeSafety() {
   const runtimeScript = String.raw`
     (() => {
@@ -123,7 +121,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    host: true, // Listen on all network interfaces (0.0.0.0)
+    host: true,
     strictPort: true,
   },
   adapter: cloudflare({
@@ -139,15 +137,12 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss(), patchViteErrorOverlay()],
     ssr: {
-      // Externalize packages that have Node-only APIs
-      // These should not be bundled into the Worker
       external: ['html2canvas'],
-      // Don't attempt to transform these in SSR
       noExternal: ['@supabase/supabase-js', '@supabase/gotrue-js'],
     },
     server: {
       watch: {
-        usePolling: true, // Enable polling for file watching in Docker
+        usePolling: true,
         interval: 1000,
         ignored: [
           '**/lost+found/**',
@@ -158,8 +153,6 @@ export default defineConfig({
       },
     },
     resolve: {
-      // Use react-dom/server.edge instead of react-dom/server.browser for React 19.
-      // Without this, MessageChannel from node:worker_threads needs to be polyfilled.
       alias: import.meta.env.PROD
         ? {
             'react-dom/server': 'react-dom/server.edge',
