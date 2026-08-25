@@ -105,6 +105,22 @@ function sanitizeDocument(row: AnyRow) {
   ]);
 }
 
+function sanitizePortalDocument(row: AnyRow) {
+  const document = sanitizeDocument(row);
+
+  if (document.id) {
+    document.download_url =
+      `/api/opc/client-portal/document-download?document_id=${encodeURIComponent(String(document.id))}`;
+  }
+
+  // Never expose raw private storage coordinates to the browser. The download
+  // bridge performs a fresh ownership/visibility check before signing the file.
+  delete document.storage_path;
+  delete document.storage_bucket;
+
+  return document;
+}
+
 function clientVisibleReport(row: AnyRow) {
   if (metadata(row).client_visible === true) return true;
   const status = String(row.status || '').trim().toLowerCase();
@@ -261,7 +277,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         tickets: ticketsResult.rows.map((row) => stripPrivateFields(row, ['internal_notes', 'private_notes', 'created_by', 'updated_by'])),
         quotes: quotesResult.rows.filter(clientVisibleQuote).map(sanitizeDocument),
         invoices: invoicesResult.rows.filter(clientVisibleInvoice).map(sanitizeDocument),
-        documents: documentsResult.rows.filter(clientVisibleDocument).map(sanitizeDocument),
+        documents: documentsResult.rows.filter(clientVisibleDocument).map(sanitizePortalDocument),
       },
     });
   } catch (error: any) {
