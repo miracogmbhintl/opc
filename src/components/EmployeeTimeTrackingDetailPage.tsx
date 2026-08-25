@@ -535,7 +535,7 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
       .from('opc_staff_roles')
       .select('*')
       .eq('user_id', userId)
-      .eq('status', 'active')
+      .in('status', ['active', 'aktiv', 'enabled'])
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -547,7 +547,7 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
         .from('opc_staff_roles')
         .select('*')
         .ilike('email', email)
-        .eq('status', 'active')
+        .in('status', ['active', 'aktiv', 'enabled'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

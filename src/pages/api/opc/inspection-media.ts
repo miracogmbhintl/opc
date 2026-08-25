@@ -8,6 +8,7 @@ const BUCKET_ID = 'opc-site-inspection-media';
 const MAX_FILES = 20;
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024;
 const RESTORE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const ACTIVE_STAFF_STATUSES = ['active', 'aktiv', 'enabled'];
 
 type StaffActor = {
   userId: string;
@@ -98,7 +99,7 @@ async function resolveActor(supabaseAdmin: any, accessToken: string): Promise<St
     .from('opc_staff_roles')
     .select('id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs')
     .eq('user_id', user.id)
-    .eq('status', 'active')
+    .in('status', ACTIVE_STAFF_STATUSES)
     .limit(1)
     .maybeSingle();
 
@@ -561,7 +562,7 @@ async function findExistingUpload(
 ) {
   if (!uploadToken) return null;
 
-  const response = await supabaseAdmin
+  const metadataResponse = await supabaseAdmin
     .from('opc_site_inspection_media')
     .select('*')
     .eq('inspection_id', inspectionId)
@@ -572,11 +573,24 @@ async function findExistingUpload(
     .limit(1)
     .maybeSingle();
 
-  if (response.error) {
-    return null;
+  if (!metadataResponse.error && metadataResponse.data) {
+    return metadataResponse.data;
   }
 
-  return response.data || null;
+  // Compatibility for uploads completed before upload_token started being
+  // persisted in metadata. The logical token was already embedded in the
+  // object path, so it can still make an interrupted request idempotent.
+  const pathResponse = await supabaseAdmin
+    .from('opc_site_inspection_media')
+    .select('*')
+    .eq('inspection_id', inspectionId)
+    .eq('uploaded_by', actorUserId)
+    .like('object_path', `%/${uploadToken}-%`)
+    .limit(1)
+    .maybeSingle();
+
+  if (pathResponse.error) return null;
+  return pathResponse.data || null;
 }
 
 function fileExtension(file: File) {
@@ -783,6 +797,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
           metadata: {
             uploaded_via: 'inspection_media_api',
             uploader_role: actor.role,
+            upload_token: uploadToken || null,
           },
         })
         .select('*')

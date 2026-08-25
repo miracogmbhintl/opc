@@ -60,7 +60,7 @@ export const GET: APIRoute = async ({ locals }) => {
         'id, user_id, employee_id, email, display_name, role, status, can_access_portal, can_manage_jobs, can_view_all_jobs',
       )
       .eq('user_id', session.user.id)
-      .eq('status', 'active')
+      .in('status', ['active', 'aktiv', 'enabled'])
       .eq('can_access_portal', true)
       .order('created_at', { ascending: false })
       .limit(1)

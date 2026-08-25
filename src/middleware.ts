@@ -132,7 +132,7 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
         .from('opc_staff_roles')
         .select('id')
         .eq('user_id', user.id)
-        .eq('status', 'active')
+        .in('status', ['active', 'aktiv', 'enabled'])
         .eq('can_access_portal', true)
         .limit(1)
         .maybeSingle(),

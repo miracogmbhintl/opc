@@ -1092,7 +1092,7 @@ function EmployeeTimeTrackingContent() {
         .from('opc_staff_roles')
         .select('*')
         .eq('user_id', userId)
-        .eq('status', 'active')
+        .in('status', ['active', 'aktiv', 'enabled'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -1105,7 +1105,7 @@ function EmployeeTimeTrackingContent() {
       const { data: staffDirectoryData, error: staffDirectoryError } = await supabase
         .from('opc_staff_roles')
         .select('*')
-        .eq('status', 'active')
+        .in('status', ['active', 'aktiv', 'enabled'])
         .order('display_name', { ascending: true });
 
       if (staffDirectoryError) throw staffDirectoryError;

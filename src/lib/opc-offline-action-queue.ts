@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { readCachedOpcAuthProfile } from './opc-auth-cache';
 
 type JsonRecord = Record<string, any>;
 
@@ -7,6 +8,7 @@ export type OpcOfflineMutation = {
   createdAt: string;
   attempts: number;
   lastError?: string | null;
+  ownerUserId: string;
   operation: 'insert' | 'update' | 'delete';
   table: string;
   payload?: JsonRecord | null;
@@ -16,7 +18,8 @@ export type OpcOfflineMutation = {
   meta?: JsonRecord | null;
 };
 
-const QUEUE_KEY = 'opc:offline-action-queue:v1';
+const LEGACY_QUEUE_KEY = 'opc:offline-action-queue:v1';
+const QUEUE_KEY_PREFIX = 'opc:offline-action-queue:v2:user:';
 const MAX_ATTEMPTS = 12;
 const DEBUG_PREFIX = '[OPC Offline Queue]';
 
@@ -29,13 +32,11 @@ export function isOfflineNow() {
   return navigator.onLine === false;
 }
 
-
 export function createOfflineUuid() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
 
-  // RFC4122-ish fallback for old mobile browsers.
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
     const random = Math.floor(Math.random() * 16);
     const value = char === 'x' ? random : (random & 0x3) | 0x8;
@@ -78,30 +79,68 @@ export function isProbablyNetworkError(error: unknown) {
   );
 }
 
-function readQueueUnsafe(): OpcOfflineMutation[] {
-  if (!isBrowser()) return [];
+function currentCachedUserId() {
+  return String(readCachedOpcAuthProfile()?.id || '').trim();
+}
+
+function queueKey(userId: string) {
+  return `${QUEUE_KEY_PREFIX}${userId}`;
+}
+
+function legacyQueueCount() {
+  if (!isBrowser()) return 0;
 
   try {
-    const raw = window.localStorage.getItem(QUEUE_KEY);
+    const raw = window.localStorage.getItem(LEGACY_QUEUE_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function warnAboutLegacyQueue() {
+  const count = legacyQueueCount();
+  if (!count) return;
+
+  console.warn(
+    `${DEBUG_PREFIX} ${count} legacy mutation(s) are quarantined and will not be replayed automatically because they have no authenticated owner.`,
+  );
+}
+
+function readQueueUnsafe(userId = currentCachedUserId()): OpcOfflineMutation[] {
+  if (!isBrowser() || !userId) return [];
+
+  try {
+    const raw = window.localStorage.getItem(queueKey(userId));
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.filter((item) => item && typeof item === 'object' && item.id && item.operation && item.table);
+    return parsed.filter(
+      (item) =>
+        item &&
+        typeof item === 'object' &&
+        item.id &&
+        item.operation &&
+        item.table &&
+        item.ownerUserId === userId,
+    );
   } catch {
     return [];
   }
 }
 
-function writeQueueUnsafe(queue: OpcOfflineMutation[]) {
-  if (!isBrowser()) return;
+function writeQueueUnsafe(queue: OpcOfflineMutation[], userId = currentCachedUserId()) {
+  if (!isBrowser() || !userId) return;
 
   try {
-    window.localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    window.localStorage.setItem(queueKey(userId), JSON.stringify(queue));
     window.dispatchEvent(
       new CustomEvent('opc-offline-queue-changed', {
-        detail: { count: queue.length },
+        detail: { count: queue.length, userId },
       }),
     );
   } catch (error) {
@@ -110,6 +149,7 @@ function writeQueueUnsafe(queue: OpcOfflineMutation[]) {
 }
 
 export function getOpcOfflineQueue() {
+  warnAboutLegacyQueue();
   return readQueueUnsafe();
 }
 
@@ -117,17 +157,33 @@ export function getOpcOfflineQueueCount() {
   return readQueueUnsafe().length;
 }
 
+/**
+ * Clears only the current user's queue. Other users' pending mutations and the
+ * legacy quarantine are intentionally preserved to avoid data loss on shared
+ * devices.
+ */
 export function clearOpcOfflineQueue() {
   writeQueueUnsafe([]);
 }
 
-export function enqueueOpcOfflineMutation(input: Omit<OpcOfflineMutation, 'id' | 'createdAt' | 'attempts'> & { id?: string }) {
-  const now = new Date().toISOString();
+export function enqueueOpcOfflineMutation(
+  input: Omit<OpcOfflineMutation, 'id' | 'createdAt' | 'attempts' | 'ownerUserId'> & {
+    id?: string;
+    ownerUserId?: string;
+  },
+) {
+  const ownerUserId = String(input.ownerUserId || currentCachedUserId()).trim();
+
+  if (!ownerUserId) {
+    throw new Error('Offline-Aktion kann keinem angemeldeten Benutzer zugeordnet werden.');
+  }
+
   const mutation: OpcOfflineMutation = {
     id: input.id || createOfflineId('mutation'),
-    createdAt: now,
+    createdAt: new Date().toISOString(),
     attempts: 0,
     lastError: null,
+    ownerUserId,
     operation: input.operation,
     table: input.table,
     payload: input.payload || null,
@@ -137,9 +193,9 @@ export function enqueueOpcOfflineMutation(input: Omit<OpcOfflineMutation, 'id' |
     meta: input.meta || null,
   };
 
-  const queue = readQueueUnsafe();
+  const queue = readQueueUnsafe(ownerUserId);
   queue.push(mutation);
-  writeQueueUnsafe(queue);
+  writeQueueUnsafe(queue, ownerUserId);
   return mutation;
 }
 
@@ -162,7 +218,6 @@ async function insertWithVariants(client: SupabaseClient, mutation: OpcOfflineMu
 
     try {
       const response = await client.from(mutation.table).insert(payload).select('*').limit(1);
-
       if (!response.error) return;
 
       const message = String(response.error.message || '').toLowerCase();
@@ -172,7 +227,6 @@ async function insertWithVariants(client: SupabaseClient, mutation: OpcOfflineMu
         (response.error as any).code === '23505';
 
       if (isDuplicate) return;
-
       lastError = response.error;
     } catch (error) {
       lastError = error;
@@ -196,7 +250,6 @@ async function updateById(client: SupabaseClient, mutation: OpcOfflineMutation) 
     .limit(1);
 
   if (response.error) throw response.error;
-
   if (!Array.isArray(response.data) || response.data.length === 0) {
     throw new Error(`${mutation.table}: queued update found no row (${mutation.idColumn}=${mutation.idValue})`);
   }
@@ -234,13 +287,31 @@ export async function syncOpcOfflineActionQueue(client: SupabaseClient) {
   if (!isBrowser()) return { synced: 0, remaining: 0 };
   if (isOfflineNow()) return { synced: 0, remaining: getOpcOfflineQueueCount() };
 
-  const queue = readQueueUnsafe();
+  warnAboutLegacyQueue();
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await client.auth.getSession();
+
+  const liveUserId = String(session?.user?.id || '').trim();
+  if (sessionError || !liveUserId) {
+    return { synced: 0, remaining: getOpcOfflineQueueCount() };
+  }
+
+  const queue = readQueueUnsafe(liveUserId);
   if (!queue.length) return { synced: 0, remaining: 0 };
 
   const remaining: OpcOfflineMutation[] = [];
   let synced = 0;
 
   for (const mutation of queue) {
+    if (mutation.ownerUserId !== liveUserId) {
+      remaining.push(mutation);
+      console.error(`${DEBUG_PREFIX} blocked cross-user mutation replay`, mutation.id);
+      continue;
+    }
+
     try {
       await runMutation(client, mutation);
       synced += 1;
@@ -269,7 +340,7 @@ export async function syncOpcOfflineActionQueue(client: SupabaseClient) {
     }
   }
 
-  writeQueueUnsafe(remaining);
+  writeQueueUnsafe(remaining, liveUserId);
   return { synced, remaining: remaining.length };
 }
 
@@ -301,10 +372,7 @@ export function installOpcOfflineQueueAutoSync(client: SupabaseClient, onChange?
   window.addEventListener('storage', handleStorage);
   window.addEventListener('opc-offline-queue-changed', handleQueueChange as EventListener);
 
-  const interval = window.setInterval(() => {
-    void runSync();
-  }, 30000);
-
+  const interval = window.setInterval(() => void runSync(), 30000);
   void runSync();
 
   return () => {

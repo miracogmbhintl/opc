@@ -1,23 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { safeNavigate } from '../lib/opc-navigation-guard';
-import { clearCachedOpcAuthProfile, writeCachedOpcAuthProfile } from '../lib/opc-auth-cache';
+import { supabase } from '../lib/supabase';
+import {
+  clearCachedOpcAuthProfile,
+  refreshOpcAuthProfile,
+  writeCachedOpcAuthProfile,
+} from '../lib/opc-auth-cache';
 
 const LOGO_URL =
   'https://cdn.prod.website-files.com/6944470386300e196e5fc347/6949534529e8342842456097_REGULAR%20COLOR%20ORANGE%20PRO%20CLEAN%20LOGO%20ORIGINAL.png';
-
-const supabase = createClient(
-  import.meta.env.PUBLIC_SUPABASE_URL,
-  import.meta.env.PUBLIC_SUPABASE_ANON_KEY,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-    },
-  }
-);
 
 const AUTH_COOKIE_SYNC_KEY = 'opc:auth-cookie-sync-at:v1';
 
@@ -32,8 +23,10 @@ async function syncLoginSessionToServer(session: {
     const response = await fetch('/api/auth/set-session', {
       method: 'POST',
       credentials: 'include',
+      cache: 'no-store',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
       body: JSON.stringify({
         access_token: session.access_token,
@@ -43,10 +36,7 @@ async function syncLoginSessionToServer(session: {
     });
 
     if (response.ok) {
-      window.localStorage.setItem(
-        AUTH_COOKIE_SYNC_KEY,
-        String(Date.now()),
-      );
+      window.localStorage.setItem(AUTH_COOKIE_SYNC_KEY, String(Date.now()));
     }
 
     return response.ok;
@@ -57,7 +47,6 @@ async function syncLoginSessionToServer(session: {
   }
 }
 
-// OPC_LOGIN_AUTHORITATIVE_ROLE_V1
 const OPC_JOB_ACCESS_CACHE_KEY = '__opc_jobs_access_response_session_v3__';
 const OPC_AUTH_PROFILE_REFRESH_KEY = 'opc:auth-profile-refresh-at:v1';
 
@@ -131,6 +120,27 @@ async function writeAuthoritativeLoginProfile(session: {
   });
 }
 
+async function resolveLoginProfile(session: {
+  access_token: string;
+  user: {
+    id: string;
+    email?: string | null;
+    user_metadata?: Record<string, any>;
+  };
+}) {
+  try {
+    await writeAuthoritativeLoginProfile(session);
+    return;
+  } catch (primaryError) {
+    // Do not make the login screen depend on one API route being healthy. The
+    // shared auth resolver is allowed as a same-user fallback and still
+    // requires a real Supabase session before it returns cached metadata.
+    const fallbackProfile = await refreshOpcAuthProfile(true);
+    if (fallbackProfile?.id === session.user.id) return;
+    throw primaryError;
+  }
+}
+
 export default function OPCLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -139,7 +149,6 @@ export default function OPCLogin() {
   const [sessionChecking, setSessionChecking] = useState(true);
   const resumeStartedRef = useRef(false);
 
-  // OPC_LOGIN_SESSION_RESUME_V1
   useEffect(() => {
     if (resumeStartedRef.current) return;
     resumeStartedRef.current = true;
@@ -148,8 +157,7 @@ export default function OPCLogin() {
 
     async function resumeSession() {
       try {
-        const { data, error: sessionError } =
-          await supabase.auth.getSession();
+        const { data, error: sessionError } = await supabase.auth.getSession();
 
         if (sessionError || !data.session) {
           if (mounted) setSessionChecking(false);
@@ -159,11 +167,13 @@ export default function OPCLogin() {
         let session = data.session;
         const expiresAtMs = Number(session.expires_at || 0) * 1000;
 
-        if (
-          expiresAtMs > 0 &&
-          expiresAtMs <= Date.now() + 60_000
-        ) {
+        if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 60_000) {
           const refreshed = await supabase.auth.refreshSession();
+
+          if (refreshed.error && !refreshed.data.session) {
+            throw refreshed.error;
+          }
+
           if (refreshed.data.session) {
             session = refreshed.data.session;
           }
@@ -171,23 +181,14 @@ export default function OPCLogin() {
 
         window.localStorage.removeItem('mco_logged_out');
         window.sessionStorage.removeItem('mco_logged_out');
-        window.localStorage.setItem(
-          'opc_auth_token',
-          session.access_token,
-        );
-        window.localStorage.setItem(
-          'opc_user_id',
-          session.user.id,
-        );
-        window.localStorage.setItem(
-          'opc_user_email',
-          session.user.email || '',
-        );
 
+        // The shared Supabase lifecycle also repairs this cookie. Keep an
+        // explicit login-page sync so a resumed session is ready before the
+        // first cookie-authenticated endpoint is opened.
         await syncLoginSessionToServer(session);
 
         clearLoginRoleCaches();
-        await writeAuthoritativeLoginProfile({
+        await resolveLoginProfile({
           access_token: session.access_token,
           user: session.user,
         });
@@ -231,41 +232,20 @@ export default function OPCLogin() {
         throw new Error('Session konnte nicht erstellt werden.');
       }
 
-      const response = await fetch('/api/auth/set-session', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        }),
-      });
+      const synced = await syncLoginSessionToServer(data.session);
 
-      const result = await response.json().catch(() => null);
-
-      if (!response.ok || result?.success === false) {
-        throw new Error(result?.error || 'Server-Session konnte nicht gesetzt werden.');
+      if (!synced) {
+        throw new Error('Server-Session konnte nicht gesetzt werden. Bitte Verbindung prüfen und erneut versuchen.');
       }
 
-      localStorage.setItem(
-        AUTH_COOKIE_SYNC_KEY,
-        String(Date.now()),
-      );
-
-
       clearLoginRoleCaches();
-      await writeAuthoritativeLoginProfile({
+      await resolveLoginProfile({
         access_token: data.session.access_token,
         user: data.user,
       });
 
-      localStorage.removeItem('mco_logged_out');
-      sessionStorage.removeItem('mco_logged_out');
-      localStorage.setItem('opc_auth_token', data.session.access_token);
-      localStorage.setItem('opc_user_id', data.user.id);
-      localStorage.setItem('opc_user_email', data.user.email || email.trim().toLowerCase());
+      window.localStorage.removeItem('mco_logged_out');
+      window.sessionStorage.removeItem('mco_logged_out');
 
       safeNavigate('/dashboard', { replace: true });
     } catch (err: any) {

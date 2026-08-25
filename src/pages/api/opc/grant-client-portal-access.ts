@@ -476,7 +476,7 @@ async function assertCanManageClients(supabase: any, userId: string) {
       'id, role, status, can_access_portal, can_manage_clients, can_manage_onboarding'
     )
     .eq('user_id', userId)
-    .eq('status', 'active')
+    .in('status', ['active', 'aktiv', 'enabled'])
     .limit(1)
     .maybeSingle();
 

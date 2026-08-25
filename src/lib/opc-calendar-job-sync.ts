@@ -152,7 +152,7 @@ async function resolveAssignedStaff(supabase: any, jobId: string) {
   const [{ data: assignments, error: assignmentError }, { data: staffRows, error: staffError }] =
     await Promise.all([
       supabase.from('opc_job_assignments').select('*').eq('job_id', jobId),
-      supabase.from('opc_staff_roles').select('*').eq('status', 'active'),
+      supabase.from('opc_staff_roles').select('*').in('status', ['active', 'aktiv', 'enabled']),
     ]);
 
   if (assignmentError) throw assignmentError;

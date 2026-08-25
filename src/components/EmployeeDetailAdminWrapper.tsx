@@ -18,12 +18,6 @@ export default function EmployeeDetailAdminWrapper({ employeeId }: Props) {
           position: relative;
           z-index: 4;
         }
-        .opc-employee-admin-wrapper .opc-employee-hero-actions > button.opc-btn-dark {
-          display: none !important;
-        }
-        .opc-employee-admin-wrapper .opc-employee-edit-panel {
-          display: none !important;
-        }
         .opc-employee-admin-wrapper section:has(.opc-note-form) {
           display: none !important;
         }

@@ -43,14 +43,10 @@ async function getAccessToken(forceRefresh = false) {
   }
 
   if (forceRefresh) {
-    const { data, error } =
-      await supabase.auth.refreshSession();
-
+    const { data, error } = await supabase.auth.refreshSession();
     if (error) throw error;
 
-    const refreshedToken =
-      data.session?.access_token;
-
+    const refreshedToken = data.session?.access_token;
     if (refreshedToken) return refreshedToken;
   }
 
@@ -62,9 +58,7 @@ async function getAccessToken(forceRefresh = false) {
   if (error) throw error;
 
   if (!session?.access_token) {
-    throw new Error(
-      'Die Sitzung ist abgelaufen. Bitte neu anmelden.',
-    );
+    throw new Error('Die Sitzung ist abgelaufen. Bitte neu anmelden.');
   }
 
   return session.access_token;
@@ -82,7 +76,6 @@ function apiError(
 
   error.status = status;
   error.retryable = retryable;
-
   return error;
 }
 
@@ -91,44 +84,22 @@ export async function inspectionMediaApiFetch(
   init: RequestInit = {},
   options: ApiOptions = {},
 ) {
-  const attempts = Math.max(
-    1,
-    options.attempts ?? 3,
-  );
-
-  const timeoutMs = Math.max(
-    5000,
-    options.timeoutMs ?? 30000,
-  );
+  const attempts = Math.max(1, options.attempts ?? 3);
+  const timeoutMs = Math.max(5000, options.timeoutMs ?? 30000);
 
   let lastError: any = null;
   let forceRefresh = false;
 
-  for (
-    let attempt = 1;
-    attempt <= attempts;
-    attempt += 1
-  ) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = window.setTimeout(
-      () => controller.abort(),
-      timeoutMs,
-    );
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const accessToken =
-        await getAccessToken(forceRefresh);
-
+      const accessToken = await getAccessToken(forceRefresh);
       forceRefresh = false;
 
-      const headers = new Headers(
-        init.headers || {},
-      );
-
-      headers.set(
-        'Authorization',
-        `Bearer ${accessToken}`,
-      );
+      const headers = new Headers(init.headers || {});
+      headers.set('Authorization', `Bearer ${accessToken}`);
 
       const response = await fetch(path, {
         ...init,
@@ -137,57 +108,34 @@ export async function inspectionMediaApiFetch(
         signal: controller.signal,
       });
 
-      const payload =
-        await response.json().catch(() => null);
+      const payload = await response.json().catch(() => null);
 
-      if (
-        response.ok &&
-        payload?.success
-      ) {
+      if (response.ok && payload?.success) {
         return payload;
       }
 
-      const message =
-        payload?.error ||
-        `Anfrage fehlgeschlagen (${response.status}).`;
+      const message = payload?.error || `Anfrage fehlgeschlagen (${response.status}).`;
 
-      if (
-        response.status === 401 &&
-        attempt < attempts
-      ) {
+      if (response.status === 401 && attempt < attempts) {
         forceRefresh = true;
-        lastError = apiError(
-          message,
-          response.status,
-          true,
-        );
+        lastError = apiError(message, response.status, true);
       } else {
         const retryable =
           response.status === 408 ||
           response.status === 429 ||
           response.status >= 500;
 
-        const error = apiError(
-          message,
-          response.status,
-          retryable,
-        );
+        const error = apiError(message, response.status, retryable);
 
-        if (
-          !retryable ||
-          attempt >= attempts
-        ) {
+        if (!retryable || attempt >= attempts) {
           throw error;
         }
 
         lastError = error;
       }
     } catch (error: any) {
-      const status =
-        Number(error?.status || 0);
-
-      const explicitlyNonRetryable =
-        error?.retryable === false;
+      const status = Number(error?.status || 0);
+      const explicitlyNonRetryable = error?.retryable === false;
 
       if (
         explicitlyNonRetryable ||
@@ -208,24 +156,17 @@ export async function inspectionMediaApiFetch(
       window.clearTimeout(timeout);
     }
 
-    await sleep(
-      attempt === 1 ? 650 : 1400,
-    );
+    await sleep(attempt === 1 ? 650 : 1400);
   }
 
-  throw (
-    lastError ||
-    new Error('Anfrage fehlgeschlagen.')
-  );
+  throw lastError || new Error('Anfrage fehlgeschlagen.');
 }
 
 export async function fetchInspectionMediaPayload(
   inspectionId: string,
 ) {
   return inspectionMediaApiFetch(
-    `${INSPECTION_MEDIA_API_PATH}?inspection_id=${encodeURIComponent(
-      inspectionId,
-    )}`,
+    `${INSPECTION_MEDIA_API_PATH}?inspection_id=${encodeURIComponent(inspectionId)}`,
     {
       method: 'GET',
       cache: 'no-store',
@@ -235,6 +176,41 @@ export async function fetchInspectionMediaPayload(
       timeoutMs: 30000,
     },
   );
+}
+
+async function verifyInspectionUpload(
+  inspectionId: string,
+  uploadToken: string,
+  file: File,
+) {
+  try {
+    const payload = await inspectionMediaApiFetch(
+      `${INSPECTION_MEDIA_API_PATH}?inspection_id=${encodeURIComponent(inspectionId)}`,
+      {
+        method: 'GET',
+        cache: 'no-store',
+      },
+      {
+        attempts: 1,
+        timeoutMs: 30000,
+      },
+    );
+
+    const rows = Array.isArray(payload?.media) ? payload.media : [];
+    const objectMarker = `/${uploadToken}-`;
+
+    return rows.some((row: any) => {
+      const objectPath = String(row?.object_path || '');
+      const fileName = String(row?.file_name || '');
+
+      return (
+        objectPath.includes(objectMarker) &&
+        (!fileName || fileName === file.name)
+      );
+    });
+  } catch {
+    return false;
+  }
 }
 
 export async function uploadInspectionMediaFiles(
@@ -247,14 +223,9 @@ export async function uploadInspectionMediaFiles(
   let uploadedCount = 0;
   const failedFiles: UploadFailure[] = [];
 
-  for (
-    let index = 0;
-    index < files.length;
-    index += 1
-  ) {
+  for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
-    const uploadToken =
-      createUploadToken(index);
+    const uploadToken = createUploadToken(index);
 
     const body = new FormData();
     body.set('inspection_id', inspectionId);
@@ -276,29 +247,45 @@ export async function uploadInspectionMediaFiles(
 
       uploadedCount += 1;
     } catch (error: any) {
+      const status = Number(error?.status || 0);
+
+      // A mobile upload can complete on the server while the response is lost.
+      // Because the server embeds this unique token in object_path, confirm the
+      // result before telling the user the upload failed or retrying later.
+      if (status !== 401 && status !== 403) {
+        const alreadyUploaded = await verifyInspectionUpload(
+          inspectionId,
+          uploadToken,
+          file,
+        );
+
+        if (alreadyUploaded) {
+          uploadedCount += 1;
+
+          onProgress?.({
+            completed: index + 1,
+            total: files.length,
+            uploaded: uploadedCount,
+            failed: failedFiles.length,
+            currentFile: file.name,
+          });
+
+          continue;
+        }
+      }
+
       const message =
         error?.name === 'AbortError'
           ? 'Upload-Zeitüberschreitung'
-          : error?.message ||
-            'Upload fehlgeschlagen';
+          : error?.message || 'Upload fehlgeschlagen';
 
       failedFiles.push({
         fileName: file.name,
         message,
       });
 
-      const status =
-        Number(error?.status || 0);
-
-      if (
-        status === 401 ||
-        status === 403
-      ) {
-        for (
-          let remaining = index + 1;
-          remaining < files.length;
-          remaining += 1
-        ) {
+      if (status === 401 || status === 403) {
+        for (let remaining = index + 1; remaining < files.length; remaining += 1) {
           failedFiles.push({
             fileName: files[remaining].name,
             message,

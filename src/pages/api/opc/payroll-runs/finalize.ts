@@ -50,6 +50,22 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       periodTo,
     });
 
+    // Employee-specific contribution/tax settings must never silently fall back
+    // to zero for a definitive payroll run. Preview/calculation may still expose
+    // missing setup, but finalization requires a time-valid active profile.
+    if (!cleanText(calculation.payrollProfile?.id)) {
+      return jsonResponse(
+        {
+          success: false,
+          error:
+            'Für diesen Abrechnungszeitraum fehlt ein aktives Payroll-Profil. ' +
+            'Lohnlauf wurde nicht abgeschlossen; NBU/KTG/GAV/BVG/Quellensteuer müssen zuerst geprüft werden.',
+          warnings: calculation.warnings,
+        },
+        409,
+      );
+    }
+
     if (calculation.reconciliation && calculation.reconciliation.matches !== true) {
       return jsonResponse(
         {
@@ -68,11 +84,12 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
 
     const existingResponse = await supabase
       .from('opc_payroll_runs')
-      .select('id,run_number,status')
+      .select('id,run_number,status,period_from,period_to')
       .eq('employee_id', employeeId)
-      .eq('period_from', periodFrom)
-      .eq('period_to', periodTo)
       .in('status', ['approved', 'paid'])
+      .lte('period_from', periodTo)
+      .gte('period_to', periodFrom)
+      .order('period_from', { ascending: true })
       .limit(1)
       .maybeSingle();
     throwOnError(existingResponse.error, 'Bestehender Lohnlauf konnte nicht geprüft werden');
@@ -81,7 +98,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       return jsonResponse(
         {
           success: false,
-          error: `Für diesen Zeitraum besteht bereits der abgeschlossene Lohnlauf ${existingResponse.data.run_number}.`,
+          error:
+            `Der gewünschte Zeitraum überschneidet sich mit dem abgeschlossenen Lohnlauf ` +
+            `${existingResponse.data.run_number} (${existingResponse.data.period_from} bis ${existingResponse.data.period_to}).`,
           existingRun: existingResponse.data,
         },
         409,
