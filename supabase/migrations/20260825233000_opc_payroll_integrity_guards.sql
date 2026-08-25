@@ -1,9 +1,10 @@
 begin;
 set local time zone 'Europe/Zurich';
 
--- Future payroll finalizations for one employee must never overlap. Existing
--- historical rows are intentionally left untouched; this guard applies only to
--- inserts/updates performed after the migration is installed.
+-- Future payroll finalizations for one employee must never overlap and must not
+-- reuse a time entry that is already part of another approved/paid payroll run.
+-- Existing historical rows are intentionally left untouched; this guard applies
+-- only to inserts/updates performed after the migration is installed.
 create or replace function public.opc_guard_payroll_run_overlap()
 returns trigger
 language plpgsql
@@ -12,13 +13,15 @@ set search_path = public, pg_temp
 as $$
 declare
   v_existing public.opc_payroll_runs%rowtype;
+  v_duplicate_entry_id text;
+  v_duplicate_run_number text;
 begin
   if new.status not in ('approved', 'paid') or new.employee_id is null then
     return new;
   end if;
 
   -- Serialize finalization attempts per employee so two simultaneous requests
-  -- cannot both pass the overlap check.
+  -- cannot both pass the integrity checks.
   perform pg_advisory_xact_lock(
     hashtextextended('opc_payroll_run:' || new.employee_id::text, 0)
   );
@@ -40,6 +43,47 @@ begin
       v_existing.run_number,
       v_existing.period_from,
       v_existing.period_to;
+  end if;
+
+  -- Period checks alone are insufficient because a payroll-period override can
+  -- theoretically move a time entry into another period. Compare the immutable
+  -- calculation snapshots as a second line of defence.
+  select
+    current_entry.entry_id,
+    existing_run.run_number
+  into
+    v_duplicate_entry_id,
+    v_duplicate_run_number
+  from public.opc_payroll_run_employees current_employee_run
+  cross join lateral jsonb_array_elements_text(
+    coalesce(
+      current_employee_run.calculation_snapshot -> 'approved_entry_ids',
+      '[]'::jsonb
+    )
+  ) as current_entry(entry_id)
+  join public.opc_payroll_runs existing_run
+    on existing_run.employee_id = new.employee_id
+   and existing_run.id is distinct from new.id
+   and existing_run.status in ('approved', 'paid')
+  join public.opc_payroll_run_employees existing_employee_run
+    on existing_employee_run.payroll_run_id = existing_run.id
+   and existing_employee_run.employee_id = new.employee_id
+  cross join lateral jsonb_array_elements_text(
+    coalesce(
+      existing_employee_run.calculation_snapshot -> 'approved_entry_ids',
+      '[]'::jsonb
+    )
+  ) as existing_entry(entry_id)
+  where current_employee_run.payroll_run_id = new.id
+    and current_employee_run.employee_id = new.employee_id
+    and existing_entry.entry_id = current_entry.entry_id
+  limit 1;
+
+  if found then
+    raise exception
+      'Zeiteintrag % ist bereits im abgeschlossenen Lohnlauf % enthalten.',
+      v_duplicate_entry_id,
+      v_duplicate_run_number;
   end if;
 
   return new;
