@@ -1,0 +1,43 @@
+name: Zero-downtime staff status normalizer
+
+on:
+  push:
+    branches:
+      - fix/zero-downtime-core-stabilization-20260825
+    paths:
+      - scripts/normalize-opc-staff-status-queries.mjs
+      - .github/workflows/zero-downtime-staff-status-normalizer.yml
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout stabilization branch
+        uses: actions/checkout@v6
+        with:
+          ref: fix/zero-downtime-core-stabilization-20260825
+          fetch-depth: 0
+
+      - name: Normalize only opc_staff_roles active-status queries
+        run: node scripts/normalize-opc-staff-status-queries.mjs
+
+      - name: Verify patch formatting
+        run: git diff --check
+
+      - name: Commit normalized queries when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No staff-status queries required normalization."
+            exit 0
+          fi
+          git config user.name "OPC Stabilization Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add src
+          git commit -m "Normalize active OPC staff status queries"
+          git push origin HEAD:fix/zero-downtime-core-stabilization-20260825
