@@ -61,9 +61,7 @@ for (const file of pageFiles) {
   const rel = relative(root, file).split(sep).join('/');
 
   if (!content.trim()) failures.push(`${rel}: empty Astro page`);
-  if (!/<(?:html|Layout|[A-Z][A-Za-z0-9_]*)\b/.test(content)) {
-    warnings.push(`${rel}: no obvious rendered root element`);
-  }
+  if (!/<(?:html|Layout|[A-Z][A-Za-z0-9_]*)\b/.test(content)) warnings.push(`${rel}: no obvious rendered root element`);
 
   if (content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__') && !content.includes('document.startViewTransition')) {
     failures.push(`${rel}: legacy transition marker without transition implementation`);
@@ -122,17 +120,9 @@ for (const rel of bannedProductionRoutes) {
   if (await exists(join(root, rel))) failures.push(`${rel}: public diagnostic/test route must not ship to production`);
 }
 
-if (!astroConfig.includes('OPC_VIEW_TRANSITION_COMPAT_V2')) {
-  failures.push('astro.config.mjs: missing OPC_VIEW_TRANSITION_COMPAT_V2 runtime guard');
-}
-
-if (!astroConfig.includes("typeof transitionInput.update === 'function'")) {
-  failures.push('astro.config.mjs: view-transition guard does not execute options.update()');
-}
-
-if (!sidebarSource.includes('data-astro-reload="true"')) {
-  failures.push('MirakaSidebar.tsx: desktop navigation is not explicitly protected by full-page reload');
-}
+if (!astroConfig.includes('OPC_VIEW_TRANSITION_COMPAT_V2')) failures.push('astro.config.mjs: missing OPC_VIEW_TRANSITION_COMPAT_V2 runtime guard');
+if (!astroConfig.includes("typeof transitionInput.update === 'function'")) failures.push('astro.config.mjs: view-transition guard does not execute options.update()');
+if (!sidebarSource.includes('data-astro-reload="true"')) failures.push('MirakaSidebar.tsx: desktop navigation is not explicitly protected by full-page reload');
 
 const primaryPages = [
   'dashboard.astro',
@@ -155,15 +145,12 @@ for (const page of primaryPages) {
   if (!await exists(join(pagesRoot, page))) failures.push(`primary page missing: src/pages/${page}`);
 }
 
-const blankSensitivePages = pageFiles.filter((file) => {
-  const rel = relative(pagesRoot, file).split(sep).join('/');
-  return !rel.startsWith('api/') && !rel.startsWith('kundenportal/');
-});
+for (const file of pageFiles) {
+  const relFromPages = relative(pagesRoot, file).split(sep).join('/');
+  if (relFromPages.startsWith('api/') || relFromPages.startsWith('kundenportal/')) continue;
 
-for (const file of blankSensitivePages) {
   const content = await readFile(file, 'utf8');
   const rel = relative(root, file).split(sep).join('/');
-
   if (content.includes('client:only="react"') && !content.includes('<body')) {
     failures.push(`${rel}: client-only React page has no explicit body fallback shell`);
   }
@@ -172,6 +159,7 @@ for (const file of blankSensitivePages) {
 console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
 console.log('Navigation integrity: Astro 5 transition compatibility guard present; primary desktop navigation is hard-reload protected.');
 console.log('Security integrity: public diagnostic/test routes are excluded from production.');
+
 if (warnings.length) {
   console.log(`Warnings (${warnings.length}):`);
   for (const warning of warnings) console.log(`- ${warning}`);
