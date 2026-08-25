@@ -115,10 +115,22 @@ const bannedProductionRoutes = [
   'src/pages/api/supabase-test.ts',
   'src/pages/api/test-clients.ts',
   'src/pages/api/test-login.ts',
+  'src/pages/api/test-google-api.ts',
+  'src/pages/api/tickets/test-create.ts',
+  'src/pages/api/tools/business-scraper/diagnose.ts',
   'src/pages/supabase-diagnostic.astro',
   'src/pages/verify-supabase.astro',
   'src/pages/work-os/debug-auth.astro',
   'src/pages/test-login.astro',
+  'src/pages/test-file-upload.astro',
+  'src/pages/test-client-detail.astro',
+  'src/pages/test-chat.astro',
+  'src/pages/test-react.astro',
+  'src/pages/test-render.astro',
+  'src/pages/test.astro',
+  'src/pages/diagnostic-tree-view.astro',
+  'src/pages/index.before-clean-rollback.astro',
+  'src/pages/index.miraka-backup.astro',
 ];
 
 for (const rel of bannedProductionRoutes) {
