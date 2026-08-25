@@ -124,7 +124,7 @@ async function assertCanManageClientSites(
       'id,role,status,can_access_portal,can_manage_clients'
     )
     .eq('user_id', user.id)
-    .eq('status', 'active')
+    .in('status', ['active', 'aktiv', 'enabled'])
     .limit(1)
     .maybeSingle();
 

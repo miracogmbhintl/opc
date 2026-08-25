@@ -806,7 +806,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       `,
       )
       .eq('user_id', user.id)
-      .eq('status', 'active')
+      .in('status', ['active', 'aktiv', 'enabled'])
       .maybeSingle();
 
     if (staffError) {

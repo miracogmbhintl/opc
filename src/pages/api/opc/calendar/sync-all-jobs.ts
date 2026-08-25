@@ -55,7 +55,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .from('opc_staff_roles')
       .select('*')
       .eq('user_id', user.id)
-      .eq('status', 'active');
+      .in('status', ['active', 'aktiv', 'enabled']);
 
     if (staffError) throw staffError;
 

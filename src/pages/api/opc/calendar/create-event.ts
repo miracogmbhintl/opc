@@ -124,7 +124,7 @@ async function resolveStaffRole(serviceSupabase: any, userId: string) {
     .from('opc_staff_roles')
     .select('*')
     .eq('user_id', userId)
-    .eq('status', 'active')
+    .in('status', ['active', 'aktiv', 'enabled'])
     .eq('can_access_portal', true)
     .order('created_at', { ascending: false })
     .limit(1)

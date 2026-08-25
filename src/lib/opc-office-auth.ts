@@ -104,7 +104,7 @@ export async function requireOpcOfficeAuth({
     .from('opc_staff_roles')
     .select('id, role, status, can_access_portal, employee_id, display_name')
     .eq('user_id', user.id)
-    .eq('status', 'active')
+    .in('status', ['active', 'aktiv', 'enabled'])
     .eq('can_access_portal', true)
     .order('created_at', { ascending: false })
     .limit(1)

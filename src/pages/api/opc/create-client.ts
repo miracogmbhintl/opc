@@ -228,7 +228,7 @@ async function assertCanCreateClients(supabase: any, userId: string) {
     .from('opc_staff_roles')
     .select('id, role, status, can_access_portal, can_manage_clients')
     .eq('user_id', userId)
-    .eq('status', 'active')
+    .in('status', ['active', 'aktiv', 'enabled'])
     .eq('can_access_portal', true)
     .limit(1)
     .maybeSingle();
