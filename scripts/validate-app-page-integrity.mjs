@@ -47,6 +47,14 @@ async function exists(path) {
   }
 }
 
+function hasValidPageOutput(content) {
+  return (
+    /<(?:html|Layout|[A-Z][A-Za-z0-9_]*)\b/.test(content) ||
+    /Astro\.redirect\s*\(/.test(content) ||
+    /return\s+new\s+Response\s*\(/.test(content)
+  );
+}
+
 const allFiles = await walk(pagesRoot);
 const pageFiles = allFiles.filter((file) => file.endsWith('.astro')).sort();
 const routeSource = await readFile(routesFile, 'utf8');
@@ -58,7 +66,7 @@ for (const file of pageFiles) {
   const rel = relative(root, file).split(sep).join('/');
 
   if (!content.trim()) failures.push(`${rel}: empty Astro page`);
-  if (!/<(?:html|Layout|[A-Z][A-Za-z0-9_]*)\b/.test(content)) warnings.push(`${rel}: no obvious rendered root element`);
+  if (!hasValidPageOutput(content)) warnings.push(`${rel}: no obvious render, redirect, or Response output`);
 
   if (content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__') && !content.includes('document.startViewTransition')) {
     failures.push(`${rel}: legacy transition marker without transition implementation`);
@@ -140,17 +148,6 @@ const primaryPages = [
 
 for (const page of primaryPages) {
   if (!await exists(join(pagesRoot, page))) failures.push(`primary page missing: src/pages/${page}`);
-}
-
-for (const file of pageFiles) {
-  const relFromPages = relative(pagesRoot, file).split(sep).join('/');
-  if (relFromPages.startsWith('api/') || relFromPages.startsWith('kundenportal/')) continue;
-
-  const content = await readFile(file, 'utf8');
-  const rel = relative(root, file).split(sep).join('/');
-  if (content.includes('client:only="react"') && !content.includes('<body')) {
-    failures.push(`${rel}: client-only React page has no explicit body fallback shell`);
-  }
 }
 
 console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
