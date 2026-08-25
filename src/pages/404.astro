@@ -1,5 +1,3 @@
-
-
 ---
 import Layout from '../layouts/main.astro';
 import { NotFound } from '../site-components/NotFound';
@@ -11,29 +9,69 @@ import '../site-components/global.css';
   <div id="not-found-root" style="min-height: 100vh; width: 100%; display: flex; align-items: center; justify-content: center;"></div>
 
   <script>
-    import { createRoot } from 'react-dom/client';
+    import { createRoot, type Root } from 'react-dom/client';
     import { createElement } from 'react';
     import { DevLinkProvider } from '../site-components/DevLinkProvider';
     import { NotFound } from '../site-components/NotFound';
     import '../site-components/global.css';
 
-    document.addEventListener('DOMContentLoaded', () => {
-      const root = document.getElementById('not-found-root');
-      
-      if (root) {
-        const rootInstance = createRoot(root);
+    type Opc404RuntimeWindow = Window & {
+      __OPC_404_RUNTIME__?: {
+        mount: () => void;
+        unmount: () => void;
+      };
+    };
+
+    const runtimeWindow = window as Opc404RuntimeWindow;
+
+    if (!runtimeWindow.__OPC_404_RUNTIME__) {
+      let rootInstance: Root | null = null;
+      let mountedElement: HTMLElement | null = null;
+
+      const unmount = () => {
+        if (rootInstance) {
+          try {
+            rootInstance.unmount();
+          } catch {
+            // The DOM swap may already have removed the previous root.
+          }
+        }
+
+        rootInstance = null;
+        mountedElement = null;
+      };
+
+      const mount = () => {
+        const root = document.getElementById('not-found-root');
+        if (!root) {
+          unmount();
+          return;
+        }
+
+        if (rootInstance && mountedElement === root) return;
+        unmount();
+
+        mountedElement = root;
+        rootInstance = createRoot(root);
         rootInstance.render(
-          createElement(DevLinkProvider, null,
-            createElement(NotFound)
-          )
+          createElement(
+            DevLinkProvider,
+            null,
+            createElement(NotFound),
+          ),
         );
-      }
-    });
+      };
+
+      runtimeWindow.__OPC_404_RUNTIME__ = { mount, unmount };
+      document.addEventListener('astro:page-load', mount);
+      document.addEventListener('astro:before-swap', unmount);
+    }
+
+    runtimeWindow.__OPC_404_RUNTIME__.mount();
   </script>
 </Layout>
 
 <style is:global>
-  /* Ensure 404 page takes full height and centers content */
   #not-found-root {
     min-height: 100vh;
     width: 100%;
@@ -43,7 +81,6 @@ import '../site-components/global.css';
     overflow: visible;
   }
 
-  /* Ensure the utility page wrap from Webflow is centered */
   .utility-page-wrap {
     width: 100%;
     min-height: 100vh;
@@ -60,11 +97,8 @@ import '../site-components/global.css';
     width: 100%;
   }
 
-  /* Ensure body doesn't hide overflow */
   body:has(#not-found-root) {
     overflow: visible !important;
     min-height: 100vh;
   }
 </style>
-
-
