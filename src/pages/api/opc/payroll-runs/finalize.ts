@@ -68,11 +68,12 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
 
     const existingResponse = await supabase
       .from('opc_payroll_runs')
-      .select('id,run_number,status')
+      .select('id,run_number,status,period_from,period_to')
       .eq('employee_id', employeeId)
-      .eq('period_from', periodFrom)
-      .eq('period_to', periodTo)
       .in('status', ['approved', 'paid'])
+      .lte('period_from', periodTo)
+      .gte('period_to', periodFrom)
+      .order('period_from', { ascending: true })
       .limit(1)
       .maybeSingle();
     throwOnError(existingResponse.error, 'Bestehender Lohnlauf konnte nicht geprüft werden');
@@ -81,7 +82,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       return jsonResponse(
         {
           success: false,
-          error: `Für diesen Zeitraum besteht bereits der abgeschlossene Lohnlauf ${existingResponse.data.run_number}.`,
+          error:
+            `Der gewünschte Zeitraum überschneidet sich mit dem abgeschlossenen Lohnlauf ` +
+            `${existingResponse.data.run_number} (${existingResponse.data.period_from} bis ${existingResponse.data.period_to}).`,
           existingRun: existingResponse.data,
         },
         409,
