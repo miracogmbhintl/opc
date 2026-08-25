@@ -10,7 +10,10 @@ import { syncJobCalendarState } from '../../../../lib/opc-calendar-job-sync';
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'private, no-store, max-age=0',
+    },
   });
 }
 
@@ -53,18 +56,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const { data: staffRows, error: staffError } = await serviceClient
       .from('opc_staff_roles')
-      .select('*')
+      .select('role,status,can_access_portal')
       .eq('user_id', user.id)
-      .in('status', ['active', 'aktiv', 'enabled']);
+      .in('status', ['active', 'aktiv', 'enabled'])
+      .eq('can_access_portal', true);
 
     if (staffError) throw staffError;
 
-    const allowed = (staffRows || []).some((row: Record<string, any>) => {
-      const role = normalizeRole(row.role);
-      return ['owner', 'admin', 'dispatch'].includes(role) || row.can_manage_jobs === true;
-    });
+    const allowed = (staffRows || []).some((row: Record<string, any>) =>
+      ['owner', 'admin', 'dispatch'].includes(normalizeRole(row.role)),
+    );
 
-    if (!allowed) return jsonResponse({ error: 'Keine Berechtigung für Kalender-Backfill.' }, 403);
+    if (!allowed) {
+      return jsonResponse(
+        { error: 'Nur Owner, Admin oder Disposition dürfen einen Kalender-Backfill ausführen.' },
+        403,
+      );
+    }
 
     const payload = await request.json().catch(() => ({}));
     const daysBack = Math.max(0, Math.min(365, Number(payload?.days_back ?? 90)));
