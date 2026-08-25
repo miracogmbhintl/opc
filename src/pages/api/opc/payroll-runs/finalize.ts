@@ -50,6 +50,22 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       periodTo,
     });
 
+    // Employee-specific contribution/tax settings must never silently fall back
+    // to zero for a definitive payroll run. Preview/calculation may still expose
+    // missing setup, but finalization requires a time-valid active profile.
+    if (!cleanText(calculation.payrollProfile?.id)) {
+      return jsonResponse(
+        {
+          success: false,
+          error:
+            'Für diesen Abrechnungszeitraum fehlt ein aktives Payroll-Profil. ' +
+            'Lohnlauf wurde nicht abgeschlossen; NBU/KTG/GAV/BVG/Quellensteuer müssen zuerst geprüft werden.',
+          warnings: calculation.warnings,
+        },
+        409,
+      );
+    }
+
     if (calculation.reconciliation && calculation.reconciliation.matches !== true) {
       return jsonResponse(
         {
