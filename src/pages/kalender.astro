@@ -8,7 +8,7 @@ export const prerender = false;
 <!DOCTYPE html>
 <html transition:name="root" transition:animate="none" lang="de">
 <head>
-    <script is:inline>
+  <script is:inline>
     (() => {
       if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
 
@@ -51,7 +51,7 @@ export const prerender = false;
       }
     })();
   </script>
-  
+
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
@@ -64,14 +64,10 @@ export const prerender = false;
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta charset="UTF-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kalender | Orange Pro Clean</title>
-  <link
-    rel="icon"
-    type="image/png"
-    href="/favicon.ico"
-  />
+  <link rel="icon" type="image/png" href="/favicon.ico" />
 </head>
 
 <body>
@@ -87,8 +83,10 @@ export const prerender = false;
 
   <script is:inline>
     (() => {
-      if (window.__OPC_TEAM_CALENDAR_DEFAULTS__) return;
-      window.__OPC_TEAM_CALENDAR_DEFAULTS__ = true;
+      if (window.__OPC_TEAM_CALENDAR_RUNTIME__) {
+        window.__OPC_TEAM_CALENDAR_RUNTIME__.activate();
+        return;
+      }
 
       const dispatchChange = (select, value) => {
         if (!select || select.value === value) return;
@@ -104,8 +102,9 @@ export const prerender = false;
 
       const applyDefaults = () => {
         const page = document.querySelector('.opc-calendar-page');
+        if (!page) return;
 
-        if (page && page.dataset.teamCalendarDefaultApplied !== 'true') {
+        if (page.dataset.teamCalendarDefaultApplied !== 'true') {
           const filterSelect = Array.from(page.querySelectorAll('select')).find((select) => {
             const values = Array.from(select.options).map((option) => option.value);
             return values.includes('team') && values.includes('all') && values.includes('employee');
@@ -139,10 +138,37 @@ export const prerender = false;
         });
       };
 
-      const observer = new MutationObserver(applyDefaults);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-      document.addEventListener('astro:page-load', applyDefaults);
-      applyDefaults();
+      let observer = null;
+
+      const deactivate = () => {
+        if (observer) {
+          observer.disconnect();
+          observer = null;
+        }
+        window.__OPC_TEAM_CALENDAR_DEFAULTS__ = false;
+      };
+
+      const activate = () => {
+        const page = document.querySelector('.opc-calendar-page');
+        if (!page) {
+          deactivate();
+          return;
+        }
+
+        window.__OPC_TEAM_CALENDAR_DEFAULTS__ = true;
+
+        if (!observer) {
+          observer = new MutationObserver(applyDefaults);
+          observer.observe(document.documentElement, { childList: true, subtree: true });
+        }
+
+        applyDefaults();
+      };
+
+      window.__OPC_TEAM_CALENDAR_RUNTIME__ = { activate, deactivate };
+      document.addEventListener('astro:page-load', activate);
+      document.addEventListener('astro:before-swap', deactivate);
+      activate();
     })();
   </script>
 </body>
