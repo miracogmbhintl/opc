@@ -170,7 +170,8 @@ for (const file of blankSensitivePages) {
 }
 
 console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
-console.log('Navigation integrity: Astro 5 transition compatibility guard present; primary sidebar forces hard reload on desktop.');
+console.log('Navigation integrity: Astro 5 transition compatibility guard present; primary desktop navigation is hard-reload protected.');
+console.log('Security integrity: public diagnostic/test routes are excluded from production.');
 if (warnings.length) {
   console.log(`Warnings (${warnings.length}):`);
   for (const warning of warnings) console.log(`- ${warning}`);
