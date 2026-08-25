@@ -6,9 +6,7 @@
 begin;
 set local time zone 'Europe/Zurich';
 
--- ---------------------------------------------------------------------------
 -- 1. Payroll profile effective periods must never overlap for one employee.
--- ---------------------------------------------------------------------------
 create or replace function public.opc_guard_payroll_profile_overlap()
 returns trigger
 language plpgsql
@@ -16,9 +14,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-  if new.status <> 'active' then
-    return new;
-  end if;
+  if new.status <> 'active' then return new; end if;
 
   if exists (
     select 1
@@ -43,9 +39,7 @@ before insert or update of employee_id, status, valid_from, valid_until
 on public.opc_employee_payroll_profiles
 for each row execute function public.opc_guard_payroll_profile_overlap();
 
--- ---------------------------------------------------------------------------
 -- 2. Employment contracts may not overlap while active/approved.
--- ---------------------------------------------------------------------------
 create or replace function public.opc_guard_employment_contract_overlap()
 returns trigger
 language plpgsql
@@ -53,9 +47,7 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
-  if new.status not in ('active', 'approved') then
-    return new;
-  end if;
+  if new.status not in ('active', 'approved') then return new; end if;
 
   if exists (
     select 1
@@ -80,11 +72,7 @@ before insert or update of employee_id, status, valid_from, valid_until
 on public.opc_employment_contracts
 for each row execute function public.opc_guard_employment_contract_overlap();
 
--- ---------------------------------------------------------------------------
--- 3. A manual time-entry rate must belong to the same employee and, when a
---    contract is supplied, that contract must also belong to that employee and
---    be effective on the time-entry work date.
--- ---------------------------------------------------------------------------
+-- 3. Time-entry pay-rate links must all reference the same employee/effective contract.
 create or replace function public.opc_guard_time_entry_pay_rate_links()
 returns trigger
 language plpgsql
@@ -137,10 +125,8 @@ before insert or update of time_entry_id, employee_id, contract_id
 on public.opc_time_entry_pay_rates
 for each row execute function public.opc_guard_time_entry_pay_rate_links();
 
--- ---------------------------------------------------------------------------
--- 4. Approval/rejection of submitted working time is authoritative in the DB.
---    Finance/report/job-view permissions do NOT imply time-approval permission.
--- ---------------------------------------------------------------------------
+-- 4. Approval/rejection is authoritative in the DB. Finance/report/job-view
+-- permissions do not imply time-approval permission.
 create or replace function public.opc_can_review_time_entries_strict()
 returns boolean
 language sql
@@ -188,10 +174,8 @@ create trigger trg_opc_guard_time_entry_review_transition
 before update of status on public.opc_employee_time_entries
 for each row execute function public.opc_guard_time_entry_review_transition();
 
--- ---------------------------------------------------------------------------
 -- 5. Prevent NEW duplicate open general shifts. Existing stale shifts are not
---    auto-closed or rewritten because their real clock-out times are unknown.
--- ---------------------------------------------------------------------------
+-- auto-closed because their true end timestamps are unknown.
 create or replace function public.opc_guard_single_open_general_shift()
 returns trigger
 language plpgsql
@@ -231,25 +215,13 @@ before insert or update of user_id, job_id, clock_out_at, status
 on public.opc_employee_time_entries
 for each row execute function public.opc_guard_single_open_general_shift();
 
--- ---------------------------------------------------------------------------
--- 6. Keep the legacy profile role aligned with the canonical staff role.
---    This closes the employee/dispatch -> client drift without changing users
---    that have no linked staff record.
--- ---------------------------------------------------------------------------
-create or replace function public.opc_sync_legacy_profile_from_staff_role()
-returns trigger
-language plpgsql
-security definer
-set search_path = public, pg_temp
+-- 6. Keep legacy user_profiles role aligned with canonical staff role.
+create or replace function public.opc_staff_role_to_legacy_role(p_role text)
+returns text
+language sql
+immutable
 as $$
-declare
-  v_role text;
-begin
-  if new.user_id is null then
-    return new;
-  end if;
-
-  v_role := case lower(coalesce(new.role, ''))
+  select case lower(coalesce(p_role, ''))
     when 'owner' then 'owner'
     when 'inhaber' then 'owner'
     when 'admin' then 'admin'
@@ -259,6 +231,19 @@ begin
     when 'disposition' then 'dispatch'
     else 'employee'
   end;
+$$;
+
+create or replace function public.opc_sync_legacy_profile_from_staff_role()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_role text;
+begin
+  if new.user_id is null then return new; end if;
+  v_role := public.opc_staff_role_to_legacy_role(new.role);
 
   update public.user_profiles
   set role = v_role,
@@ -275,5 +260,71 @@ create trigger trg_opc_sync_legacy_profile_from_staff_role
 after insert or update of user_id, role
 on public.opc_staff_roles
 for each row execute function public.opc_sync_legacy_profile_from_staff_role();
+
+-- 7. The legacy profile may still be written by old application code after the
+-- canonical staff row is saved. Override that stale write at the table itself.
+create or replace function public.opc_guard_legacy_profile_role_from_staff()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_staff_role text;
+begin
+  select s.role
+    into v_staff_role
+  from public.opc_staff_roles s
+  where s.user_id = new.id
+    and s.status in ('active', 'aktiv', 'enabled')
+    and coalesce(s.can_access_portal, true) = true
+  order by s.created_at desc nulls last
+  limit 1;
+
+  if v_staff_role is not null then
+    new.role := public.opc_staff_role_to_legacy_role(v_staff_role);
+  end if;
+
+  return new;
+end
+$$;
+
+drop trigger if exists trg_opc_guard_legacy_profile_role_from_staff on public.user_profiles;
+create trigger trg_opc_guard_legacy_profile_role_from_staff
+before insert or update of role on public.user_profiles
+for each row execute function public.opc_guard_legacy_profile_role_from_staff();
+
+-- 8. payroll_in_scope is payroll governance, not generic HR editing. The HR API
+-- writes updated_by, which lets the DB verify that the actor is an Owner.
+create or replace function public.opc_guard_payroll_scope_owner_only()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if old.payroll_in_scope is not distinct from new.payroll_in_scope then
+    return new;
+  end if;
+
+  if new.updated_by is null or not exists (
+    select 1
+    from public.opc_staff_roles s
+    where s.user_id = new.updated_by
+      and s.status in ('active', 'aktiv', 'enabled')
+      and lower(coalesce(s.role, '')) in ('owner', 'inhaber')
+  ) then
+    raise exception 'Nur Owner dürfen payroll_in_scope ändern.'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end
+$$;
+
+drop trigger if exists trg_opc_guard_payroll_scope_owner_only on public.opc_employees;
+create trigger trg_opc_guard_payroll_scope_owner_only
+before update of payroll_in_scope on public.opc_employees
+for each row execute function public.opc_guard_payroll_scope_owner_only();
 
 commit;
