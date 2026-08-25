@@ -43,6 +43,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run Astro type diagnostics
+        continue-on-error: true
+        run: npx astro check
+
       - name: Verify zero-downtime invariants
         run: node scripts/validate-zero-downtime-invariants.mjs
 
