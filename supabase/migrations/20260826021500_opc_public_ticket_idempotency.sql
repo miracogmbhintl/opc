@@ -71,9 +71,6 @@ begin
       );
     end if;
 
-    -- A failed reservation, or a reservation abandoned for more than five
-    -- minutes before a ticket was created, can safely be retried with the same
-    -- idempotency key. It does not count as a second public submission.
     if v_existing.state = 'failed'
        or (v_existing.state = 'reserved' and v_existing.updated_at < now() - interval '5 minutes') then
       update public.opc_public_ticket_submissions
@@ -146,5 +143,22 @@ $$;
 
 revoke all on function public.opc_reserve_public_ticket_submission(uuid, text, text, integer) from public, anon, authenticated;
 grant execute on function public.opc_reserve_public_ticket_submission(uuid, text, text, integer) to service_role;
+
+create or replace function public.opc_mark_public_link_used(p_public_link_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  update public.opc_facility_public_links
+  set use_count = coalesce(use_count, 0) + 1,
+      last_used_at = now()
+  where id = p_public_link_id;
+end
+$$;
+
+revoke all on function public.opc_mark_public_link_used(uuid) from public, anon, authenticated;
+grant execute on function public.opc_mark_public_link_used(uuid) to service_role;
 
 commit;
