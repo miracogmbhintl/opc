@@ -129,6 +129,69 @@ function apiAccessResponse(error: string, status: number) {
   );
 }
 
+async function blockClientPortalStaffCollision(
+  context: any,
+  pathname: string,
+  serviceClient: any,
+) {
+  if (
+    pathname !== '/api/opc/grant-client-portal-access' ||
+    context.request.method !== 'POST'
+  ) {
+    return null;
+  }
+
+  let body: any = null;
+  try {
+    body = await context.request.clone().json();
+  } catch {
+    return null;
+  }
+
+  const clientId = String(body?.clientId || '').trim();
+  if (!clientId) return null;
+
+  const { data: client, error: clientError } = await serviceClient
+    .from('opc_clients')
+    .select('id, contact_id, billing_email')
+    .eq('id', clientId)
+    .maybeSingle();
+
+  if (clientError) throw clientError;
+  if (!client) return null;
+
+  let email = String(client.billing_email || '').trim().toLowerCase();
+
+  if (!email && client.contact_id) {
+    const { data: contact, error: contactError } = await serviceClient
+      .from('opc_contacts')
+      .select('email')
+      .eq('id', client.contact_id)
+      .maybeSingle();
+
+    if (contactError) throw contactError;
+    email = String(contact?.email || '').trim().toLowerCase();
+  }
+
+  if (!email) return null;
+
+  const { data: conflictingStaff, error: staffError } = await serviceClient
+    .from('opc_staff_roles')
+    .select('id, user_id, display_name, email, role')
+    .ilike('email', email)
+    .in('status', ['active', 'aktiv', 'enabled'])
+    .limit(1)
+    .maybeSingle();
+
+  if (staffError) throw staffError;
+  if (!conflictingStaff) return null;
+
+  return apiAccessResponse(
+    'Portalzugang nicht erstellt: Diese E-Mail gehört bereits zu einem aktiven Mitarbeiterkonto. Mitarbeiter- und Kundenidentitäten müssen getrennt bleiben.',
+    409,
+  );
+}
+
 async function enforceClientPortalSeparation(context: any, pathname: string) {
   const internalPage = isInternalOpcPage(pathname);
   const restrictedApi = isRestrictedInternalApi(pathname);
@@ -193,6 +256,13 @@ async function enforceClientPortalSeparation(context: any, pathname: string) {
     ]);
 
     if (staffResult.data) {
+      const collisionResponse = await blockClientPortalStaffCollision(
+        context,
+        pathname,
+        serviceClient,
+      );
+      if (collisionResponse) return collisionResponse;
+
       // A small set of legacy Work OS handlers expects a request-scoped
       // `locals.session`. Populate it from the same user/token that has just
       // passed the canonical staff check instead of maintaining a second auth
