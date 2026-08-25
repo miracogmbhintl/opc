@@ -46,6 +46,9 @@ jobs:
       - name: Verify zero-downtime invariants
         run: node scripts/validate-zero-downtime-invariants.mjs
 
+      - name: Verify full app page integrity
+        run: node scripts/validate-app-page-integrity.mjs
+
       - name: Build
         run: npm run build
 
