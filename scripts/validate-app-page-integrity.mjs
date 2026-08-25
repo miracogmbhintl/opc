@@ -1,0 +1,177 @@
+import { readdir, readFile, stat } from 'node:fs/promises';
+import { join, relative, sep } from 'node:path';
+
+const root = process.cwd();
+const pagesRoot = join(root, 'src', 'pages');
+const routesFile = join(root, 'src', 'lib', 'opc-routes.ts');
+const astroConfigFile = join(root, 'astro.config.mjs');
+const sidebarFile = join(root, 'src', 'components', 'MirakaSidebar.tsx');
+
+const failures = [];
+const warnings = [];
+
+async function walk(dir) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const absolute = join(dir, entry.name);
+    if (entry.isDirectory()) files.push(...await walk(absolute));
+    else files.push(absolute);
+  }
+
+  return files;
+}
+
+function routeCandidates(route) {
+  if (route === '/') return [join(pagesRoot, 'index.astro')];
+
+  const clean = route.replace(/^\/+|\/+$/g, '');
+  const parts = clean.split('/').filter(Boolean);
+  const direct = [
+    join(pagesRoot, `${clean}.astro`),
+    join(pagesRoot, clean, 'index.astro'),
+  ];
+
+  // Catch-all routes can serve nested paths such as /kundenportal/*.
+  for (let i = parts.length - 1; i >= 1; i -= 1) {
+    const prefix = parts.slice(0, i).join('/');
+    direct.push(join(pagesRoot, prefix, '[...path].astro'));
+    direct.push(join(pagesRoot, prefix, '[...slug].astro'));
+  }
+
+  return direct;
+}
+
+async function exists(path) {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+const allFiles = await walk(pagesRoot);
+const pageFiles = allFiles.filter((file) => file.endsWith('.astro'));
+const routeSource = await readFile(routesFile, 'utf8');
+const astroConfig = await readFile(astroConfigFile, 'utf8');
+const sidebarSource = await readFile(sidebarFile, 'utf8');
+
+for (const file of pageFiles) {
+  const content = await readFile(file, 'utf8');
+  const rel = relative(root, file).split(sep).join('/');
+
+  if (!content.trim()) failures.push(`${rel}: empty Astro page`);
+  if (!/<(?:html|Layout|[A-Z][A-Za-z0-9_]*)\b/.test(content)) {
+    warnings.push(`${rel}: no obvious rendered root element`);
+  }
+
+  if (content.includes('__OPC_NO_MOTION_VIEW_TRANSITIONS__')) {
+    if (!content.includes('document.startViewTransition')) {
+      failures.push(`${rel}: legacy transition marker without transition implementation`);
+    }
+  }
+}
+
+const routeMatches = [...routeSource.matchAll(/\b([A-Za-z][A-Za-z0-9_]*)\s*:\s*['"](\/[^'"]*|\/)['"]/g)];
+const routes = routeMatches.map((match) => ({ key: match[1], path: match[2] }));
+
+for (const route of routes) {
+  const candidates = routeCandidates(route.path);
+  let resolved = false;
+
+  for (const candidate of candidates) {
+    if (await exists(candidate)) {
+      resolved = true;
+      break;
+    }
+  }
+
+  // Detail bases such as /mitarbeiter are valid when the list page exists and
+  // their dynamic child lives under the same directory.
+  if (!resolved) {
+    const clean = route.path.replace(/^\/+|\/+$/g, '');
+    const listPage = join(pagesRoot, `${clean}.astro`);
+    const dynamicChildren = [
+      join(pagesRoot, clean, '[id].astro'),
+      join(pagesRoot, clean, '[reportId].astro'),
+      join(pagesRoot, clean, '[jobId].astro'),
+    ];
+
+    if (await exists(listPage)) resolved = true;
+    if (!resolved) {
+      for (const child of dynamicChildren) {
+        if (await exists(child)) {
+          resolved = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!resolved) {
+    failures.push(`OPC_ROUTES.${route.key} -> ${route.path}: no matching Astro page or catch-all route`);
+  }
+}
+
+const bannedProductionRoutes = [
+  'src/pages/api/diagnostic.ts',
+  'src/pages/api/supabase-test.ts',
+  'src/pages/api/test-clients.ts',
+  'src/pages/api/test-login.ts',
+  'src/pages/supabase-diagnostic.astro',
+  'src/pages/verify-supabase.astro',
+  'src/pages/work-os/debug-auth.astro',
+  'src/pages/test-login.astro',
+];
+
+for (const rel of bannedProductionRoutes) {
+  if (await exists(join(root, rel))) failures.push(`${rel}: public diagnostic/test route must not ship to production`);
+}
+
+if (!astroConfig.includes('OPC_VIEW_TRANSITION_COMPAT_V2')) {
+  failures.push('astro.config.mjs: missing OPC_VIEW_TRANSITION_COMPAT_V2 runtime guard');
+}
+
+if (!astroConfig.includes("typeof transitionInput.update === 'function'")) {
+  failures.push('astro.config.mjs: view-transition guard does not execute options.update()');
+}
+
+if (!sidebarSource.includes('data-astro-reload="true"')) {
+  failures.push('MirakaSidebar.tsx: desktop navigation is not explicitly protected by full-page reload');
+}
+
+const primaryPages = [
+  'dashboard.astro',
+  'kunden.astro',
+  'mitarbeiter.astro',
+  'anfragen.astro',
+  'besichtigungen.astro',
+  'kalender.astro',
+  'einsaetze.astro',
+  'zeiterfassung.astro',
+  'anfragen-schaeden.astro',
+  'qr-codes.astro',
+  'berichte-dateien.astro',
+  'finanzen.astro',
+  'rechnungsautomationen.astro',
+  'einstellungen.astro',
+];
+
+for (const page of primaryPages) {
+  if (!await exists(join(pagesRoot, page))) failures.push(`primary page missing: src/pages/${page}`);
+}
+
+console.log(`App page integrity audit: ${pageFiles.length} Astro pages, ${routes.length} OPC route entries.`);
+if (warnings.length) {
+  console.log(`Warnings (${warnings.length}):`);
+  for (const warning of warnings) console.log(`- ${warning}`);
+}
+
+if (failures.length) {
+  console.error(`Integrity failures (${failures.length}):`);
+  for (const failure of failures) console.error(`- ${failure}`);
+  process.exit(1);
+}
+
+console.log('App page integrity verified.');
