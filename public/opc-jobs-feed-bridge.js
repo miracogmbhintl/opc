@@ -1,5 +1,9 @@
 (() => {
-  if (window.__OPC_MANAGER_JOB_BRIDGE__) return;
+  if (window.__OPC_MANAGER_JOB_BRIDGE_RUNTIME__) {
+    window.__OPC_MANAGER_JOB_BRIDGE_RUNTIME__.activate();
+    return;
+  }
+
   window.__OPC_MANAGER_JOB_BRIDGE__ = true;
 
   const originalFetch = window.fetch.bind(window);
@@ -25,6 +29,16 @@
   let accessPromise = null;
   let isManager = false;
   let selectedAll = false;
+  let observer = null;
+
+  function isJobRoute() {
+    const path = window.location.pathname;
+    return path === '/einsaetze' || path === '/einsatz-planen' || path.startsWith('/einsatz/');
+  }
+
+  function isJobsListRoute() {
+    return window.location.pathname === '/einsaetze';
+  }
 
   function tokenFromStorage() {
     try {
@@ -109,8 +123,9 @@
   }
 
   function chooseAllJobs() {
-    if (!isManager || selectedAll || !location.pathname.includes('/einsaetze')) return;
+    if (!isManager || selectedAll || !isJobsListRoute()) return;
     requestAnimationFrame(() => {
+      if (!isJobsListRoute()) return;
       const buttons = document.querySelectorAll('.opc-jobs-date-buttons button');
       const all = Array.from(buttons).find((button) => button.textContent?.trim() === 'Alle');
       if (!all) return;
@@ -119,13 +134,36 @@
     });
   }
 
-  new MutationObserver(chooseAllJobs).observe(document.documentElement, { childList: true, subtree: true });
-  document.addEventListener('astro:page-load', () => {
+  function disconnectObserver() {
+    if (!observer) return;
+    observer.disconnect();
+    observer = null;
+  }
+
+  function activate() {
     selectedAll = false;
+
+    if (!isJobsListRoute()) {
+      disconnectObserver();
+      return;
+    }
+
+    if (!observer) {
+      observer = new MutationObserver(chooseAllJobs);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
     chooseAllJobs();
-  });
+  }
+
+  function deactivate() {
+    selectedAll = false;
+    disconnectObserver();
+  }
 
   window.fetch = async (input, init = {}) => {
+    if (!isJobRoute()) return originalFetch(input, init);
+
     const request = input instanceof Request ? input : null;
     const url = new URL(request ? request.url : String(input), location.origin);
     const method = String(init.method || request?.method || 'GET').toUpperCase();
@@ -162,6 +200,11 @@
     }
   };
 
+  window.__OPC_MANAGER_JOB_BRIDGE_RUNTIME__ = { activate, deactivate };
+  document.addEventListener('astro:page-load', activate);
+  document.addEventListener('astro:before-swap', deactivate);
+  activate();
+
   const initialToken = tokenFromStorage();
-  if (initialToken) access(initialToken).catch(() => {});
+  if (initialToken && isJobRoute()) access(initialToken).catch(() => {});
 })();

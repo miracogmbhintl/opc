@@ -6,6 +6,11 @@ export type OpcServerAccess = {
   profile: AnyRow | null;
   canManageJobs: boolean;
   canManageCalendar: boolean;
+  canManageClients: boolean;
+  canManageEmployees: boolean;
+  canManageFinance: boolean;
+  canManageReports: boolean;
+  canManageTimeEntries: boolean;
 };
 
 export function normalizeOpcServerRole(value: unknown): OpcServerAccess['role'] {
@@ -35,7 +40,9 @@ export async function resolveOpcServerAccess(serviceSupabase: any, user: AnyRow)
   const [staffResult, profileResult] = await Promise.all([
     serviceSupabase
       .from('opc_staff_roles')
-      .select('id,user_id,employee_id,role,status,can_access_portal,can_manage_jobs,can_view_all_jobs')
+      .select(
+        'id,user_id,employee_id,role,status,can_access_portal,can_manage_jobs,can_view_all_jobs,can_manage_clients,can_manage_onboarding,can_manage_employees,can_manage_finance,can_manage_reports,can_manage_time_entries',
+      )
       .eq('user_id', user.id)
       .in('status', ['active', 'aktiv', 'enabled'])
       .eq('can_access_portal', true)
@@ -67,6 +74,7 @@ export async function resolveOpcServerAccess(serviceSupabase: any, user: AnyRow)
   ]);
 
   const elevatedRole = ['owner', 'admin', 'dispatch'].includes(role);
+  const ownerOrAdmin = ['owner', 'admin'].includes(role);
 
   return {
     role,
@@ -77,5 +85,14 @@ export async function resolveOpcServerAccess(serviceSupabase: any, user: AnyRow)
       staffRole?.can_manage_jobs === true ||
       staffRole?.can_view_all_jobs === true,
     canManageCalendar: elevatedRole,
+    canManageClients:
+      elevatedRole ||
+      staffRole?.can_manage_clients === true ||
+      staffRole?.can_manage_onboarding === true,
+    canManageEmployees: ownerOrAdmin || staffRole?.can_manage_employees === true,
+    canManageFinance: ownerOrAdmin || staffRole?.can_manage_finance === true,
+    canManageReports: elevatedRole || staffRole?.can_manage_reports === true,
+    canManageTimeEntries:
+      elevatedRole || staffRole?.can_manage_time_entries === true,
   };
 }

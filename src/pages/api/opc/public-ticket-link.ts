@@ -1,8 +1,6 @@
 import type { APIRoute } from 'astro';
 import {
   createOpcServiceClient,
-  getOpcRuntimeEnv,
-  getSupabaseProjectRef,
   jsonResponse,
 } from '../../../lib/opc-ticket-admin';
 
@@ -62,17 +60,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .maybeSingle();
 
     if (publicLinkError) {
-      const env = getOpcRuntimeEnv(locals);
-
+      console.error('[opc/public-ticket-link] QR lookup failed:', publicLinkError.message);
       return jsonResponse(
         {
           ok: false,
-          error: `QR-Code konnte nicht geladen werden: ${publicLinkError.message}`,
-          debug: {
-            table: QR_LINK_TABLE,
-            supabase_project_ref: getSupabaseProjectRef(env.supabaseUrl),
-            env_source_mode: env.sourceMode,
-          },
+          error: 'QR-Code konnte nicht geladen werden.',
         },
         500
       );
@@ -130,13 +122,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
       metadata: publicLink.metadata || {},
     });
   } catch (error) {
+    console.error('[opc/public-ticket-link] failed:', error);
     return jsonResponse(
       {
         ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Interner Fehler beim Laden des QR-Codes.',
+        error: 'Interner Fehler beim Laden des QR-Codes.',
       },
       500
     );

@@ -26,10 +26,8 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       });
     }
 
-    const supabaseUrl =
-      import.meta.env.PUBLIC_SUPABASE_URL || import.meta.env.PUBLIC_SUPABASE_URL;
-    const supabaseAnonKey =
-      import.meta.env.PUBLIC_SUPABASE_ANON_KEY || import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
+    const supabaseUrl = import.meta.env.PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY;
 
     if (!supabaseUrl || !supabaseAnonKey) {
       return new Response(JSON.stringify({ error: 'Server configuration error' }), {
@@ -83,9 +81,7 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-      if (updateData.group_id === '') {
-        updateData.group_id = null;
-      }
+      if (updateData.group_id === '') updateData.group_id = null;
     }
 
     if (Object.prototype.hasOwnProperty.call(updateData, 'description')) {
@@ -121,23 +117,16 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       }
     }
 
-    if (Object.prototype.hasOwnProperty.call(updateData, 'start_date')) {
-      if (updateData.start_date === '') {
-        updateData.start_date = null;
-      }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'start_date') && updateData.start_date === '') {
+      updateData.start_date = null;
     }
 
-    if (Object.prototype.hasOwnProperty.call(updateData, 'due_date')) {
-      if (updateData.due_date === '') {
-        updateData.due_date = null;
-      }
+    if (Object.prototype.hasOwnProperty.call(updateData, 'due_date') && updateData.due_date === '') {
+      updateData.due_date = null;
     }
 
     if (Object.prototype.hasOwnProperty.call(updateData, 'progress_percent')) {
-      if (
-        updateData.progress_percent === '' ||
-        updateData.progress_percent === undefined
-      ) {
+      if (updateData.progress_percent === '' || updateData.progress_percent === undefined) {
         updateData.progress_percent = null;
       } else if (updateData.progress_percent !== null) {
         const parsed = Number(updateData.progress_percent);
@@ -158,11 +147,12 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
         headers: {
           Authorization: `Bearer ${session.access_token}`
         }
-      }
+      },
+      auth: { persistSession: false, autoRefreshToken: false },
     });
 
     const { data: item, error } = await supabase
-      .from('work_os_items')
+      .from('work_os_tasks')
       .update(updateData)
       .eq('id', itemId)
       .select(`
@@ -185,9 +175,16 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       .single();
 
     if (error) {
-      console.error('[Work OS API] Error updating item:', error);
+      if (error.code === 'PGRST116') {
+        return new Response(JSON.stringify({ error: 'Task not found or access denied' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      console.error('[Work OS API] Error updating task:', error);
       return new Response(
-        JSON.stringify({ error: 'Failed to update item', details: error.message }),
+        JSON.stringify({ error: 'Failed to update task' }),
         {
           status: 500,
           headers: { 'Content-Type': 'application/json' }
@@ -195,21 +192,15 @@ export const PATCH: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
-    return new Response(
-      JSON.stringify({ item }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
+    return new Response(JSON.stringify({ item }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
   } catch (error: any) {
-    console.error('[Work OS API] Item PATCH error:', error);
-    return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error?.message || 'Unknown error' }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
+    console.error('[Work OS API] Task PATCH error:', error);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 };

@@ -1,0 +1,38 @@
+name: Apply red-point patches
+
+on:
+  push:
+    branches:
+      - hotfix/remove-public-diagnostics-20260825
+    paths:
+      - scripts/apply-red-point-patches.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/remove-public-diagnostics-20260825
+          fetch-depth: 0
+      - name: Apply exact function patches
+        shell: bash
+        run: |
+          if [ ! -f scripts/apply-red-point-patches.mjs ]; then
+            echo "Patch script already removed; nothing to do."
+            exit 0
+          fi
+          node scripts/apply-red-point-patches.mjs
+          git diff --check
+          if git diff --quiet; then
+            echo "No patch changes required."
+            exit 0
+          fi
+          git config user.name "opc-integrity-bot"
+          git config user.email "opc-integrity-bot@users.noreply.github.com"
+          git add src
+          git commit -m "Apply remaining red-point code fixes"
+          git push origin HEAD:hotfix/remove-public-diagnostics-20260825

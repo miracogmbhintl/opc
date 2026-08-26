@@ -1,24 +1,8 @@
 ---
-import Layout from '../../../layouts/main.astro';
-import MirakaDashboardShell from '../../../components/MirakaDashboardShell';
-import WorkspaceDetail from '../../../components/work-os/WorkspaceDetail';
-import EnsureAuthCookies from '../../../components/work-os/EnsureAuthCookies';
-import { baseUrl } from '../../../lib/base-url';
+const workspaceId = String(Astro.params.workspaceId || '').trim();
+const target = workspaceId
+  ? `/work-os/boards?workspace_id=${encodeURIComponent(workspaceId)}`
+  : '/work-os/boards';
+
+return Astro.redirect(target, 302);
 ---
-
-<Layout>
-  <MirakaDashboardShell 
-    client:only="react" 
-    baseUrl={baseUrl} 
-    currentPath="work-os"
-    hideTopBar={true}
-    fullWidth={true}
-  >
-    <EnsureAuthCookies client:only="react">
-      <WorkspaceDetail client:only="react" baseUrl={baseUrl} />
-    </EnsureAuthCookies>
-  </MirakaDashboardShell>
-</Layout>
-
-
-

@@ -9,20 +9,19 @@ const token = Array.isArray(rawToken) ? rawToken.join("/") : rawToken;
 
 <html lang="de">
   <head>
-    
-  <!-- Orange Pro Clean Web App / PWA -->
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
-  <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
-  <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
+    <!-- Orange Pro Clean Web App / PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+    <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+    <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
 
-  <meta name="theme-color" content="#ff6a00" />
-  <meta name="application-name" content="Orange Pro Clean" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta charset="utf-8" />
+    <meta name="theme-color" content="#ff6a00" />
+    <meta name="application-name" content="Orange Pro Clean" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Orange Pro Clean Meldung</title>
     <meta
@@ -32,6 +31,43 @@ const token = Array.isArray(rawToken) ? rawToken.join("/") : rawToken;
   </head>
 
   <body style="margin:0;">
+    <script define:vars={{ token }}>
+      (() => {
+        // OPC_PUBLIC_PLACES_TOKEN_BRIDGE_V1
+        // The public report page is the only caller of these paid Google proxy endpoints.
+        // Attach the current active QR token without changing the large form component.
+        if (window.__OPC_PUBLIC_PLACES_TOKEN_BRIDGE__) return;
+        window.__OPC_PUBLIC_PLACES_TOKEN_BRIDGE__ = true;
+
+        const nativeFetch = window.fetch.bind(window);
+        const protectedPaths = new Set([
+          '/api/opc/google-place-autocomplete',
+          '/api/opc/google-place-details',
+        ]);
+
+        window.fetch = (input, init) => {
+          try {
+            const request = input instanceof Request ? input : null;
+            const url = new URL(request ? request.url : String(input), window.location.origin);
+
+            if (url.origin === window.location.origin && protectedPaths.has(url.pathname)) {
+              url.searchParams.set('token', String(token || ''));
+
+              if (request) {
+                return nativeFetch(new Request(url.href, request), init);
+              }
+
+              return nativeFetch(url.href, init);
+            }
+          } catch {
+            // Fall through to the native request.
+          }
+
+          return nativeFetch(input, init);
+        };
+      })();
+    </script>
+
     <PublicTicketForm token={token} client:load />
   </body>
 </html>

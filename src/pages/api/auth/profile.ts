@@ -1,5 +1,10 @@
 import type { APIRoute } from 'astro';
-import { supabase } from '../../../lib/supabase';
+import {
+  createServerSupabaseClient,
+  requireAuth,
+} from '../../../lib/supabase-server';
+
+export const prerender = false;
 
 function normalizeRole(value: unknown) {
   const role = String(value || '').toLowerCase().trim();
@@ -26,61 +31,73 @@ function resolveStaffRole(staffRole: Record<string, any> | null | undefined, pro
   const explicitRole = normalizeRole(staffRole.role);
 
   if (['owner', 'admin', 'dispatch'].includes(explicitRole)) return explicitRole;
+  if (explicitRole === 'employee') return 'employee';
+
   if (['owner', 'admin', 'dispatch'].includes(profileRole)) return profileRole;
 
   if (staffRole.can_manage_jobs === true || staffRole.can_view_all_jobs === true) {
     return 'dispatch';
   }
 
-  if (explicitRole === 'employee') return 'employee';
-
   return profileRole || 'client';
 }
 
-export const GET: APIRoute = async ({ locals }) => {
-  try {
-    const session = locals?.runtime?.session || locals?.session;
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'private, no-store, max-age=0',
+    },
+  });
+}
 
-    if (!session?.user) {
-      return new Response(JSON.stringify({ error: 'Not authenticated' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+export const GET: APIRoute = async ({ cookies, locals }) => {
+  try {
+    const user = await requireAuth(cookies, locals?.runtime?.env);
+    if (!user) return json({ error: 'Not authenticated' }, 401);
+
+    const supabase = createServerSupabaseClient(cookies, locals?.runtime?.env);
+
+    const [{ data: profile, error: profileError }, { data: staffRole, error: staffError }] =
+      await Promise.all([
+        supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle(),
+        supabase
+          .from('opc_staff_roles')
+          .select(
+            'id, user_id, employee_id, email, display_name, role, status, can_access_portal, can_manage_jobs, can_view_all_jobs',
+          )
+          .eq('user_id', user.id)
+          .in('status', ['active', 'aktiv', 'enabled'])
+          .eq('can_access_portal', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+    if (profileError) {
+      console.warn('[Auth Profile] User profile lookup failed:', profileError.message);
+    }
+    if (staffError) {
+      console.warn('[Auth Profile] Staff lookup failed:', staffError.message);
     }
 
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .maybeSingle();
-
-    const { data: staffRole } = await supabase
-      .from('opc_staff_roles')
-      .select(
-        'id, user_id, employee_id, email, display_name, role, status, can_access_portal, can_manage_jobs, can_view_all_jobs',
-      )
-      .eq('user_id', session.user.id)
-      .in('status', ['active', 'aktiv', 'enabled'])
-      .eq('can_access_portal', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
     if (!profile && !staffRole) {
-      return new Response(JSON.stringify({ error: 'Profile not found' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Profile not found' }, 404);
     }
 
     const profileRole = resolveProfileRole(profile);
     const effectiveRole = resolveStaffRole(staffRole, profileRole);
 
-    const enrichedProfile = {
+    return json({
       ...(profile || {}),
-      id: session.user.id,
-      email: staffRole?.email || profile?.email || session.user.email || '',
-      full_name: staffRole?.display_name || profile?.full_name || session.user.email || 'User',
+      id: user.id,
+      email: staffRole?.email || profile?.email || user.email || '',
+      full_name: staffRole?.display_name || profile?.full_name || user.email || 'User',
       role: effectiveRole,
       opc_staff_role_id: staffRole?.id || null,
       employee_id: staffRole?.employee_id || null,
@@ -88,18 +105,13 @@ export const GET: APIRoute = async ({ locals }) => {
         staffRole?.can_manage_jobs === true || ['owner', 'admin', 'dispatch'].includes(effectiveRole),
       can_view_all_jobs:
         staffRole?.can_view_all_jobs === true || ['owner', 'admin', 'dispatch'].includes(effectiveRole),
-      last_sign_in_at: session.user.last_sign_in_at || null,
-    };
-
-    return new Response(JSON.stringify(enrichedProfile), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      last_sign_in_at: user.last_sign_in_at || null,
     });
   } catch (error) {
-    console.error('Profile API error:', error);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    console.error(
+      '[Auth Profile] GET failed:',
+      error instanceof Error ? error.message : error,
+    );
+    return json({ error: 'Internal server error' }, 500);
   }
 };

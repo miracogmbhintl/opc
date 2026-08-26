@@ -1,8 +1,3 @@
-
-
-
-
-
 import {defineConfig} from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import react from '@astrojs/react';
@@ -39,10 +34,79 @@ function injectDevScript(options = {}) {
       'astro:config:setup': ({injectScript, command, logger}) => {
         if (command === 'dev') {
           logger.info(`Injecting dev script: ${scriptPath}`);
-
-          // Inject as ES module
           injectScript('page', `import "${scriptPath}";`);
         }
+      },
+    },
+  };
+}
+
+// OPC_VIEW_TRANSITION_COMPAT_V2
+// Legacy page shells replace document.startViewTransition() to suppress motion.
+// Astro 5 may pass { update, types } instead of a plain callback. The old shim
+// ignored update(), so a client-side route change could update the URL without
+// swapping the DOM, leaving the app blank. This global repair preserves no-motion
+// behavior while supporting both forms of the View Transitions API.
+function injectOpcRuntimeSafety() {
+  const runtimeScript = String.raw`
+    (() => {
+      const installOpcViewTransitionCompatibility = () => {
+        if (typeof window === 'undefined' || typeof document === 'undefined') return;
+        if (!window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
+
+        const noMotionTransition = (transitionInput) => {
+          const update =
+            typeof transitionInput === 'function'
+              ? transitionInput
+              : transitionInput && typeof transitionInput.update === 'function'
+                ? transitionInput.update
+                : null;
+
+          let updateCallbackDone;
+
+          try {
+            updateCallbackDone = Promise.resolve(update ? update() : undefined);
+          } catch (error) {
+            updateCallbackDone = Promise.reject(error);
+          }
+
+          const ready = Promise.resolve();
+          const finished = updateCallbackDone.then(() => undefined);
+          const requestedTypes =
+            transitionInput && typeof transitionInput === 'object' && Array.isArray(transitionInput.types)
+              ? transitionInput.types
+              : [];
+
+          return {
+            ready,
+            updateCallbackDone,
+            finished,
+            skipTransition() {},
+            types: new Set(requestedTypes),
+          };
+        };
+
+        try {
+          Object.defineProperty(document, 'startViewTransition', {
+            configurable: true,
+            writable: true,
+            value: noMotionTransition,
+          });
+        } catch {
+          document.startViewTransition = noMotionTransition;
+        }
+      };
+
+      installOpcViewTransitionCompatibility();
+      document.addEventListener('astro:page-load', installOpcViewTransitionCompatibility);
+    })();
+  `;
+
+  return {
+    name: 'opc-runtime-safety',
+    hooks: {
+      'astro:config:setup': ({injectScript}) => {
+        injectScript('page', runtimeScript);
       },
     },
   };
@@ -57,7 +121,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    host: true, // Listen on all network interfaces (0.0.0.0)
+    host: true,
     strictPort: true,
   },
   adapter: cloudflare({
@@ -68,19 +132,17 @@ export default defineConfig({
   integrations: [
     react(),
     injectDevScript({scriptPath: '/generated/dev-only.js'}),
+    injectOpcRuntimeSafety(),
   ],
   vite: {
     plugins: [tailwindcss(), patchViteErrorOverlay()],
     ssr: {
-      // Externalize packages that have Node-only APIs
-      // These should not be bundled into the Worker
       external: ['html2canvas'],
-      // Don't attempt to transform these in SSR
       noExternal: ['@supabase/supabase-js', '@supabase/gotrue-js'],
     },
     server: {
       watch: {
-        usePolling: true, // Enable polling for file watching in Docker
+        usePolling: true,
         interval: 1000,
         ignored: [
           '**/lost+found/**',
@@ -91,8 +153,6 @@ export default defineConfig({
       },
     },
     resolve: {
-      // Use react-dom/server.edge instead of react-dom/server.browser for React 19.
-      // Without this, MessageChannel from node:worker_threads needs to be polyfilled.
       alias: import.meta.env.PROD
         ? {
             'react-dom/server': 'react-dom/server.edge',
@@ -101,12 +161,3 @@ export default defineConfig({
     },
   },
 });
-
-
-
-
-
-
-
-
-

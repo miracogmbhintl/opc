@@ -1,10 +1,19 @@
 (() => {
-  if (window.__OPC_PAYROLL_COMPAT_BRIDGE__) return;
+  if (window.__OPC_PAYROLL_COMPAT_RUNTIME__) {
+    window.__OPC_PAYROLL_COMPAT_RUNTIME__.activate();
+    return;
+  }
+
   window.__OPC_PAYROLL_COMPAT_BRIDGE__ = true;
 
   const originalFetch = window.fetch.bind(window);
   const employeeDetailPattern = /^\/api\/opc\/employees\/([0-9a-f-]{36})\/?$/i;
-  const employeePagePattern = /\/mitarbeiter\/([0-9a-f-]{36})(?:\/|$)/i;
+  const employeePagePattern = /^\/mitarbeiter\/([0-9a-f-]{36})(?:\/|$)/i;
+  let clickListenerActive = false;
+
+  function isEmployeeDetailRoute() {
+    return employeePagePattern.test(window.location.pathname);
+  }
 
   function methodOf(input, init) {
     if (init && init.method) return String(init.method).toUpperCase();
@@ -21,6 +30,8 @@
   }
 
   window.fetch = (input, init) => {
+    if (!isEmployeeDetailRoute()) return originalFetch(input, init);
+
     const method = methodOf(input, init);
     const url = requestUrl(input);
 
@@ -160,22 +171,42 @@
     }
   }
 
-  document.addEventListener(
-    'click',
-    (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      const button = target.closest('button.opc-payroll-button');
-      if (!button) return;
-      if (button.textContent?.trim() !== 'PDF') return;
-      const container = button.closest('.opc-payroll-period');
-      if (!container) return;
+  function handlePayrollClick(event) {
+    if (!isEmployeeDetailRoute()) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest('button.opc-payroll-button');
+    if (!button) return;
+    if (button.textContent?.trim() !== 'PDF') return;
+    const container = button.closest('.opc-payroll-period');
+    if (!container) return;
 
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      void downloadPayrollPdf(button, container);
-    },
-    true,
-  );
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    void downloadPayrollPdf(button, container);
+  }
+
+  function activate() {
+    if (!isEmployeeDetailRoute()) {
+      deactivate();
+      return;
+    }
+
+    if (!clickListenerActive) {
+      document.addEventListener('click', handlePayrollClick, true);
+      clickListenerActive = true;
+    }
+  }
+
+  function deactivate() {
+    if (!clickListenerActive) return;
+    document.removeEventListener('click', handlePayrollClick, true);
+    clickListenerActive = false;
+  }
+
+  window.__OPC_PAYROLL_COMPAT_RUNTIME__ = { activate, deactivate };
+  document.addEventListener('astro:page-load', activate);
+  document.addEventListener('astro:before-swap', deactivate);
+  activate();
 })();

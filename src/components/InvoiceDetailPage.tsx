@@ -863,7 +863,6 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         balance_chf: roundMoney(totals.balance),
         sent_at: status === 'sent' && !invoice.sent_at ? new Date().toISOString() : invoice.sent_at || null,
         paid_at: status === 'paid' && !invoice.paid_at ? new Date().toISOString() : invoice.paid_at || null,
-        updated_at: new Date().toISOString(),
         metadata: {
           ...getMetadata(invoice),
           invoice_editor_version: INVOICE_EDITOR_VERSION,
@@ -873,41 +872,36 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         },
       };
 
-      const { error } = await supabase.from('opc_invoices').update(invoicePayload).eq('id', invoice.id);
+      const itemPayloads = items.map((item, index) => ({
+        ...(String(item.id).startsWith('local-') ? {} : { id: item.id }),
+        quote_item_id: item.quote_item_id || null,
+        sort_order: index + 1,
+        title: clean(item.title) || 'Position',
+        description: item.description || null,
+        quantity: toNumber(item.quantity || 1) || 1,
+        unit: item.unit || 'pauschal',
+        unit_price_chf: roundMoney(toNumber(item.unit_price_chf)),
+        discount_chf: roundMoney(toNumber(item.discount_chf)),
+        tax_rate: roundMoney(toNumber(item.tax_rate || totals.taxRate) || 8.1),
+        subtotal_chf: roundMoney(toNumber(item.subtotal_chf)),
+        tax_chf: roundMoney(toNumber(item.tax_chf)),
+        total_chf: roundMoney(toNumber(item.total_chf)),
+        metadata: getMetadata(item),
+      }));
+
+      const { data: saved, error } = await supabase.rpc('opc_save_invoice_atomic', {
+        p_invoice_id: invoice.id,
+        p_invoice: invoicePayload,
+        p_items: itemPayloads,
+      });
       if (error) throw error;
+      if (!saved?.invoice?.id) throw new Error('Die Rechnung wurde nicht vollständig gespeichert.');
 
-      for (const [index, item] of items.entries()) {
-        const itemPayload = {
-          invoice_id: invoice.id,
-          quote_item_id: item.quote_item_id || null,
-          sort_order: index + 1,
-          title: clean(item.title) || 'Position',
-          description: item.description || null,
-          quantity: toNumber(item.quantity || 1) || 1,
-          unit: item.unit || 'pauschal',
-          unit_price_chf: roundMoney(toNumber(item.unit_price_chf)),
-          discount_chf: roundMoney(toNumber(item.discount_chf)),
-          tax_rate: roundMoney(toNumber(item.tax_rate || totals.taxRate) || 8.1),
-          subtotal_chf: roundMoney(toNumber(item.subtotal_chf)),
-          tax_chf: roundMoney(toNumber(item.tax_chf)),
-          total_chf: roundMoney(toNumber(item.total_chf)),
-          updated_at: new Date().toISOString(),
-          metadata: getMetadata(item),
-        };
-
-        if (String(item.id).startsWith('local-')) {
-          const { error: insertError } = await supabase.from('opc_invoice_items').insert(itemPayload);
-          if (insertError) throw insertError;
-        } else {
-          const { error: updateError } = await supabase.from('opc_invoice_items').update(itemPayload).eq('id', item.id);
-          if (updateError) throw updateError;
-        }
-      }
-
+      setInvoice(saved.invoice);
+      setItems(Array.isArray(saved.items) ? saved.items : items);
       const savedTime = new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);
-      await loadInvoice({ clearMessages: false });
       return true;
     } catch (error: any) {
       setErrorMessage(error?.message || 'Rechnung konnte nicht gespeichert werden.');
@@ -1278,7 +1272,8 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
   }
 
   async function handleDownloadInvoicePdf() {
-    await saveInvoice(undefined, { silent: true });
+    const saved = await saveInvoice(undefined, { silent: true });
+    if (!saved) { setErrorMessage('Rechnung konnte vor der PDF-Erstellung nicht gespeichert werden.'); return; }
     const filename = buildInvoiceFileName(invoice!);
     const input = buildInvoicePdfInput();
 
@@ -1298,7 +1293,8 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
   async function handleDownloadPaymentReminder() {
     try {
-      await saveInvoice(undefined, { silent: true });
+      const saved = await saveInvoice(undefined, { silent: true });
+      if (!saved) throw new Error('Rechnung konnte vor der Zahlungserinnerung nicht gespeichert werden.');
       const input = buildInvoicePdfInput();
       if (!input) return;
 
@@ -1321,7 +1317,8 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
 
   async function handleDownloadFirstReminder() {
     try {
-      await saveInvoice(undefined, { silent: true });
+      const saved = await saveInvoice(undefined, { silent: true });
+      if (!saved) throw new Error('Rechnung konnte vor der Mahnung nicht gespeichert werden.');
       const input = buildInvoicePdfInput();
       if (!input) return;
 

@@ -2,10 +2,13 @@
   if (window.__OPC_CALENDAR_FETCH_BRIDGE__) return;
   window.__OPC_CALENDAR_FETCH_BRIDGE__ = true;
 
-  // OPC_CALENDAR_EXPLICIT_SYNC_ONLY_V1
+  // OPC_CALENDAR_EXPLICIT_SYNC_ONLY_V2
   // Database writes no longer trigger hidden follow-up calendar requests.
   // The application calls the canonical sync endpoint exactly once per action.
+  // The compatibility wrapper is only relevant while an Einsatz detail route is active.
   const nativeFetch = window.fetch.bind(window);
+
+  const isEinsatzDetailRoute = () => /^\/einsatz\/[^/]+\/?$/.test(window.location.pathname);
 
   const readAccessToken = () => {
     try {
@@ -34,6 +37,10 @@
   };
 
   window.fetch = (input, init = {}) => {
+    if (!isEinsatzDetailRoute()) {
+      return nativeFetch(input, init);
+    }
+
     const inputRequest = input instanceof Request ? input : null;
     const requestUrl = inputRequest ? inputRequest.url : String(input);
     const url = new URL(requestUrl, window.location.origin);

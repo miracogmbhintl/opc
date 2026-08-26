@@ -1,10 +1,20 @@
 (() => {
-  if (window.__OPC_PRIVATE_JOB_MEDIA_BRIDGE__) return;
+  if (window.__OPC_PRIVATE_JOB_MEDIA_RUNTIME__) {
+    window.__OPC_PRIVATE_JOB_MEDIA_RUNTIME__.activate();
+    return;
+  }
+
   window.__OPC_PRIVATE_JOB_MEDIA_BRIDGE__ = true;
 
   const marker = '/storage/v1/object/public/opc-job-media/';
   const endpoint = '/api/opc/jobs/media-file?path=';
   const originalOpen = window.open.bind(window);
+  let observer = null;
+
+  function isMediaRoute() {
+    const path = window.location.pathname;
+    return path.startsWith('/einsatz/') || path.startsWith('/bericht/');
+  }
 
   function protectedUrl(raw) {
     const value = String(raw || '').trim();
@@ -46,33 +56,57 @@
   }
 
   window.open = (url, target, features) => {
+    if (!isMediaRoute()) return originalOpen(url, target, features);
     const replacement = protectedUrl(url);
     return originalOpen(replacement || url, target, features);
   };
 
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      if (mutation.type === 'attributes') {
-        rewriteAttribute(mutation.target, mutation.attributeName || '');
-        continue;
-      }
-
-      for (const addedNode of mutation.addedNodes) rewriteNode(addedNode);
-    }
-  });
-
-  function start() {
-    rewriteNode(document.documentElement);
-    observer.observe(document.documentElement, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ['src', 'href', 'poster'],
-    });
+  function disconnectObserver() {
+    if (!observer) return;
+    observer.disconnect();
+    observer = null;
   }
 
-  if (document.documentElement) start();
-  else document.addEventListener('DOMContentLoaded', start, { once: true });
+  function activate() {
+    if (!isMediaRoute()) {
+      disconnectObserver();
+      return;
+    }
 
-  document.addEventListener('astro:page-load', () => rewriteNode(document.documentElement));
+    rewriteNode(document.documentElement);
+
+    if (!observer) {
+      observer = new MutationObserver((mutations) => {
+        if (!isMediaRoute()) {
+          disconnectObserver();
+          return;
+        }
+
+        for (const mutation of mutations) {
+          if (mutation.type === 'attributes') {
+            rewriteAttribute(mutation.target, mutation.attributeName || '');
+            continue;
+          }
+
+          for (const addedNode of mutation.addedNodes) rewriteNode(addedNode);
+        }
+      });
+
+      observer.observe(document.documentElement, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['src', 'href', 'poster'],
+      });
+    }
+  }
+
+  function deactivate() {
+    disconnectObserver();
+  }
+
+  window.__OPC_PRIVATE_JOB_MEDIA_RUNTIME__ = { activate, deactivate };
+  document.addEventListener('astro:page-load', activate);
+  document.addEventListener('astro:before-swap', deactivate);
+  activate();
 })();

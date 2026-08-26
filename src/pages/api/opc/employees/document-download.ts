@@ -27,10 +27,10 @@ export const GET: APIRoute = async ({ request, locals, cookies }) => {
       return jsonResponse({ success: false, error: 'Dokument-ID fehlt.' }, 400);
     }
 
-    const { supabase } = await requireEmployeeHrAccess({ request, locals, cookies });
+    const { supabase, access } = await requireEmployeeHrAccess({ request, locals, cookies });
     const { data: document, error } = await supabase
       .from('opc_employee_documents')
-      .select('id,employee_id,storage_bucket,storage_path,file_name,title,mime_type')
+      .select('id,employee_id,access_scope,storage_bucket,storage_path,file_name,title,mime_type')
       .eq('id', documentId)
       .maybeSingle();
 
@@ -39,6 +39,13 @@ export const GET: APIRoute = async ({ request, locals, cookies }) => {
     }
     if (!document) {
       return jsonResponse({ success: false, error: 'Dokument wurde nicht gefunden.' }, 404);
+    }
+
+    if (String(document.access_scope || '').toLowerCase() === 'payroll_owner' && !access.isOwner) {
+      return jsonResponse(
+        { success: false, error: 'Dieses Dokument ist nur für Owner freigegeben.' },
+        403,
+      );
     }
 
     const bucket = cleanText(document.storage_bucket) || EMPLOYEE_DOCUMENT_BUCKET;
