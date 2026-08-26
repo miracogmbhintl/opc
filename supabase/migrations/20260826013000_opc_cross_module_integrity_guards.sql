@@ -215,84 +215,70 @@ before insert or update of user_id, job_id, clock_out_at, status
 on public.opc_employee_time_entries
 for each row execute function public.opc_guard_single_open_general_shift();
 
--- 6. Keep legacy user_profiles role aligned with canonical staff role.
-create or replace function public.opc_staff_role_to_legacy_role(p_role text)
-returns text
-language sql
-immutable
-as $$
-  select case lower(coalesce(p_role, ''))
-    when 'owner' then 'owner'
-    when 'inhaber' then 'owner'
-    when 'admin' then 'admin'
-    when 'administrator' then 'admin'
-    when 'dispatch' then 'dispatch'
-    when 'dispatcher' then 'dispatch'
-    when 'disposition' then 'dispatch'
-    else 'employee'
-  end;
-$$;
+-- 6. user_profiles is a VIEW in the live schema, not a writable legacy table.
+-- Rebuild it from the canonical opc_staff_roles source and stop classifying normal
+-- employees as "client". Dispatch remains legacy-admin compatible; client users
+-- are represented by opc_client_users and therefore do not belong in this view.
+create or replace view public.user_profiles as
+select
+  sr.user_id as id,
+  coalesce(sr.email, u.email::text) as email,
+  coalesce(sr.display_name, u.email::text, 'Orange Pro Clean User'::text) as name,
+  coalesce(sr.display_name, u.email::text, 'Orange Pro Clean User'::text) as full_name,
+  case
+    when lower(coalesce(sr.role, '')) in ('owner', 'inhaber') then 'owner'::text
+    when lower(coalesce(sr.role, '')) in ('admin', 'administrator', 'dispatch', 'dispatcher', 'disposition') then 'admin'::text
+    else 'employee'::text
+  end as role,
+  'Orange Pro Clean GmbH'::text as company,
+  sr.phone_raw as phone,
+  null::text as avatar_url,
+  sr.created_at,
+  sr.updated_at,
+  sr.id as opc_staff_role_id,
+  sr.role as opc_staff_role,
+  sr.status as opc_status,
+  sr.can_access_portal
+from public.opc_staff_roles sr
+left join auth.users u on u.id = sr.user_id
+where sr.user_id is not null
+  and sr.status = 'active'
+  and sr.can_access_portal = true
+  and sr.user_id = auth.uid();
 
-create or replace function public.opc_sync_legacy_profile_from_staff_role()
+-- 7. A Supabase Auth identity that is still active OPC staff must never be
+-- relabelled as a client account by e-mail collision during client-portal setup.
+create or replace function public.opc_guard_active_staff_auth_client_collision()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, pg_temp
+set search_path = public, auth, pg_temp
 as $$
-declare
-  v_role text;
 begin
-  if new.user_id is null then return new; end if;
-  v_role := public.opc_staff_role_to_legacy_role(new.role);
-
-  update public.user_profiles
-  set role = v_role,
-      updated_at = now()
-  where id = new.user_id
-    and role is distinct from v_role;
-
-  return new;
-end
-$$;
-
-drop trigger if exists trg_opc_sync_legacy_profile_from_staff_role on public.opc_staff_roles;
-create trigger trg_opc_sync_legacy_profile_from_staff_role
-after insert or update of user_id, role
-on public.opc_staff_roles
-for each row execute function public.opc_sync_legacy_profile_from_staff_role();
-
--- 7. The legacy profile may still be written by old application code after the
--- canonical staff row is saved. Override that stale write at the table itself.
-create or replace function public.opc_guard_legacy_profile_role_from_staff()
-returns trigger
-language plpgsql
-security definer
-set search_path = public, pg_temp
-as $$
-declare
-  v_staff_role text;
-begin
-  select s.role
-    into v_staff_role
-  from public.opc_staff_roles s
-  where s.user_id = new.id
-    and s.status in ('active', 'aktiv', 'enabled')
-    and coalesce(s.can_access_portal, true) = true
-  order by s.created_at desc nulls last
-  limit 1;
-
-  if v_staff_role is not null then
-    new.role := public.opc_staff_role_to_legacy_role(v_staff_role);
+  if exists (
+    select 1
+    from public.opc_staff_roles s
+    where s.user_id = new.id
+      and s.status in ('active', 'aktiv', 'enabled')
+      and coalesce(s.can_access_portal, true) = true
+  ) and (
+    lower(coalesce(new.raw_app_meta_data ->> 'opc_role', '')) = 'client'
+    or lower(coalesce(new.raw_user_meta_data ->> 'opc_role', '')) = 'client'
+    or new.raw_app_meta_data ? 'opc_client_id'
+    or new.raw_user_meta_data ? 'opc_client_id'
+  ) then
+    raise exception 'Active OPC staff account cannot be linked as a client portal user.'
+      using errcode = '23514';
   end if;
 
   return new;
 end
 $$;
 
-drop trigger if exists trg_opc_guard_legacy_profile_role_from_staff on public.user_profiles;
-create trigger trg_opc_guard_legacy_profile_role_from_staff
-before insert or update of role on public.user_profiles
-for each row execute function public.opc_guard_legacy_profile_role_from_staff();
+drop trigger if exists trg_opc_guard_active_staff_auth_client_collision on auth.users;
+create trigger trg_opc_guard_active_staff_auth_client_collision
+before update of raw_app_meta_data, raw_user_meta_data on auth.users
+for each row execute function public.opc_guard_active_staff_auth_client_collision();
 
 -- 8. payroll_in_scope is payroll governance, not generic HR editing. The HR API
 -- writes updated_by, which lets the DB verify that the actor is an Owner.
