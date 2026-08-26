@@ -199,4 +199,110 @@ create trigger trg_opc_guard_single_open_general_shift
   on public.opc_employee_time_entries
   for each row execute function public.opc_guard_single_open_general_shift();
 
+-- user_profiles is a compatibility mirror only, but several older screens still
+-- read it. Never collapse employee/dispatch to client. Abort the migration if an
+-- old role CHECK cannot represent the canonical staff roles; that is safer than
+-- installing a half-working synchronizer.
+do $$
+declare
+  v_role_checks text;
+begin
+  if to_regclass('public.user_profiles') is null then
+    raise exception 'Required compatibility table public.user_profiles is missing.';
+  end if;
+
+  select string_agg(pg_get_constraintdef(c.oid, true), ' ')
+  into v_role_checks
+  from pg_constraint c
+  where c.conrelid = 'public.user_profiles'::regclass
+    and c.contype = 'c'
+    and pg_get_constraintdef(c.oid, true) ilike '%role%';
+
+  if v_role_checks is not null and (
+    v_role_checks not ilike '%employee%'
+    or v_role_checks not ilike '%dispatch%'
+  ) then
+    raise exception 'user_profiles.role CHECK must allow employee and dispatch before staff-role synchronization can be installed: %', v_role_checks;
+  end if;
+end
+$$;
+
+create or replace function public.opc_sync_legacy_profile_staff_role()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_role text;
+  v_has_is_owner boolean;
+  v_has_is_admin boolean;
+begin
+  if new.user_id is null then
+    return new;
+  end if;
+
+  v_role := lower(trim(coalesce(new.role, 'employee')));
+  if v_role in ('inhaber','godmode') then v_role := 'owner'; end if;
+  if v_role = 'administrator' then v_role := 'admin'; end if;
+  if v_role in ('dispatcher','disposition') then v_role := 'dispatch'; end if;
+  if v_role in ('mitarbeiter','staff') then v_role := 'employee'; end if;
+
+  if v_role not in ('owner','admin','dispatch','employee') then
+    v_role := 'employee';
+  end if;
+
+  update public.user_profiles
+  set role = v_role
+  where id = new.user_id;
+
+  select exists(
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'user_profiles' and column_name = 'is_owner'
+  ) into v_has_is_owner;
+  select exists(
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'user_profiles' and column_name = 'is_admin'
+  ) into v_has_is_admin;
+
+  if v_has_is_owner then
+    execute 'update public.user_profiles set is_owner = $1 where id = $2'
+      using (v_role = 'owner'), new.user_id;
+  end if;
+  if v_has_is_admin then
+    execute 'update public.user_profiles set is_admin = $1 where id = $2'
+      using (v_role = 'admin'), new.user_id;
+  end if;
+
+  return new;
+end
+$$;
+
+drop trigger if exists trg_opc_sync_legacy_profile_staff_role
+  on public.opc_staff_roles;
+create trigger trg_opc_sync_legacy_profile_staff_role
+  after insert or update of user_id, role
+  on public.opc_staff_roles
+  for each row execute function public.opc_sync_legacy_profile_staff_role();
+
+-- Repair existing compatibility rows only where an active staff role already
+-- exists. This does not create users or change staff permissions.
+update public.user_profiles p
+set role = case
+  when lower(trim(s.role)) in ('owner','inhaber','godmode') then 'owner'
+  when lower(trim(s.role)) in ('admin','administrator') then 'admin'
+  when lower(trim(s.role)) in ('dispatch','dispatcher','disposition') then 'dispatch'
+  else 'employee'
+end
+from public.opc_staff_roles s
+where s.user_id = p.id
+  and s.status in ('active','aktiv','enabled')
+  and s.can_access_portal = true
+  and p.role is distinct from case
+    when lower(trim(s.role)) in ('owner','inhaber','godmode') then 'owner'
+    when lower(trim(s.role)) in ('admin','administrator') then 'admin'
+    when lower(trim(s.role)) in ('dispatch','dispatcher','disposition') then 'dispatch'
+    else 'employee'
+  end;
+
 commit;
