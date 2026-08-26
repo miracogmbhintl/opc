@@ -7,35 +7,35 @@ import '../styles/miraka-dashboard.css';
 <!DOCTYPE html>
 <html transition:name="root" transition:animate="none" lang="de">
 <head>
-    <script is:inline>
+  <script is:inline>
     (() => {
-      if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
-
       window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
 
-      const noMotionTransition = (callback) => {
-        let callbackResult;
+      const noMotionTransition = (input) => {
+        const update =
+          typeof input === 'function'
+            ? input
+            : input && typeof input.update === 'function'
+              ? input.update
+              : null;
 
+        let updateCallbackDone;
         try {
-          callbackResult = typeof callback === 'function' ? callback() : undefined;
+          updateCallbackDone = Promise.resolve(update ? update() : undefined);
         } catch (error) {
-          const rejected = Promise.reject(error);
-
-          return {
-            ready: rejected,
-            updateCallbackDone: rejected,
-            finished: rejected,
-            skipTransition() {},
-          };
+          updateCallbackDone = Promise.reject(error);
         }
 
-        const done = Promise.resolve(callbackResult);
-
         return {
-          ready: done,
-          updateCallbackDone: done,
-          finished: done,
+          ready: Promise.resolve(),
+          updateCallbackDone,
+          finished: updateCallbackDone.then(() => undefined),
           skipTransition() {},
+          types: new Set(
+            input && typeof input === 'object' && Array.isArray(input.types)
+              ? input.types
+              : []
+          ),
         };
       };
 
@@ -50,8 +50,7 @@ import '../styles/miraka-dashboard.css';
       }
     })();
   </script>
-  
-  <!-- Orange Pro Clean Web App / PWA -->
+
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
@@ -63,7 +62,7 @@ import '../styles/miraka-dashboard.css';
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta charset="UTF-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Zeiterfassung - Orange Pro Clean</title>
   <link
