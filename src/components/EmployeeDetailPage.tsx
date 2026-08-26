@@ -227,7 +227,15 @@ function initials(name: string) {
 
 function employeeName(detail: JsonRow | null) {
   const employee = detail?.employee || {};
-  return employee.preferred_name || [employee.legal_first_name, employee.legal_last_name].filter(Boolean).join(' ') || 'Mitarbeiter';
+  const legalName = [employee.legal_first_name, employee.legal_last_name]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+
+  // Payroll, contracts and HR master data must use one canonical identity.
+  // preferred_name remains available separately as a display/nickname field,
+  // but must never silently replace the legal employee identity.
+  return legalName || String(employee.preferred_name || '').trim() || 'Mitarbeiter';
 }
 
 function makeHourlyRateDraft(detail: JsonRow | null): HourlyRateDraft {
@@ -500,6 +508,24 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         ...extra,
       };
       const response = await apiRequest<ApiPayload>(`/api/opc/employees/${employeeId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+
+      const persistedEmployee = safeObject(response.detail?.employee);
+      const expectedFirstName = String(draft.legal_first_name || '').trim();
+      const expectedLastName = String(draft.legal_last_name || '').trim();
+      const persistedFirstName = String(persistedEmployee.legal_first_name || '').trim();
+      const persistedLastName = String(persistedEmployee.legal_last_name || '').trim();
+
+      if (
+        persistedFirstName !== expectedFirstName ||
+        persistedLastName !== expectedLastName
+      ) {
+        throw new Error(
+          `Mitarbeitername wurde nicht vollständig gespeichert. ` +
+          `Erwartet: ${expectedFirstName} ${expectedLastName}. ` +
+          `Gespeichert: ${persistedFirstName} ${persistedLastName}.`
+        );
+      }
+
       setDetail(response.detail || detail);
       setDraft(makeDraft(response.detail || detail));
       setDayRules(makeDayRules(response.detail || detail));
