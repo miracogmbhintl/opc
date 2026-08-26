@@ -1,27 +1,33 @@
-import { useState } from 'react';
-import EmployeeAdminControl from './EmployeeAdminControl';
+import { useEffect } from 'react';
 import EmployeeDetailPage from './EmployeeDetailPage';
 
-type Props = {
+type EmployeeDetailAdminWrapperProps = {
   employeeId: string;
 };
 
-export default function EmployeeDetailAdminWrapper({ employeeId }: Props) {
-  const [version, setVersion] = useState(0);
+export default function EmployeeDetailAdminWrapper({
+  employeeId,
+}: EmployeeDetailAdminWrapperProps) {
+  useEffect(() => {
+    const marker = '__opcPayrollCompatBridgeScriptLoaded__';
+    const scopedWindow = window as Window & Record<string, unknown>;
 
-  return (
-    <div className="opc-employee-admin-wrapper">
-      <EmployeeAdminControl employeeId={employeeId} onSaved={() => setVersion((value) => value + 1)} />
-      <EmployeeDetailPage key={`${employeeId}:${version}`} employeeId={employeeId} />
-      <style>{`
-        .opc-employee-admin-wrapper > .opc-admin-control {
-          position: relative;
-          z-index: 4;
-        }
-        .opc-employee-admin-wrapper section:has(.opc-note-form) {
-          display: none !important;
-        }
-      `}</style>
-    </div>
-  );
+    if (scopedWindow[marker]) return;
+    scopedWindow[marker] = true;
+
+    const script = document.createElement('script');
+    script.src = '/opc-payroll-compat-bridge.js';
+    script.async = false;
+    script.dataset.opcPayrollCompatBridge = 'true';
+
+    document.head.appendChild(script);
+  }, []);
+
+  // EmployeeDetailPage is the canonical OPC employee UI.
+  //
+  // The old wrapper rendered a second legacy employee editor before this component,
+  // outside MirakaDashboardShell. That produced a second editor underneath
+  // the fixed sidebar and caused employee data to be edited through two
+  // competing save paths.
+  return <EmployeeDetailPage employeeId={employeeId} />;
 }

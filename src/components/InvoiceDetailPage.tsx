@@ -889,16 +889,87 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         metadata: getMetadata(item),
       }));
 
-      const { data: saved, error } = await supabase.rpc('opc_save_invoice_atomic', {
+      const atomicResponse = await supabase.rpc('opc_save_invoice_atomic', {
         p_invoice_id: invoice.id,
         p_invoice: invoicePayload,
         p_items: itemPayloads,
       });
-      if (error) throw error;
-      if (!saved?.invoice?.id) throw new Error('Die Rechnung wurde nicht vollständig gespeichert.');
 
-      setInvoice(saved.invoice);
-      setItems(Array.isArray(saved.items) ? saved.items : items);
+      const atomicMissing =
+        atomicResponse.error &&
+        (
+          /opc_save_invoice_atomic/i.test(String(atomicResponse.error.message || '')) &&
+          /schema cache|could not find|function/i.test(String(atomicResponse.error.message || ''))
+        );
+
+      if (atomicResponse.error && !atomicMissing) {
+        throw atomicResponse.error;
+      }
+
+      if (atomicMissing) {
+        console.warn(
+          '[finance] opc_save_invoice_atomic is not installed yet; using compatibility save.'
+        );
+
+        const { data: savedInvoice, error: invoiceError } = await supabase
+          .from('opc_invoices')
+          .update({
+            ...invoicePayload,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', invoice.id)
+          .select('*')
+          .single();
+
+        if (invoiceError) throw invoiceError;
+
+        for (const [index, item] of items.entries()) {
+          const itemPayload = {
+            invoice_id: invoice.id,
+            quote_item_id: item.quote_item_id || null,
+            sort_order: index + 1,
+            title: clean(item.title) || 'Position',
+            description: item.description || null,
+            quantity: toNumber(item.quantity || 1) || 1,
+            unit: item.unit || 'pauschal',
+            unit_price_chf: roundMoney(toNumber(item.unit_price_chf)),
+            discount_chf: roundMoney(toNumber(item.discount_chf)),
+            tax_rate: roundMoney(toNumber(item.tax_rate || totals.taxRate) || 8.1),
+            subtotal_chf: roundMoney(toNumber(item.subtotal_chf)),
+            tax_chf: roundMoney(toNumber(item.tax_chf)),
+            total_chf: roundMoney(toNumber(item.total_chf)),
+            updated_at: new Date().toISOString(),
+            metadata: getMetadata(item),
+          };
+
+          if (String(item.id).startsWith('local-')) {
+            const { error: insertError } = await supabase
+              .from('opc_invoice_items')
+              .insert(itemPayload);
+
+            if (insertError) throw insertError;
+          } else {
+            const { error: updateError } = await supabase
+              .from('opc_invoice_items')
+              .update(itemPayload)
+              .eq('id', item.id);
+
+            if (updateError) throw updateError;
+          }
+        }
+
+        setInvoice(savedInvoice || invoice);
+        await loadInvoice({ clearMessages: false });
+      } else {
+        const saved = atomicResponse.data;
+
+        if (!saved?.invoice?.id) {
+          throw new Error('Die Rechnung wurde nicht vollständig gespeichert.');
+        }
+
+        setInvoice(saved.invoice);
+        setItems(Array.isArray(saved.items) ? saved.items : items);
+      }
       const savedTime = new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);

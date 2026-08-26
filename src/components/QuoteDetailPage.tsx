@@ -645,18 +645,151 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         previous_status: quote.status || null,
         new_status: status,
       };
-      const { data: saved, error } = await supabase.rpc('opc_save_quote_atomic', {
+      const atomicResponse = await supabase.rpc('opc_save_quote_atomic', {
         p_quote_id: quote.id,
         p_quote: quotePayload,
         p_items: itemPayloads,
         p_event: event,
       });
-      if (error) throw error;
-      if (!saved?.quote?.id) throw new Error('Die Offerte wurde nicht vollständig gespeichert.');
 
-      const nextQuote = normalizeQuoteAfterLoad(saved.quote);
+      const atomicMissing =
+        atomicResponse.error &&
+        (
+          /opc_save_quote_atomic/i.test(String(atomicResponse.error.message || '')) &&
+          /schema cache|could not find|function/i.test(String(atomicResponse.error.message || ''))
+        );
+
+      if (atomicResponse.error && !atomicMissing) {
+        throw atomicResponse.error;
+      }
+
+      let nextQuote;
+
+      if (atomicMissing) {
+        console.warn(
+          '[finance] opc_save_quote_atomic is not installed yet; using compatibility save.'
+        );
+
+        const { data: savedQuote, error: quoteError } = await supabase
+          .from('opc_quotes')
+          .update({
+            ...quotePayload,
+            updated_at: now,
+          })
+          .eq('id', quote.id)
+          .select('*')
+          .single();
+
+        if (quoteError) throw quoteError;
+
+        const preparedItems = items.map((item, index) => {
+          const payload = {
+            quote_id: quote.id,
+            sort_order: index + 1,
+            item_type: item.item_type || 'service',
+            title: clean(item.title) || 'Position',
+            description: item.description || null,
+            quantity: toNumber(item.quantity || 1) || 1,
+            unit: item.unit || 'pauschal',
+            unit_price_chf: roundMoney(toNumber(item.unit_price_chf)),
+            discount_chf: roundMoney(toNumber(item.discount_chf)),
+            tax_rate: roundMoney(toNumber(item.tax_rate || totals.taxRate) || 8.1),
+            subtotal_chf: roundMoney(toNumber(item.subtotal_chf)),
+            tax_chf: roundMoney(toNumber(item.tax_chf)),
+            total_chf: roundMoney(toNumber(item.total_chf)),
+            updated_at: now,
+            metadata: {
+              ...getMetadata(item),
+              input_price_mode: priceInputMode,
+            },
+          };
+
+          return {
+            item,
+            payload,
+            isLocal:
+              Boolean(item.isLocal) ||
+              String(item.id || '').startsWith('local-'),
+          };
+        });
+
+        const existingPayloads = preparedItems
+          .filter((entry) => !entry.isLocal)
+          .map((entry) => ({
+            id: entry.item.id,
+            ...entry.payload,
+          }));
+
+        const newPayloads = preparedItems
+          .filter((entry) => entry.isLocal)
+          .map((entry) => entry.payload);
+
+        const existingRequest = existingPayloads.length
+          ? supabase
+              .from('opc_quote_items')
+              .upsert(existingPayloads, { onConflict: 'id' })
+              .select('*')
+          : Promise.resolve({ data: [], error: null });
+
+        const newRequest = newPayloads.length
+          ? supabase
+              .from('opc_quote_items')
+              .insert(newPayloads)
+              .select('*')
+          : Promise.resolve({ data: [], error: null });
+
+        const [existingResponse, newResponse] = await Promise.all([
+          existingRequest,
+          newRequest,
+        ]);
+
+        if (existingResponse.error) throw existingResponse.error;
+        if (newResponse.error) throw newResponse.error;
+
+        const savedItems = [
+          ...(existingResponse.data || []),
+          ...(newResponse.data || []),
+        ].sort(
+          (left, right) =>
+            Number(left.sort_order || 0) -
+            Number(right.sort_order || 0)
+        );
+
+        setItems(savedItems);
+
+        nextQuote = normalizeQuoteAfterLoad(
+          savedQuote || {
+            ...quote,
+            ...quotePayload,
+          }
+        );
+
+        const { error: eventError } = await supabase
+          .from('opc_quote_events')
+          .insert({
+            quote_id: quote.id,
+            client_id: quote.client_id,
+            ...event,
+          });
+
+        if (eventError) {
+          console.warn(
+            'Offerten-Ereignis konnte nicht protokolliert werden:',
+            eventError.message
+          );
+        }
+      } else {
+        const saved = atomicResponse.data;
+
+        if (!saved?.quote?.id) {
+          throw new Error('Die Offerte wurde nicht vollständig gespeichert.');
+        }
+
+        nextQuote = normalizeQuoteAfterLoad(saved.quote);
+        setItems(Array.isArray(saved.items) ? saved.items : items);
+      }
+
       setQuote(nextQuote);
-      setItems(Array.isArray(saved.items) ? saved.items : items);
       const savedTime = new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);
@@ -1242,14 +1375,122 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         tax_rate: roundMoney(toNumber(item.tax_rate || totals.taxRate) || 8.1), subtotal_chf: roundMoney(toNumber(item.subtotal_chf)),
         tax_chf: roundMoney(toNumber(item.tax_chf)), total_chf: roundMoney(toNumber(item.total_chf)), metadata: getMetadata(item),
       }));
-      const { data: converted, error } = await supabase.rpc('opc_convert_quote_to_invoice_atomic', {
-        p_quote_id: quote.id,
-        p_invoice: invoicePayload,
-        p_items: invoiceItems,
-      });
-      if (error) throw error;
-      const invoice = converted?.invoice;
-      if (!invoice?.id) throw new Error('Rechnung wurde nicht vollständig aus der Offerte erstellt.');
+      const conversionResponse = await supabase.rpc(
+        'opc_convert_quote_to_invoice_atomic',
+        {
+          p_quote_id: quote.id,
+          p_invoice: invoicePayload,
+          p_items: invoiceItems,
+        },
+      );
+
+      const atomicMissing =
+        conversionResponse.error &&
+        (
+          /opc_convert_quote_to_invoice_atomic/i.test(
+            String(conversionResponse.error.message || '')
+          ) &&
+          /schema cache|could not find|function/i.test(
+            String(conversionResponse.error.message || '')
+          )
+        );
+
+      if (conversionResponse.error && !atomicMissing) {
+        throw conversionResponse.error;
+      }
+
+      let invoice;
+
+      if (atomicMissing) {
+        console.warn(
+          '[finance] opc_convert_quote_to_invoice_atomic is not installed yet; using compatibility conversion.'
+        );
+
+        const { data: fallbackInvoice, error: invoiceError } = await supabase
+          .from('opc_invoices')
+          .insert({
+            quote_id: quote.id,
+            ...invoicePayload,
+          })
+          .select('id, invoice_number')
+          .single();
+
+        if (invoiceError) throw invoiceError;
+
+        invoice = fallbackInvoice;
+
+        if (invoiceItems.length > 0) {
+          const { error: itemsError } = await supabase
+            .from('opc_invoice_items')
+            .insert(
+              invoiceItems.map((item) => ({
+                invoice_id: invoice.id,
+                ...item,
+              })),
+            );
+
+          if (itemsError) {
+            await supabase
+              .from('opc_invoice_items')
+              .delete()
+              .eq('invoice_id', invoice.id);
+
+            await supabase
+              .from('opc_invoices')
+              .delete()
+              .eq('id', invoice.id);
+
+            throw itemsError;
+          }
+        }
+
+        const now = new Date().toISOString();
+
+        const { error: quoteStatusError } = await supabase
+          .from('opc_quotes')
+          .update({
+            status: 'invoiced',
+            invoiced_at: now,
+          })
+          .eq('id', quote.id);
+
+        if (quoteStatusError) {
+          await supabase
+            .from('opc_invoice_items')
+            .delete()
+            .eq('invoice_id', invoice.id);
+
+          await supabase
+            .from('opc_invoices')
+            .delete()
+            .eq('id', invoice.id);
+
+          throw quoteStatusError;
+        }
+
+        await supabase
+          .from('opc_quote_events')
+          .insert({
+            quote_id: quote.id,
+            client_id: quote.client_id,
+            event_type: 'invoice_created',
+            message: `Rechnung ${invoice.invoice_number || ''} erstellt.`,
+            new_status: 'invoiced',
+            metadata: {
+              invoice_id: invoice.id,
+              compatibility_mode: true,
+            },
+          });
+      } else {
+        invoice = conversionResponse.data?.invoice;
+      }
+
+      if (!invoice?.id) {
+        throw new Error(
+          'Rechnung wurde nicht vollständig aus der Offerte erstellt.'
+        );
+      }
+
       window.location.href = `${baseUrl}/rechnung/${invoice.id}`;
     } catch (error: any) {
       setErrorMessage(error?.message || 'Rechnung konnte nicht erstellt werden.');
