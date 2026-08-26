@@ -110,50 +110,40 @@ export const PUT: APIRoute = async ({ request, locals, cookies, params }) => {
       return jsonResponse({ success: false, error: 'Mindestens ein Zeiteintrag gehört nicht zum Mitarbeiter oder ist nicht genehmigt.' }, 400);
     }
 
-    const actorId = access.user.id;
-    const toDelete: string[] = [];
-    const toUpsert: any[] = [];
-    for (const row of rates) {
-      const timeEntryId = cleanText(row.timeEntryId);
-      const amount = asNumber(row.hourlyRateChf);
-      if (!timeEntryId) continue;
-      if (amount === null || amount <= 0) {
-        toDelete.push(timeEntryId);
-        continue;
-      }
-      toUpsert.push({
-        time_entry_id: timeEntryId,
-        employee_id: employeeId,
-        contract_id: cleanText(row.contractId),
-        hourly_rate_chf: Math.round((amount + Number.EPSILON) * 10000) / 10000,
-        rate_source: cleanText(row.rateSource) || 'manual',
-        notes: cleanText(row.notes),
-        metadata: {
-          ...safeObject(row.metadata),
-          source: 'employee_payroll_owner_panel',
-        },
-        created_by: actorId,
-        updated_by: actorId,
-      });
-    }
+    const normalizedRates = rates
+      .map((row) => {
+        const timeEntryId = cleanText(row.timeEntryId);
+        if (!timeEntryId) return null;
+        const amount = asNumber(row.hourlyRateChf);
+        return {
+          time_entry_id: timeEntryId,
+          contract_id: cleanText(row.contractId),
+          hourly_rate_chf:
+            amount === null || amount <= 0
+              ? null
+              : Math.round((amount + Number.EPSILON) * 10000) / 10000,
+          rate_source: cleanText(row.rateSource) || 'manual',
+          notes: cleanText(row.notes),
+          metadata: {
+            ...safeObject(row.metadata),
+            source: 'employee_payroll_owner_panel',
+          },
+        };
+      })
+      .filter(Boolean);
 
-    if (toDelete.length) {
-      const deleteResponse = await supabase
-        .from('opc_time_entry_pay_rates')
-        .delete()
-        .eq('employee_id', employeeId)
-        .in('time_entry_id', toDelete);
-      throwOnError(deleteResponse.error, 'Stundenansätze konnten nicht entfernt werden');
-    }
+    const { data, error } = await supabase.rpc('opc_replace_time_entry_pay_rates_atomic', {
+      p_employee_id: employeeId,
+      p_rates: normalizedRates,
+      p_actor_user_id: access.user.id,
+    });
+    throwOnError(error, 'Stundenansätze konnten nicht atomar gespeichert werden');
 
-    if (toUpsert.length) {
-      const upsertResponse = await supabase
-        .from('opc_time_entry_pay_rates')
-        .upsert(toUpsert, { onConflict: 'time_entry_id' });
-      throwOnError(upsertResponse.error, 'Stundenansätze konnten nicht gespeichert werden');
-    }
-
-    return jsonResponse({ success: true, saved: toUpsert.length, deleted: toDelete.length });
+    return jsonResponse({
+      success: true,
+      saved: Number(data?.saved || 0),
+      deleted: Number(data?.deleted || 0),
+    });
   } catch (error: any) {
     const denied = String(error?.message || '').includes('Payroll access denied');
     return jsonResponse(
