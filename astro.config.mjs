@@ -38,15 +38,16 @@ function injectDevScript(options = {}) {
   };
 }
 
-// OPC_WORKABILITY_VIEW_TRANSITION_COMPAT_V1
-// Several legacy page shells replace document.startViewTransition() to suppress
-// animation. Astro 5 can call startViewTransition({ update, types }); the old shim
-// ignored update(), which changes the URL without swapping the DOM and leaves a
-// blank page. Re-install a compatible no-motion implementation after every page load.
+// OPC_WORKABILITY_VIEW_TRANSITION_COMPAT_V2
+// Legacy page shells replace document.startViewTransition() to suppress motion.
+// Astro 5 can call startViewTransition({ update, types }); the old shim ignored
+// update(), which can change the URL without swapping the DOM and leave a blank page.
+// This repair also forces the primary sidebar/mobile navigation through a normal
+// document load while we remove the legacy shims page-by-page in the larger audit.
 function injectOpcRuntimeSafety() {
   const runtimeScript = String.raw`
     (() => {
-      const install = () => {
+      const installViewTransitionCompatibility = () => {
         if (typeof window === 'undefined' || typeof document === 'undefined') return;
         if (!window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
 
@@ -90,8 +91,43 @@ function injectOpcRuntimeSafety() {
         }
       };
 
-      install();
-      document.addEventListener('astro:page-load', install);
+      const installPrimaryNavigationFallback = () => {
+        if (window.__OPC_PRIMARY_NAV_HARD_RELOAD__) return;
+        window.__OPC_PRIMARY_NAV_HARD_RELOAD__ = true;
+
+        document.addEventListener('click', (event) => {
+          if (event.defaultPrevented || event.button !== 0) return;
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+          const target = event.target instanceof Element ? event.target : null;
+          const link = target?.closest?.('.miraka-sidebar-desktop a[href], .miraka-mobile-nav a[href]');
+          if (!(link instanceof HTMLAnchorElement)) return;
+          if (link.target && link.target !== '_self') return;
+
+          let url;
+          try {
+            url = new URL(link.href, window.location.href);
+          } catch {
+            return;
+          }
+
+          if (url.origin !== window.location.origin) return;
+          const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          const next = `${url.pathname}${url.search}${url.hash}`;
+          if (current === next) {
+            event.preventDefault();
+            return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          window.location.assign(next);
+        }, true);
+      };
+
+      installViewTransitionCompatibility();
+      installPrimaryNavigationFallback();
+      document.addEventListener('astro:page-load', installViewTransitionCompatibility);
     })();
   `;
 
