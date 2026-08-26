@@ -18,7 +18,7 @@ begin
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public'
       and p.prosecdef = true
-      and (p.proname like 'opc\_%' escape '\\' or p.proname = 'create_job_storage_link')
+      and (left(p.proname, 4) = 'opc_' or p.proname = 'create_job_storage_link')
       and p.prosrc ~* '(^|[^a-z])(insert|update|delete|truncate)([^a-z]|$)'
   loop
     execute format('revoke execute on function %s from public, anon', r.signature);
