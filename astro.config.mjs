@@ -112,8 +112,8 @@ function injectOpcRuntimeSafety() {
           }
 
           if (url.origin !== window.location.origin) return;
-          const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-          const next = `${url.pathname}${url.search}${url.hash}`;
+          const current = window.location.pathname + window.location.search + window.location.hash;
+          const next = url.pathname + url.search + url.hash;
           if (current === next) {
             event.preventDefault();
             return;
