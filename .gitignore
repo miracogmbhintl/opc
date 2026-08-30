@@ -206,3 +206,4 @@ _besichtigung_layout_discovery.sh
 _patch_*.sh
 *_layout_discovery_*/
 .env.development
+supabase/.temp/
