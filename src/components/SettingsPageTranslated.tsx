@@ -25,6 +25,7 @@ import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { readOpcPageCache, writeOpcPageCache } from '../lib/opc-page-cache';
 import PortalSkeleton from './shared/PortalSkeleton';
+import OwnerDataExportButton from './OwnerDataExportButton';
 
 const SETTINGS_PAGE_CACHE_KEY = 'opc:page-cache:settings-profile';
 
@@ -1852,6 +1853,33 @@ export default function SettingsPageTranslated({ role }: SettingsPageProps) {
               }
               label="Dispatch-Benachrichtigungen"
               description="Operative Alerts für neue Einsätze, Statuswechsel und Mitarbeiterantworten."
+            />
+          </div>
+
+          <div
+            style={{
+              marginTop: '20px',
+              padding: '16px',
+              borderRadius: '18px',
+              border: `1px solid ${BRAND.border}`,
+              background: '#FAFAFA',
+            }}
+          >
+            <div
+              style={{
+                marginBottom: '10px',
+                fontSize: '15px',
+                fontWeight: 850,
+                color: BRAND.text,
+              }}
+            >
+              Unternehmensdaten exportieren
+            </div>
+
+            <OwnerDataExportButton
+              scope="all"
+              label="Gesamten Datenbestand per E-Mail anfordern"
+              description="Der aktuelle Unternehmensdatenbestand wird als aufbereitete CSV-Dateien ausschließlich an die E-Mail-Adresse Ihres authentifizierten Owner-Kontos gesendet."
             />
           </div>
 

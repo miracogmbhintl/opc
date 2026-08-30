@@ -16,6 +16,10 @@ import {
   todayIsoDate,
   yesterdayIsoDate,
 } from '../../../../lib/opc-employee-api';
+import {
+  isMaskedAhvNumber,
+  maskAhvNumber,
+} from '../../../../lib/opc-sensitive-data';
 
 export const prerender = false;
 
@@ -278,7 +282,10 @@ async function loadEmployeeDetail({
     : null;
 
   return {
-    employee,
+    employee: {
+      ...employee,
+      ahv_number: maskAhvNumber(employee.ahv_number) || null,
+    },
     staff_role: staffResponse.data || null,
     legal_entity: entityResponse.data || null,
     current_address: currentRow(addressResponse.data || []),
@@ -1011,6 +1018,13 @@ export const PATCH: APIRoute = async ({ request, locals, cookies, params }) => {
       });
     }
 
+    const requestedAhvNumber = cleanText(body.ahv_number);
+
+    const ahvNumberForStorage =
+      requestedAhvNumber && !isMaskedAhvNumber(requestedAhvNumber)
+        ? requestedAhvNumber
+        : employee.ahv_number;
+
     const firstName = cleanText(body.legal_first_name) || employee.legal_first_name;
     const lastName = cleanText(body.legal_last_name) || employee.legal_last_name;
     if (!firstName || !lastName) {
@@ -1056,7 +1070,7 @@ export const PATCH: APIRoute = async ({ request, locals, cookies, params }) => {
         civil_status: cleanText(body.civil_status),
         birth_place: cleanText(body.birth_place),
         citizenship_place: cleanText(body.citizenship_place),
-        ahv_number: cleanText(body.ahv_number),
+        ahv_number: ahvNumberForStorage,
         private_email: normalizeEmail(body.private_email),
         business_email: normalizeEmail(body.business_email),
         phone_raw: cleanText(body.phone_raw),

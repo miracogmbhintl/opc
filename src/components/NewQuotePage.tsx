@@ -506,16 +506,8 @@ export default function NewQuotePage() {
         },
       };
 
-      const { data: quote, error: quoteError } = await supabase
-        .from('opc_quotes')
-        .insert(quotePayload)
-        .select('id, quote_number')
-        .single();
-
-      if (quoteError) throw quoteError;
-
+      // OPC_ATOMIC_CREATE_COMPAT_20260827_QUOTE
       const itemPayload = {
-        quote_id: quote.id,
         sort_order: 1,
         item_type: 'service',
         title: clean(form.itemTitle),
@@ -534,8 +526,79 @@ export default function NewQuotePage() {
         },
       };
 
-      const { error: itemError } = await supabase.from('opc_quote_items').insert(itemPayload);
-      if (itemError) throw itemError;
+      let quote: any = null;
+
+      const atomicResponse = await supabase.rpc(
+        'opc_create_quote_atomic',
+        {
+          p_quote: quotePayload,
+          p_items: [itemPayload],
+        },
+      );
+
+      const atomicMissing =
+        atomicResponse.error &&
+        /opc_create_quote_atomic/i.test(
+          String(atomicResponse.error.message || '')
+        ) &&
+        /schema cache|could not find|function/i.test(
+          String(atomicResponse.error.message || '')
+        );
+
+      if (atomicResponse.error && !atomicMissing) {
+        throw atomicResponse.error;
+      }
+
+      if (!atomicMissing) {
+        quote = atomicResponse.data?.quote || null;
+      } else {
+        console.warn(
+          '[finance] opc_create_quote_atomic is not installed yet; ' +
+          'using compatibility creation.'
+        );
+
+        const {
+          data: fallbackQuote,
+          error: quoteError,
+        } = await supabase
+          .from('opc_quotes')
+          .insert(quotePayload)
+          .select('id, quote_number')
+          .single();
+
+        if (quoteError) throw quoteError;
+
+        quote = fallbackQuote;
+
+        const { error: itemError } = await supabase
+          .from('opc_quote_items')
+          .insert({
+            quote_id: quote.id,
+            ...itemPayload,
+          });
+
+        if (itemError) {
+          const { error: cleanupError } = await supabase
+            .from('opc_quotes')
+            .delete()
+            .eq('id', quote.id);
+
+          if (cleanupError) {
+            console.error(
+              '[finance] Failed to clean up incomplete quote:',
+              cleanupError,
+            );
+          }
+
+          throw itemError;
+        }
+      }
+
+      if (!quote?.id) {
+        throw new Error(
+          'Offerte wurde nicht vollständig erstellt.'
+        );
+      }
 
       setSuccessMessage('Offerte wurde erstellt.');
       window.location.href = `${baseUrl}/offerte/${quote.id}`;

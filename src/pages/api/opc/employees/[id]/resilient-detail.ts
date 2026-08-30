@@ -6,6 +6,7 @@ import {
   requireEmployeeHrAccess,
   safeObject,
 } from '../../../../../lib/opc-employee-api';
+import { maskAhvNumber } from '../../../../../lib/opc-sensitive-data';
 
 export const prerender = false;
 
@@ -258,7 +259,10 @@ export const GET: APIRoute = async ({ request, locals, cookies, params }) => {
       }));
 
     const detail = {
-      employee,
+      employee: {
+        ...employee,
+        ahv_number: maskAhvNumber(employee.ahv_number) || null,
+      },
       staff_role: staffRole,
       legal_entity: legalEntity,
       current_address: currentRow(addresses),

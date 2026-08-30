@@ -86,6 +86,7 @@ type StaffRole = {
   can_manage_employees?: boolean | null;
   can_manage_finance?: boolean | null;
   can_view_all_jobs?: boolean | null;
+  can_manage_time_entries?: boolean | null;
 };
 
 type TimeEntry = {
@@ -108,6 +109,13 @@ type TimeEntry = {
   rejected_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+type TimeEditDraft = {
+  clockIn: string;
+  clockOut: string;
+  breakMinutes: string;
+  reason: string;
 };
 
 type TeamPresence = {
@@ -175,10 +183,7 @@ function isManagerStaff(staff: StaffRole | null) {
 
   return (
     isManagerText(staff.role) ||
-    staff.can_manage_reports === true ||
-    staff.can_manage_employees === true ||
-    staff.can_manage_finance === true ||
-    staff.can_view_all_jobs === true
+    staff.can_manage_time_entries === true
   );
 }
 
@@ -293,6 +298,34 @@ function liveMinutesFromEntry(entry: TimeEntry | null) {
     Math.floor((now - start) / 60000) -
       Number(entry.break_minutes || 0) -
       activeBreakMinutes
+  );
+}
+
+function zurichDateTimeInput(value?: string | null) {
+  if (!value) return '';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Zurich',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+
+  const getPart = (type: string) =>
+    parts.find((part) => part.type === type)?.value || '';
+
+  return (
+    `${getPart('year')}-${getPart('month')}-${getPart('day')}` +
+    `T${getPart('hour')}:${getPart('minute')}`
   );
 }
 
@@ -440,6 +473,8 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
   const [entries, setEntries] = useState<TimeEntry[]>([]);
   const [month, setMonth] = useState(currentMonthValue());
   const [reviewNote, setReviewNote] = useState('');
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<TimeEditDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
@@ -648,6 +683,96 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
     setEntries((data || []) as TimeEntry[]);
   }
 
+  function beginEntryCorrection(entry: TimeEntry) {
+    setEditingEntryId(entry.id);
+
+    setEditDraft({
+      clockIn: zurichDateTimeInput(entry.clock_in_at),
+      clockOut: zurichDateTimeInput(entry.clock_out_at),
+      breakMinutes: String(
+        Math.max(0, Number(entry.break_minutes || 0))
+      ),
+      reason: '',
+    });
+
+    setErrorMessage('');
+    setSuccessMessage('');
+  }
+
+  function cancelEntryCorrection() {
+    setEditingEntryId(null);
+    setEditDraft(null);
+  }
+
+  async function saveEntryCorrection(entryId: string) {
+    if (!editDraft) return;
+
+    if (!editDraft.clockIn || !editDraft.clockOut) {
+      setErrorMessage(
+        'Start- und Endzeit sind erforderlich.'
+      );
+      return;
+    }
+
+    if (!editDraft.reason.trim()) {
+      setErrorMessage(
+        'Bitte einen Korrekturgrund angeben.'
+      );
+      return;
+    }
+
+    const breakMinutes = Number(
+      editDraft.breakMinutes || 0
+    );
+
+    if (
+      !Number.isFinite(breakMinutes) ||
+      breakMinutes < 0
+    ) {
+      setErrorMessage(
+        'Pausenzeit ist ungültig.'
+      );
+      return;
+    }
+
+    setSaving(`correct-${entryId}`);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      const { error } = await supabase.rpc(
+        'opc_correct_employee_time_entry',
+        {
+          p_time_entry_id: entryId,
+          p_clock_in_local: editDraft.clockIn,
+          p_clock_out_local: editDraft.clockOut,
+          p_break_minutes: Math.round(breakMinutes),
+          p_dispatch_note:
+            reviewNote.trim() || null,
+          p_reason: editDraft.reason.trim(),
+        }
+      );
+
+      if (error) throw error;
+
+      setEditingEntryId(null);
+      setEditDraft(null);
+
+      setSuccessMessage(
+        'Zeiteintrag korrigiert und erneut zur Freigabe eingereicht.'
+      );
+
+      await loadAll();
+    } catch (error: any) {
+      setErrorMessage(
+        error?.message ||
+          'Zeiteintrag konnte nicht korrigiert werden.'
+      );
+    } finally {
+      setSaving(null);
+    }
+  }
+
   async function approveEntry(entryId: string) {
     setSaving(`approve-${entryId}`);
     setErrorMessage('');
@@ -817,7 +942,17 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
           <div style={entryCardsWrapStyle}>
             {entries.map((entry) => {
               const total = entry.id === activeEntry?.id ? liveMinutesFromEntry(entry) : Number(entry.total_minutes || 0);
-              const isSubmitted = normalize(entry.status) === 'submitted';
+              const isSubmitted =
+                normalize(entry.status) === 'submitted';
+
+              const isCorrectable =
+                ['submitted', 'rejected', 'corrected'].includes(
+                  normalize(entry.status)
+                );
+
+              const isEditing =
+                editingEntryId === entry.id &&
+                editDraft !== null;
 
               return (
                 <article key={entry.id} className="opc-entry-card" style={entryCardStyle}>
@@ -838,6 +973,266 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
                     <InfoBlock label="Start" value={formatTime(entry.clock_in_at)} />
                     <InfoBlock label="Ende" value={formatTime(entry.clock_out_at)} />
                   </div>
+
+                  {canManage && isCorrectable && (
+                    <div
+                      style={{
+                        marginTop: 14,
+                        display: 'grid',
+                        gap: 10,
+                      }}
+                    >
+                      {!isEditing ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            beginEntryCorrection(entry)
+                          }
+                          style={{
+                            minHeight: 38,
+                            padding: '0 13px',
+                            borderRadius: 10,
+                            border:
+                              `1px solid ${OPC_BRAND.borderStrong}`,
+                            background: '#FFFFFF',
+                            color: OPC_BRAND.text,
+                            fontSize: 12,
+                            fontWeight: 780,
+                            fontFamily: OPC_PAGE_FONT,
+                            cursor: 'pointer',
+                            justifySelf: 'start',
+                          }}
+                        >
+                          Zeit korrigieren
+                        </button>
+                      ) : (
+                        <div
+                          style={{
+                            border:
+                              `1px solid ${OPC_BRAND.border}`,
+                            borderRadius: 14,
+                            background: '#FAFAFA',
+                            padding: 14,
+                            display: 'grid',
+                            gap: 12,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 820,
+                              color: OPC_BRAND.text,
+                            }}
+                          >
+                            Zeiteintrag korrigieren
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns:
+                                'repeat(3, minmax(0, 1fr))',
+                              gap: 10,
+                            }}
+                          >
+                            <label
+                              style={{
+                                display: 'grid',
+                                gap: 6,
+                                fontSize: 11,
+                                fontWeight: 760,
+                                color: OPC_BRAND.muted,
+                              }}
+                            >
+                              Start
+                              <input
+                                type="datetime-local"
+                                value={editDraft.clockIn}
+                                onChange={(event) =>
+                                  setEditDraft(
+                                    (current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            clockIn:
+                                              event.target.value,
+                                          }
+                                        : current
+                                  )
+                                }
+                                style={{
+                                  minHeight: 40,
+                                  border:
+                                    `1px solid ${OPC_BRAND.borderStrong}`,
+                                  borderRadius: 10,
+                                  padding: '6px 9px',
+                                  background: '#FFFFFF',
+                                  color: OPC_BRAND.text,
+                                  fontFamily: OPC_PAGE_FONT,
+                                }}
+                              />
+                            </label>
+
+                            <label
+                              style={{
+                                display: 'grid',
+                                gap: 6,
+                                fontSize: 11,
+                                fontWeight: 760,
+                                color: OPC_BRAND.muted,
+                              }}
+                            >
+                              Ende
+                              <input
+                                type="datetime-local"
+                                value={editDraft.clockOut}
+                                onChange={(event) =>
+                                  setEditDraft(
+                                    (current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            clockOut:
+                                              event.target.value,
+                                          }
+                                        : current
+                                  )
+                                }
+                                style={{
+                                  minHeight: 40,
+                                  border:
+                                    `1px solid ${OPC_BRAND.borderStrong}`,
+                                  borderRadius: 10,
+                                  padding: '6px 9px',
+                                  background: '#FFFFFF',
+                                  color: OPC_BRAND.text,
+                                  fontFamily: OPC_PAGE_FONT,
+                                }}
+                              />
+                            </label>
+
+                            <label
+                              style={{
+                                display: 'grid',
+                                gap: 6,
+                                fontSize: 11,
+                                fontWeight: 760,
+                                color: OPC_BRAND.muted,
+                              }}
+                            >
+                              Pause in Minuten
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={editDraft.breakMinutes}
+                                onChange={(event) =>
+                                  setEditDraft(
+                                    (current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            breakMinutes:
+                                              event.target.value,
+                                          }
+                                        : current
+                                  )
+                                }
+                                style={{
+                                  minHeight: 40,
+                                  border:
+                                    `1px solid ${OPC_BRAND.borderStrong}`,
+                                  borderRadius: 10,
+                                  padding: '6px 9px',
+                                  background: '#FFFFFF',
+                                  color: OPC_BRAND.text,
+                                  fontFamily: OPC_PAGE_FONT,
+                                }}
+                              />
+                            </label>
+                          </div>
+
+                          <label
+                            style={{
+                              display: 'grid',
+                              gap: 6,
+                              fontSize: 11,
+                              fontWeight: 760,
+                              color: OPC_BRAND.muted,
+                            }}
+                          >
+                            Korrekturgrund
+                            <textarea
+                              rows={3}
+                              value={editDraft.reason}
+                              onChange={(event) =>
+                                setEditDraft(
+                                  (current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          reason:
+                                            event.target.value,
+                                        }
+                                      : current
+                                )
+                              }
+                              placeholder="Zum Beispiel: Mitarbeiter hat um 17:10 Uhr Feierabend gemacht und das Ausstempeln vergessen."
+                              style={{
+                                border:
+                                  `1px solid ${OPC_BRAND.borderStrong}`,
+                                borderRadius: 10,
+                                padding: 10,
+                                resize: 'vertical',
+                                background: '#FFFFFF',
+                                color: OPC_BRAND.text,
+                                fontFamily: OPC_PAGE_FONT,
+                                fontSize: 12,
+                              }}
+                            />
+                          </label>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              gap: 8,
+                              flexWrap: 'wrap',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void saveEntryCorrection(
+                                  entry.id
+                                )
+                              }
+                              disabled={
+                                saving ===
+                                `correct-${entry.id}`
+                              }
+                              style={smallApproveButtonStyle}
+                            >
+                              Korrektur speichern
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={
+                                cancelEntryCorrection
+                              }
+                              disabled={
+                                saving ===
+                                `correct-${entry.id}`
+                              }
+                              style={smallRejectButtonStyle}
+                            >
+                              Abbrechen
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {canManage && isSubmitted && (
                     <div style={entryActionsStyle}>

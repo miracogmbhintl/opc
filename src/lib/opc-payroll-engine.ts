@@ -1,9 +1,11 @@
 import {
   cleanText,
+  errorStatus,
   safeObject,
   throwOnError,
   todayIsoDate,
 } from './opc-employee-api';
+import { maskAhvNumber } from './opc-sensitive-data';
 
 type JsonRow = Record<string, any>;
 
@@ -75,6 +77,26 @@ export type PayrollCalculation = {
   filename: string;
   snapshot: JsonRow;
 };
+
+export class PayrollDomainError extends Error {
+  code: string;
+  httpStatus: number;
+
+  constructor(code: string, message: string, httpStatus = 422) {
+    super(message);
+    this.name = 'PayrollDomainError';
+    this.code = code;
+    this.httpStatus = httpStatus;
+  }
+}
+
+export function payrollErrorStatus(error: any) {
+  if (error instanceof PayrollDomainError) {
+    return error.httpStatus;
+  }
+
+  return errorStatus(error);
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -589,7 +611,11 @@ export async function calculateEmployeePayroll({
 
   if (salaryType === 'hourly') {
     if (!positiveEntries.length) {
-      throw new Error('Im Zeitraum bestehen keine genehmigten Arbeitsstunden.');
+      throw new PayrollDomainError(
+        'NO_APPROVED_HOURS',
+        'Im Zeitraum bestehen keine genehmigten Arbeitsstunden.',
+        422,
+      );
     }
 
     const minimumMaintenanceRate = metadataNumber(
@@ -1379,7 +1405,7 @@ export async function calculateEmployeePayroll({
       country: cleanText(address.country_code) || 'CH',
       salutationLine: employeeSalutation(employee),
       employeeNumber: cleanText(employee.employee_number),
-      ahvNumber: cleanText(employee.ahv_number),
+      ahvNumber: maskAhvNumber(employee.ahv_number),
     },
     payroll: {
       month: heading.month,

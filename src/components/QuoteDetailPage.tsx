@@ -381,8 +381,10 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const removedItemIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    removedItemIdsRef.current.clear();
     void loadQuote({ clearMessages: true });
   }, [quoteId]);
 
@@ -549,15 +551,11 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
     ]);
   }
 
-  async function removeItem(item: QuoteItem, index: number) {
-    if (!supabase) return;
+  function removeItem(item: QuoteItem, index: number) {
+    const itemId = String(item.id || '');
 
-    if (!String(item.id).startsWith('local-')) {
-      const { error } = await supabase.from('opc_quote_items').delete().eq('id', item.id);
-      if (error) {
-        setErrorMessage(error.message);
-        return;
-      }
+    if (itemId && !itemId.startsWith('local-')) {
+      removedItemIdsRef.current.add(itemId);
     }
 
     setItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
@@ -645,12 +643,37 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         previous_status: quote.status || null,
         new_status: status,
       };
-      const atomicResponse = await supabase.rpc('opc_save_quote_atomic', {
+      const removedItemIds = Array.from(removedItemIdsRef.current);
+      const removedItemIdSet = new Set(removedItemIds);
+      const atomicArgs = {
         p_quote_id: quote.id,
         p_quote: quotePayload,
         p_items: itemPayloads,
         p_event: event,
-      });
+      };
+
+      const syncResponse = await supabase.rpc('opc_save_quote_sync_atomic', atomicArgs);
+      const syncMissing =
+        syncResponse.error &&
+        (
+          /opc_save_quote_sync_atomic/i.test(String(syncResponse.error.message || '')) &&
+          /schema cache|could not find|function/i.test(String(syncResponse.error.message || ''))
+        );
+
+      if (syncResponse.error && !syncMissing) {
+        throw syncResponse.error;
+      }
+
+      let usedSyncAtomic = !syncMissing;
+      let atomicResponse = syncResponse;
+
+      if (syncMissing) {
+        console.warn(
+          '[finance] opc_save_quote_sync_atomic is not installed yet; using opc_save_quote_atomic compatibility path.'
+        );
+        usedSyncAtomic = false;
+        atomicResponse = await supabase.rpc('opc_save_quote_atomic', atomicArgs);
+      }
 
       const atomicMissing =
         atomicResponse.error &&
@@ -746,6 +769,15 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         if (existingResponse.error) throw existingResponse.error;
         if (newResponse.error) throw newResponse.error;
 
+        if (removedItemIds.length) {
+          const { error: deleteError } = await supabase
+            .from('opc_quote_items')
+            .delete()
+            .eq('quote_id', quote.id)
+            .in('id', removedItemIds);
+          if (deleteError) throw deleteError;
+        }
+
         const savedItems = [
           ...(existingResponse.data || []),
           ...(newResponse.data || []),
@@ -779,6 +811,15 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
           );
         }
       } else {
+        if (!usedSyncAtomic && removedItemIds.length) {
+          const { error: deleteError } = await supabase
+            .from('opc_quote_items')
+            .delete()
+            .eq('quote_id', quote.id)
+            .in('id', removedItemIds);
+          if (deleteError) throw deleteError;
+        }
+
         const saved = atomicResponse.data;
 
         if (!saved?.quote?.id) {
@@ -786,10 +827,11 @@ export default function QuoteDetailPage({ quoteId }: QuoteDetailPageProps) {
         }
 
         nextQuote = normalizeQuoteAfterLoad(saved.quote);
-        setItems(Array.isArray(saved.items) ? saved.items : items);
+        setItems((Array.isArray(saved.items) ? saved.items : items).filter((row: QuoteItem) => !removedItemIdSet.has(String(row?.id || ''))));
       }
 
       setQuote(nextQuote);
+      removedItemIdsRef.current.clear();
       const savedTime = new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);

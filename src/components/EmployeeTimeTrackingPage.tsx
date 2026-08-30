@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import MirakaDashboardShell from './MirakaDashboardShell';
+import TimeImportExportPanel from './TimeImportExportPanel';
 import {
   CalendarDays,
   CheckCircle2,
@@ -18,8 +19,9 @@ import {
   Users,
 } from 'lucide-react';
 
-type ActiveTab = 'my_time' | 'team_live' | 'approvals';
+type ActiveTab = 'my_time' | 'team_live' | 'approvals' | 'import_export';
 type StatusFilter = 'all' | 'open' | 'on_break' | 'submitted' | 'approved' | 'rejected';
+type PeriodMode = 'day' | 'week' | 'month' | 'custom' | 'all';
 
 
 const BRAND = {
@@ -95,6 +97,15 @@ interface TimeEntry {
   updated_at?: string | null;
 }
 
+interface TimeReviewNote {
+  id: string;
+  note: string;
+  context: Record<string, any>;
+  created_by: string;
+  author_name: string | null;
+  created_at: string;
+}
+
 interface TeamPresence {
   staff_role_id: string;
   user_id: string | null;
@@ -142,6 +153,63 @@ function monthRange(monthValue: string) {
     startDate: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
     endDate: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
   };
+}
+
+function shiftIsoDate(value: string, days: number) {
+  const [year, month, day] = String(value || '').split('-').map(Number);
+  if (!year || !month || !day) return value;
+
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  date.setUTCDate(date.getUTCDate() + days);
+
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
+}
+
+function weekRangeForDate(value: string) {
+  const date = new Date(`${value}T12:00:00`);
+  const day = date.getDay() || 7;
+  const startDate = shiftIsoDate(value, 1 - day);
+
+  return {
+    startDate,
+    endDate: shiftIsoDate(startDate, 6),
+  };
+}
+
+function isDateInSelectedPeriod(
+  workDate: string,
+  periodMode: PeriodMode,
+  anchorDate: string,
+  month: string,
+  customFrom: string,
+  customTo: string
+) {
+  if (!workDate) return false;
+  if (periodMode === 'all') return true;
+  if (periodMode === 'day') return workDate === anchorDate;
+  if (periodMode === 'month') return Boolean(month) && workDate.startsWith(`${month}-`);
+
+  if (periodMode === 'week') {
+    const { startDate, endDate } = weekRangeForDate(anchorDate);
+    return workDate >= startDate && workDate <= endDate;
+  }
+
+  const from = customFrom || customTo;
+  const to = customTo || customFrom;
+  if (!from && !to) return true;
+
+  const startDate = from && to && from > to ? to : from;
+  const endDate = from && to && from > to ? from : to;
+
+  return (!startDate || workDate >= startDate) && (!endDate || workDate <= endDate);
+}
+
+function timeEntryEmployeeFilterKey(entry: TimeEntry) {
+  if (entry.employee_id) return `employee:${entry.employee_id}`;
+  if (entry.user_id) return `user:${entry.user_id}`;
+
+  const name = String(entry.employee_name || '').trim().toLowerCase();
+  return name ? `name:${name}` : '';
 }
 
 function normalizeStatus(status?: string | null) {
@@ -295,11 +363,6 @@ function canReviewTimeEntries(staff: StaffRole | null) {
   return (
     isOwnerRole(staff) ||
     isAdminLikeRole(staff) ||
-    staff.can_manage_reports === true ||
-    staff.can_manage_employees === true ||
-    staff.can_manage_finance === true ||
-    staff.can_view_all_jobs === true ||
-    staff.can_manage_jobs === true ||
     staff.can_manage_time_entries === true
   );
 }
@@ -561,7 +624,7 @@ function OPCTabs({
 }) {
   return (
     <div
-      className="opc-time-tab-buttons"
+      className="opc-time-tab-buttons" data-opc-owner-export-dock="true"
       style={{
         display: 'flex',
         gap: '12px',
@@ -911,24 +974,38 @@ function EmployeeTimeTrackingContent() {
   const [activeEntry, setActiveEntry] = useState<TimeEntry | null>(null);
 
   const [month, setMonth] = useState(currentMonthValue());
+  const [periodMode, setPeriodMode] = useState<PeriodMode>('month');
+  const [anchorDate, setAnchorDate] = useState(todayString());
+  const [customFrom, setCustomFrom] = useState(`${currentMonthValue()}-01`);
+  const [customTo, setCustomTo] = useState(todayString());
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [employeeFilter, setEmployeeFilter] = useState('all');
 
   const [note, setNote] = useState('');
   const [clockOutNote, setClockOutNote] = useState('');
-  const [reviewNote, setReviewNote] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [globalReviewNote, setGlobalReviewNote] = useState('');
+  const [timeReviewNotes, setTimeReviewNotes] = useState<TimeReviewNote[]>([]);
+  const [reviewNotesLoading, setReviewNotesLoading] = useState(false);
   const [tick, setTick] = useState(0);
 
   const canManageTeam = canReviewTimeEntries(staffRole);
 
   useEffect(() => {
+    if (activeTab === 'approvals' && canManageTeam) {
+      void loadTimeReviewNotes(true);
+    }
+  }, [activeTab, canManageTeam]);
+
+
+  useEffect(() => {
     void loadAll(true);
-  }, [month]);
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => setTick((value) => value + 1), 30000);
@@ -954,7 +1031,7 @@ function EmployeeTimeTrackingContent() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [month]);
+  }, []);
 
   const staffLookups = useMemo(() => {
     const byUserId = new Map<string, StaffRole>();
@@ -1007,10 +1084,46 @@ function EmployeeTimeTrackingContent() {
     );
   }, [entries, staffRole, staffLookups]);
 
+  const employeeFilterOptions = useMemo(() => {
+    const options = new Map<string, string>();
+
+    visibleEntries.forEach((entry) => {
+      const value = timeEntryEmployeeFilterKey(entry);
+      if (!value) return;
+
+      const label = String(entry.employee_name || '').trim() || 'Mitarbeiter';
+      if (!options.has(value)) options.set(value, label);
+    });
+
+    return Array.from(options.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((left, right) => left.label.localeCompare(right.label, 'de'));
+  }, [visibleEntries]);
+
   const filteredEntries = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
     return visibleEntries.filter((entry) => {
+      if (
+        !isDateInSelectedPeriod(
+          entry.work_date,
+          periodMode,
+          anchorDate,
+          month,
+          customFrom,
+          customTo
+        )
+      ) {
+        return false;
+      }
+
+      if (
+        employeeFilter !== 'all' &&
+        timeEntryEmployeeFilterKey(entry) !== employeeFilter
+      ) {
+        return false;
+      }
+
       if (statusFilter !== 'all' && statusGroup(entry.status) !== statusFilter) return false;
 
       if (!query) return true;
@@ -1026,11 +1139,21 @@ function EmployeeTimeTrackingContent() {
         .toLowerCase()
         .includes(query);
     });
-  }, [visibleEntries, searchQuery, statusFilter]);
+  }, [
+    visibleEntries,
+    searchQuery,
+    statusFilter,
+    employeeFilter,
+    periodMode,
+    anchorDate,
+    month,
+    customFrom,
+    customTo,
+  ]);
 
   const submittedEntries = useMemo(() => {
-    return visibleEntries.filter((entry) => normalizeStatus(entry.status) === 'submitted');
-  }, [visibleEntries]);
+    return filteredEntries.filter((entry) => normalizeStatus(entry.status) === 'submitted');
+  }, [filteredEntries]);
 
   const stats = useMemo(() => {
     const today = todayString();
@@ -1093,13 +1216,22 @@ function EmployeeTimeTrackingContent() {
         .select('*')
         .eq('user_id', userId)
         .in('status', ['active', 'aktiv', 'enabled'])
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('created_at', { ascending: false });
 
       if (staffError) throw staffError;
 
-      const resolvedStaff = (staffData || null) as StaffRole | null;
+      const activeStaffRows = (staffData || []) as StaffRole[];
+
+      const resolvedStaff =
+        activeStaffRows.find((row) => isOwnerRole(row)) ||
+        activeStaffRows.find((row) => {
+          const role = roleKey(row.role);
+          return role === 'admin' || role === 'dispatch';
+        }) ||
+        activeStaffRows.find((row) => canReviewTimeEntries(row)) ||
+        activeStaffRows[0] ||
+        null;
+
       setStaffRole(resolvedStaff);
 
       const { data: staffDirectoryData, error: staffDirectoryError } = await supabase
@@ -1116,13 +1248,9 @@ function EmployeeTimeTrackingContent() {
       const visibleStaffForViewer = safeStaffDirectory.filter((member) => canViewStaffMember(resolvedStaff, member));
       const entryVisibilityFilter = buildTimeEntryOrFilter(visibleStaffForViewer, userId);
 
-      const { startDate, endDate } = monthRange(month);
-
       let entriesQuery = supabase
         .from('opc_employee_time_entries')
         .select('*')
-        .gte('work_date', startDate)
-        .lte('work_date', endDate)
         .order('work_date', { ascending: false })
         .order('created_at', { ascending: false });
 
@@ -1193,6 +1321,8 @@ function EmployeeTimeTrackingContent() {
   }
 
   async function runAction(action: string, callback: () => Promise<void>) {
+    const scrollY = typeof window !== 'undefined' ? window.scrollY : 0;
+
     setActionLoading(action);
     setErrorMessage('');
     setSuccessMessage('');
@@ -1200,11 +1330,73 @@ function EmployeeTimeTrackingContent() {
     try {
       await callback();
       await loadAll(false);
+
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          window.scrollTo({ top: scrollY, left: 0, behavior: 'auto' });
+        });
+      }
     } catch (error: any) {
       setErrorMessage(error?.message || 'Aktion konnte nicht ausgeführt werden.');
     } finally {
       setActionLoading(null);
     }
+  }
+
+  async function loadTimeReviewNotes(showLoader = false) {
+    if (!canManageTeam) return;
+    if (showLoader) setReviewNotesLoading(true);
+
+    try {
+      const { data, error } = await supabase.rpc('opc_list_time_review_notes', {
+        p_limit: 200,
+      });
+
+      if (error) throw error;
+      setTimeReviewNotes((data || []) as TimeReviewNote[]);
+    } catch (error: any) {
+      console.warn('Zeiterfassungs-Prüfnotizen konnten nicht geladen werden:', error);
+    } finally {
+      if (showLoader) setReviewNotesLoading(false);
+    }
+  }
+
+  async function saveGlobalReviewNote() {
+    const cleanNote = globalReviewNote.trim();
+
+    if (!cleanNote) {
+      setErrorMessage('Bitte zuerst eine Prüfnotiz eingeben.');
+      return;
+    }
+
+    await runAction('save-global-review-note', async () => {
+      const { error } = await supabase.rpc('opc_add_time_review_note', {
+        p_note: cleanNote,
+        p_context: {
+          periodMode,
+          anchorDate,
+          month,
+          customFrom,
+          customTo,
+          statusFilter,
+          employeeFilter,
+          searchQuery: searchQuery.trim() || null,
+        },
+      });
+
+      if (error) throw error;
+
+      setGlobalReviewNote('');
+      setSuccessMessage('Prüfnotiz gespeichert.');
+      await loadTimeReviewNotes(false);
+    });
+  }
+
+  function scrollToReviewNotes() {
+    document.getElementById('opc-time-review-notes')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
   }
 
   async function clockIn() {
@@ -1270,12 +1462,11 @@ function EmployeeTimeTrackingContent() {
     await runAction(`approve-${entryId}`, async () => {
       const { error } = await supabase.rpc('opc_approve_employee_time_entry', {
         p_time_entry_id: entryId,
-        p_dispatch_note: reviewNote.trim() || null,
+        p_dispatch_note: null,
       });
 
       if (error) throw error;
 
-      setReviewNote('');
       setSuccessMessage('Zeiteintrag genehmigt.');
     });
   }
@@ -1284,12 +1475,11 @@ function EmployeeTimeTrackingContent() {
     await runAction(`reject-${entryId}`, async () => {
       const { error } = await supabase.rpc('opc_reject_employee_time_entry', {
         p_time_entry_id: entryId,
-        p_dispatch_note: reviewNote.trim() || null,
+        p_dispatch_note: null,
       });
 
       if (error) throw error;
 
-      setReviewNote('');
       setSuccessMessage('Zeiteintrag abgelehnt.');
     });
   }
@@ -1321,7 +1511,7 @@ function EmployeeTimeTrackingContent() {
         />
       </OPCMetricsGrid>
 
-      <OPCToolbar columns="minmax(0, 1fr) 170px 180px 190px">
+      <OPCToolbar columns="minmax(220px, 1.45fr) 160px minmax(190px, 1fr) 185px 210px 170px">
         <div style={{ position: 'relative', minWidth: 0 }}>
           <Search size={17} style={searchIconStyle} />
           <input
@@ -1333,12 +1523,69 @@ function EmployeeTimeTrackingContent() {
           />
         </div>
 
-        <input
-          type="month"
-          value={month}
-          onChange={(event) => setMonth(event.target.value)}
-          style={monthInputStyle}
-        />
+        <select
+          value={periodMode}
+          onChange={(event) => setPeriodMode(event.target.value as PeriodMode)}
+          style={opcSelectStyle}
+        >
+          <option value="day">Tag</option>
+          <option value="week">Woche</option>
+          <option value="month">Monat</option>
+          <option value="custom">Zeitraum</option>
+          <option value="all">Alle</option>
+        </select>
+
+        <div style={{ minWidth: 0 }}>
+          {periodMode === 'month' && (
+            <input
+              type="month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+              style={monthInputStyle}
+            />
+          )}
+
+          {(periodMode === 'day' || periodMode === 'week') && (
+            <input
+              type="date"
+              value={anchorDate}
+              onChange={(event) => setAnchorDate(event.target.value)}
+              style={monthInputStyle}
+            />
+          )}
+
+          {periodMode === 'custom' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                aria-label="Zeitraum von"
+                style={monthInputStyle}
+              />
+              <input
+                type="date"
+                value={customTo}
+                onChange={(event) => setCustomTo(event.target.value)}
+                aria-label="Zeitraum bis"
+                style={monthInputStyle}
+              />
+            </div>
+          )}
+
+          {periodMode === 'all' && (
+            <div
+              style={{
+                ...monthInputStyle,
+                display: 'flex',
+                alignItems: 'center',
+                color: BRAND.muted,
+              }}
+            >
+              Gesamter Zeitraum
+            </div>
+          )}
+        </div>
 
         <select
           value={statusFilter}
@@ -1346,11 +1593,24 @@ function EmployeeTimeTrackingContent() {
           style={opcSelectStyle}
         >
           <option value="all">Alle Status</option>
-          <option value="open">Aktiv</option>
-          <option value="on_break">Pause</option>
-          <option value="submitted">Eingereicht</option>
+          <option value="submitted">Offen zur Freigabe</option>
           <option value="approved">Genehmigt</option>
           <option value="rejected">Abgelehnt</option>
+          <option value="open">Aktiv</option>
+          <option value="on_break">Pause</option>
+        </select>
+
+        <select
+          value={employeeFilter}
+          onChange={(event) => setEmployeeFilter(event.target.value)}
+          style={opcSelectStyle}
+        >
+          <option value="all">Alle Mitarbeiter</option>
+          {employeeFilterOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
 
         <button
@@ -1364,6 +1624,52 @@ function EmployeeTimeTrackingContent() {
           <span>Aktualisieren</span>
         </button>
       </OPCToolbar>
+
+      {canManageTeam && activeTab === 'approvals' && (
+        <section
+          className="opc-time-global-review-note"
+          style={{
+            ...cardStyle,
+            padding: '16px 18px',
+            marginTop: '-8px',
+            marginBottom: '22px',
+          }}
+        >
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+              gap: 10,
+              alignItems: 'center',
+            }}
+          >
+            <input
+              value={globalReviewNote}
+              onChange={(event) => setGlobalReviewNote(event.target.value)}
+              placeholder="Prüfnotiz für diesen Kontrollvorgang"
+              style={inputStyle}
+            />
+
+            <button
+              type="button"
+              onClick={() => void saveGlobalReviewNote()}
+              disabled={actionLoading === 'save-global-review-note' || !globalReviewNote.trim()}
+              style={{ ...opcBlackButtonStyle, width: 'auto', minWidth: 150 }}
+            >
+              {actionLoading === 'save-global-review-note' ? 'Speichert…' : 'Notiz speichern'}
+            </button>
+
+            <button
+              type="button"
+              onClick={scrollToReviewNotes}
+              style={{ ...opcSecondaryButtonStyle, width: 'auto', minWidth: 170 }}
+            >
+              Zu weiteren Notizen
+            </button>
+          </div>
+        </section>
+      )}
+
 
       <OPCTabs
         tabs={[
@@ -1389,12 +1695,22 @@ function EmployeeTimeTrackingContent() {
                 },
               ]
             : []),
+          ...(canManageTeam
+            ? [
+                {
+                  key: 'import_export',
+                  label: 'Import & Export',
+                  active: activeTab === 'import_export',
+                  onClick: () => setActiveTab('import_export'),
+                },
+              ]
+            : []),
         ]}
       />
 
 
-      {errorMessage && <div style={errorStyle}>{errorMessage}</div>}
-      {successMessage && <div style={successStyle}>{successMessage}</div>}
+      {errorMessage && <div style={{ ...errorStyle, ...toastOverlayStyle }}>{errorMessage}</div>}
+      {successMessage && <div style={{ ...successStyle, ...toastOverlayStyle }}>{successMessage}</div>}
 
       {activeTab === 'my_time' && (
         <>
@@ -1598,25 +1914,10 @@ function EmployeeTimeTrackingContent() {
         <>
           <OPCMetricsGrid>
             <OPCMetricCard value={submittedEntries.length} label="Offen zur Freigabe" icon={<Clock3 size={18} />} />
-            <OPCMetricCard value={visibleEntries.filter((entry) => normalizeStatus(entry.status) === 'approved').length} label="Genehmigt" icon={<CheckCircle2 size={18} />} tone="success" />
-            <OPCMetricCard value={visibleEntries.filter((entry) => normalizeStatus(entry.status) === 'rejected').length} label="Abgelehnt" icon={<LogOut size={18} />} tone="danger" />
-            <OPCMetricCard value={visibleEntries.length} label="Einträge gesamt" icon={<CalendarDays size={18} />} />
+            <OPCMetricCard value={filteredEntries.filter((entry) => normalizeStatus(entry.status) === 'approved').length} label="Genehmigt" icon={<CheckCircle2 size={18} />} tone="success" />
+            <OPCMetricCard value={filteredEntries.filter((entry) => normalizeStatus(entry.status) === 'rejected').length} label="Abgelehnt" icon={<LogOut size={18} />} tone="danger" />
+            <OPCMetricCard value={filteredEntries.length} label="Einträge gesamt" icon={<CalendarDays size={18} />} />
           </OPCMetricsGrid>
-
-          <section style={actionCardStyle}>
-            <div style={sectionHeaderStyle}>Freigabe-Notiz</div>
-            <div style={{ padding: 20 }}>
-              <label style={labelStyle}>
-                Dispatch/Admin Notiz
-                <input
-                  value={reviewNote}
-                  onChange={(event) => setReviewNote(event.target.value)}
-                  placeholder="Optional. Beispiel: geprüft, Zeiten plausibel."
-                  style={inputStyle}
-                />
-              </label>
-            </div>
-          </section>
 
           <TimeEntriesList
             entries={filteredEntries}
@@ -1627,7 +1928,96 @@ function EmployeeTimeTrackingContent() {
             onReject={rejectEntry}
             actionLoading={actionLoading}
           />
+          <section
+            id="opc-time-review-notes"
+            style={{
+              ...cardStyle,
+              marginTop: 22,
+              marginBottom: 22,
+              overflow: 'hidden',
+              scrollMarginTop: 24,
+            }}
+          >
+            <div style={sectionHeaderStyle}>Weitere Prüfnotizen</div>
+
+            {reviewNotesLoading ? (
+              <div style={{ padding: 20, color: BRAND.muted }}>
+                Prüfnotizen werden geladen…
+              </div>
+            ) : timeReviewNotes.length === 0 ? (
+              <div style={{ ...emptyStyle, padding: 28 }}>
+                <Clock3 size={22} />
+                <strong>Noch keine Prüfnotizen vorhanden.</strong>
+                <span>
+                  Gespeicherte Kontrollnotizen von autorisierten Mitarbeitenden
+                  erscheinen hier.
+                </span>
+              </div>
+            ) : (
+              <div>
+                {timeReviewNotes.map((item, index) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      padding: '18px 20px',
+                      borderBottom:
+                        index < timeReviewNotes.length - 1
+                          ? '1px solid #F3F4F6'
+                          : 'none',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 16,
+                        alignItems: 'baseline',
+                        marginBottom: 8,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <strong
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 820,
+                          color: BRAND.text,
+                        }}
+                      >
+                        {item.author_name || 'Autorisiert'}
+                      </strong>
+
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 650,
+                          color: BRAND.muted,
+                        }}
+                      >
+                        {formatDateTime(item.created_at)}
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: 14,
+                        lineHeight: 1.55,
+                        color: BRAND.text,
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {item.note}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
         </>
+      )}
+
+      {activeTab === 'import_export' && canManageTeam && (
+        <TimeImportExportPanel />
       )}
 
       <style>{`${opcResponsiveStyle}${spinStyle}`}</style>
@@ -1662,8 +2052,8 @@ function TimeEntriesList({
   uiActiveEntry: TimeEntry | null;
   title: string;
   showActions?: boolean;
-  onApprove?: (entryId: string) => void;
-  onReject?: (entryId: string) => void;
+  onApprove?: (entryId: string, noteValue?: string) => void;
+  onReject?: (entryId: string, noteValue?: string) => void;
   actionLoading?: string | null;
 }) {
   return (
@@ -1671,21 +2061,19 @@ function TimeEntriesList({
       <div style={{ ...contentSectionTitleStyle, marginBottom: 14 }}>{title}</div>
 
       {entries.length === 0 ? (
-        <div
-          style={{
-            ...cardStyle,
-            ...emptyStyle,
-          }}
-        >
+        <div style={{ ...cardStyle, ...emptyStyle }}>
           <Clock3 size={24} />
           <strong>Keine Einträge vorhanden.</strong>
-          <span>Sobald Zeiten erfasst werden, erscheinen sie hier.</span>
+          <span>Für die gewählten Filter wurden keine Zeiteinträge gefunden.</span>
         </div>
       ) : (
         <>
           <section className="opc-requests-desktop-table" style={{ ...cardStyle, overflow: 'hidden' }}>
             {entries.map((entry, index) => {
-              const total = entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
+              const total =
+                entry.id === uiActiveEntry?.id
+                  ? liveMinutes(entry)
+                  : Number(entry.total_minutes || 0);
               const isSubmitted = normalizeStatus(entry.status) === 'submitted';
 
               return (
@@ -1693,24 +2081,39 @@ function TimeEntriesList({
                   key={entry.id}
                   style={{
                     ...desktopRowStyle,
-                    borderBottom: index < entries.length - 1 ? '1px solid #F3F4F6' : 'none',
+                    borderBottom:
+                      index < entries.length - 1 ? '1px solid #F3F4F6' : 'none',
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={rowTitleStyle}>{formatDate(entry.work_date)}</div>
-                    <div style={rowSubStyle}>Pause {formatMinutes(entry.break_minutes || 0)}</div>
+                    <div style={rowSubStyle}>
+                      Pause {formatMinutes(entry.break_minutes || 0)}
+                    </div>
                   </div>
 
                   <div style={{ minWidth: 0 }}>
-                    <div style={rowTitleStyle}>{entry.employee_name || 'Mitarbeiter'}</div>
-                    <div style={rowSubStyle}>{entry.employee_note || 'Keine Notiz'}</div>
+                    <div style={rowTitleStyle}>
+                      {entry.employee_name || 'Mitarbeiter'}
+                    </div>
+                    <div style={rowSubStyle}>
+                      {entry.employee_note || 'Keine Mitarbeiter-Notiz'}
+                    </div>
                   </div>
 
                   <div style={dateStyle}>{formatTime(entry.clock_in_at)}</div>
                   <div style={dateStyle}>{formatTime(entry.clock_out_at)}</div>
                   <div style={dateStyle}>{formatMinutes(total)}</div>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                      gap: 8,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
                     <StatusBadge status={entry.status} />
 
                     {showActions && isSubmitted && (
@@ -1742,7 +2145,10 @@ function TimeEntriesList({
 
           <div className="opc-requests-mobile-cards opc-time-entry-mobile-cards">
             {entries.map((entry) => {
-              const total = entry.id === uiActiveEntry?.id ? liveMinutes(entry) : Number(entry.total_minutes || 0);
+              const total =
+                entry.id === uiActiveEntry?.id
+                  ? liveMinutes(entry)
+                  : Number(entry.total_minutes || 0);
               const isSubmitted = normalizeStatus(entry.status) === 'submitted';
 
               return (
@@ -1752,51 +2158,34 @@ function TimeEntriesList({
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'flex-start',
-                      gap: '12px',
-                      marginBottom: '12px',
+                      gap: 12,
+                      marginBottom: 12,
                     }}
                   >
                     <div style={{ minWidth: 0 }}>
-                      <h3
-                        style={{
-                          margin: '0 0 6px',
-                          fontSize: '15px',
-                          lineHeight: 1.25,
-                          fontWeight: 820,
-                          color: BRAND.text,
-                        }}
-                      >
-                        {formatDate(entry.work_date)}
-                      </h3>
-
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          color: BRAND.muted,
-                        }}
-                      >
+                      <div style={rowTitleStyle}>{formatDate(entry.work_date)}</div>
+                      <div style={rowSubStyle}>
                         {entry.employee_name || 'Mitarbeiter'}
-                      </p>
+                      </div>
                     </div>
-
                     <StatusBadge status={entry.status} />
                   </div>
 
                   <div
                     style={{
                       display: 'grid',
-                      gap: '6px',
-                      fontSize: '13px',
+                      gap: 6,
+                      fontSize: 13,
                       fontWeight: 560,
                       color: BRAND.muted,
                     }}
                   >
-                    <div>{formatTime(entry.clock_in_at)} – {formatTime(entry.clock_out_at)}</div>
+                    <div>
+                      {formatTime(entry.clock_in_at)} – {formatTime(entry.clock_out_at)}
+                    </div>
                     <div>Total: {formatMinutes(total)}</div>
                     <div>Pause: {formatMinutes(entry.break_minutes || 0)}</div>
-                    <div>{entry.employee_note || 'Keine Notiz'}</div>
+                    <div>{entry.employee_note || 'Keine Mitarbeiter-Notiz'}</div>
                   </div>
 
                   {showActions && isSubmitted && (
@@ -1846,6 +2235,17 @@ const loadingStyle: CSSProperties = {
   fontSize: '14px',
   fontWeight: 650,
   fontFamily: OPC_PAGE_FONT,
+};
+
+const toastOverlayStyle: CSSProperties = {
+  position: 'fixed',
+  top: 24,
+  right: 24,
+  zIndex: 9999,
+  width: 'min(420px, calc(100vw - 32px))',
+  maxWidth: '420px',
+  marginBottom: 0,
+  boxShadow: '0 16px 40px rgba(15, 17, 21, 0.14)',
 };
 
 const searchIconStyle: CSSProperties = {

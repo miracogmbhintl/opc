@@ -1,4 +1,5 @@
 import { deriveOpcDocumentNumber } from './opc-document-numbering';
+import { maskAhvNumber } from './opc-sensitive-data';
 import generalLetterTemplate from './opc-document-templates/general-letter.html?raw';
 import offerTemplate from './opc-document-templates/offer.html?raw';
 import orderConfirmationTemplate from './opc-document-templates/order-confirmation.html?raw';
@@ -1133,13 +1134,20 @@ export function buildGeneralLetterHtml(input: OPCGeneralLetterInput) {
 }
 
 export function buildPayrollHtml(input: OPCPayrollHtmlInput) {
+  const employee = asObject(input.employee);
+
   const data = {
     ...input,
+    employee: {
+      ...employee,
+      ahvNumber: maskAhvNumber(employee.ahvNumber),
+    },
     company: {
       ...TEMPLATE_COMPANY,
       ...(input.company || {}),
     },
   };
+
   return injectWindowData(payrollTemplate, 'PAYROLL_DATA', data);
 }
 

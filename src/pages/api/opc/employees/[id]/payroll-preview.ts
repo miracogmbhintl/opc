@@ -1,11 +1,13 @@
 import type { APIRoute } from 'astro';
 import {
   cleanText,
-  errorStatus,
   jsonResponse,
   requireEmployeeHrAccess,
 } from '../../../../../lib/opc-employee-api';
-import { calculateEmployeePayroll } from '../../../../../lib/opc-payroll-engine';
+import {
+  calculateEmployeePayroll,
+  payrollErrorStatus,
+} from '../../../../../lib/opc-payroll-engine';
 
 export const prerender = false;
 
@@ -96,7 +98,7 @@ export const GET: APIRoute = async ({ request, locals, cookies, params }) => {
     console.error('[opc/employees/id/payroll-preview] GET failed', error);
     return jsonResponse(
       { success: false, error: error?.message || 'Lohnabrechnung konnte nicht erstellt werden.' },
-      errorStatus(error),
+      payrollErrorStatus(error),
     );
   }
 };

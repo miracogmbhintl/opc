@@ -33,6 +33,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { safeNavigate } from '../lib/opc-navigation-guard';
 
+import { clearOpcAuthReturnTarget } from '../lib/opc-auth-return';
 interface MirakaSidebarProps {
   role: string;
   currentPath?: string;
@@ -331,6 +332,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
   }
 
   async function handleLogout() {
+    clearOpcAuthReturnTarget();
     clearCachedOpcAuthProfile();
 
     try {

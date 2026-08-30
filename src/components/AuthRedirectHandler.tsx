@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import WebflowLoadingScreen from './shared/WebflowLoadingScreen';
 
+import { consumeOpcAuthReturnTarget } from '../lib/opc-auth-return';
 export default function AuthRedirectHandler() {
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -167,7 +168,8 @@ export default function AuthRedirectHandler() {
           targetPath = '/';
       }
 
-      const targetUrl = baseUrl + targetPath;
+      const returnTarget = consumeOpcAuthReturnTarget();
+      const targetUrl = baseUrl + (returnTarget || targetPath);
       console.log('✅ AuthRedirectHandler: Target URL determined:', targetUrl);
       console.log('⏱️ AuthRedirectHandler: Waiting for loading animation...');
       

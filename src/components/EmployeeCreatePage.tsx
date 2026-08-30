@@ -25,6 +25,8 @@ import MirakaDashboardShell from './MirakaDashboardShell';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 
+import EmployeePortalAccessCreateFields from './EmployeePortalAccessCreateFields';
+import { OPC_EMPLOYEE_PORTAL_ACCESS_DEFAULT, type OpcEmployeePortalAccessDraft } from '../lib/opc-staff-permissions';
 type JsonRow = Record<string, any>;
 
 type SkillSelection = {
@@ -430,6 +432,13 @@ export default function EmployeeCreatePage() {
   const [pendingDocumentType, setPendingDocumentType] = useState('identity_document');
   const [pendingDocumentTitle, setPendingDocumentTitle] = useState('');
   const [pendingDocumentValidUntil, setPendingDocumentValidUntil] = useState('');
+  const [portalAccessDraft, setPortalAccessDraft] =
+    useState<OpcEmployeePortalAccessDraft>(() => ({
+      ...OPC_EMPLOYEE_PORTAL_ACCESS_DEFAULT,
+      permissions: {
+        ...OPC_EMPLOYEE_PORTAL_ACCESS_DEFAULT.permissions,
+      },
+    }));
 
   useEffect(() => {
     void loadOptions();
@@ -640,6 +649,40 @@ export default function EmployeeCreatePage() {
 
       let uploadedCount = 0;
       const uploadErrors: string[] = [];
+      let portalInviteCreated = false;
+
+      if (
+        role === 'owner' &&
+        portalAccessDraft.enabled &&
+        !form.staff_role_id
+      ) {
+        try {
+          const portalResponse = await apiPost<any>(
+            `/api/opc/employees/${response.employeeId}/portal-access`,
+            {
+              action: 'create_or_invite',
+              loginEmail:
+                portalAccessDraft.loginEmail ||
+                form.business_email ||
+                form.private_email,
+              canAccessPortal: true,
+              permissions: portalAccessDraft.permissions,
+            },
+          );
+
+          portalInviteCreated =
+            portalResponse?.inviteSent === true ||
+            portalResponse?.accessEmailSent === true ||
+            portalResponse?.portal?.linked === true;
+        } catch (portalError: any) {
+          uploadErrors.push(
+            `Portal-Zugang: ${
+              portalError?.message ||
+              'Login/Einladung konnte nicht erstellt werden.'
+            }`,
+          );
+        }
+      }
 
       for (const document of pendingDocuments) {
         try {
@@ -652,13 +695,15 @@ export default function EmployeeCreatePage() {
 
       if (uploadErrors.length) {
         setMessage(
-          `Mitarbeiter wurde gespeichert. ${uploadedCount} Dokument${uploadedCount === 1 ? '' : 'e'} hochgeladen. ${uploadErrors.length} Upload${uploadErrors.length === 1 ? '' : 's'} konnten nicht abgeschlossen werden.`,
+          `Mitarbeiter wurde gespeichert. ${uploadedCount} Dokument${uploadedCount === 1 ? '' : 'e'} hochgeladen. ${uploadErrors.length} Folgeschritt${uploadErrors.length === 1 ? '' : 'e'} konnten nicht abgeschlossen werden.`,
         );
       } else {
         setMessage(
           pendingDocuments.length
             ? `Mitarbeiter und ${uploadedCount} Dokument${uploadedCount === 1 ? '' : 'e'} wurden gespeichert.`
-            : 'Mitarbeiter wurde gespeichert. Die Personalakte wird geöffnet.',
+            : portalInviteCreated
+              ? 'Mitarbeiter wurde gespeichert. Portal-Zugang/Einladung wurde vorbereitet. Die Personalakte wird geöffnet.'
+              : 'Mitarbeiter wurde gespeichert. Die Personalakte wird geöffnet.',
         );
       }
 
@@ -704,7 +749,13 @@ export default function EmployeeCreatePage() {
           <div className="opc-create-hero-meta">
             <span>{selectedPosition?.title_de || 'Position noch nicht gewählt'}</span>
             <span>{selectedEntity?.legal_name || 'Rechtsträger noch nicht gewählt'}</span>
-            <span>{form.staff_role_id ? 'Mit Portalnutzer verknüpft' : 'Ohne Portalzugang'}</span>
+            <span>
+              {form.staff_role_id
+                ? 'Mit Portalnutzer verknüpft'
+                : role === 'owner' && portalAccessDraft.enabled
+                  ? 'Portal-Einladung vorgesehen'
+                  : 'Ohne Portalzugang'}
+            </span>
           </div>
         </section>
 
@@ -795,6 +846,15 @@ export default function EmployeeCreatePage() {
                 </select>
               </Field>
             </div>
+            {role === 'owner' ? (
+              <EmployeePortalAccessCreateFields
+                value={portalAccessDraft}
+                onChange={setPortalAccessDraft}
+                suggestedEmail={form.business_email || form.private_email || ''}
+                disabled={Boolean(form.staff_role_id)}
+              />
+            ) : null}
+
             <div className="opc-toggle-grid">
               <Toggle checked={form.payroll_in_scope} onChange={(value) => setRoot('payroll_in_scope', value)} label="Für OPC-Lohnabrechnung vorgesehen" helper="Die tatsächlichen Lohnwerte bleiben Owner-only." />
               <Toggle checked={form.portal_access_only} onChange={(value) => setForm((current) => ({ ...current, portal_access_only: value, payroll_in_scope: value ? false : current.payroll_in_scope }))} label="Nur Portal-/Infrastrukturzugang" helper="Kein Bestandteil der OPC-Lohnabrechnung." />

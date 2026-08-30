@@ -3,6 +3,7 @@ import DashboardSidebar from './DashboardSidebar';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 
+import { clearOpcAuthReturnTarget } from '../lib/opc-auth-return';
 interface DashboardLayoutProps {
   children: ReactNode;
   role: 'owner' | 'admin' | 'client';
@@ -28,6 +29,8 @@ export default function DashboardLayout({ children, role }: DashboardLayoutProps
   }, []);
 
   const handleLogout = async () => {
+    clearOpcAuthReturnTarget();
+
     try {
       await supabase.auth.signOut({ scope: 'local' });
       window.location.href = `${baseUrl}/`;

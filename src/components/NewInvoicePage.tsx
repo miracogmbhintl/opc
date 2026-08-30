@@ -639,15 +639,8 @@ export default function NewInvoicePage() {
         },
       };
 
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('opc_invoices')
-        .insert(invoicePayload)
-        .select('id, invoice_number')
-        .single();
-      if (invoiceError) throw invoiceError;
-
+      // OPC_ATOMIC_CREATE_COMPAT_20260827_INVOICE
       const itemPayload = {
-        invoice_id: invoice.id,
         sort_order: 1,
         title: clean(form.itemTitle),
         description: form.description || null,
@@ -661,8 +654,80 @@ export default function NewInvoicePage() {
         total_chf: roundMoney(totals.total),
         metadata: {},
       };
-      const { error: itemError } = await supabase.from('opc_invoice_items').insert(itemPayload);
-      if (itemError) throw itemError;
+
+      let invoice: any = null;
+
+      const atomicResponse = await supabase.rpc(
+        'opc_create_invoice_atomic',
+        {
+          p_invoice: invoicePayload,
+          p_items: [itemPayload],
+        },
+      );
+
+      const atomicMissing =
+        atomicResponse.error &&
+        /opc_create_invoice_atomic/i.test(
+          String(atomicResponse.error.message || '')
+        ) &&
+        /schema cache|could not find|function/i.test(
+          String(atomicResponse.error.message || '')
+        );
+
+      if (atomicResponse.error && !atomicMissing) {
+        throw atomicResponse.error;
+      }
+
+      if (!atomicMissing) {
+        invoice = atomicResponse.data?.invoice || null;
+      } else {
+        console.warn(
+          '[finance] opc_create_invoice_atomic is not installed yet; ' +
+          'using compatibility creation.'
+        );
+
+        const {
+          data: fallbackInvoice,
+          error: invoiceError,
+        } = await supabase
+          .from('opc_invoices')
+          .insert(invoicePayload)
+          .select('id, invoice_number')
+          .single();
+
+        if (invoiceError) throw invoiceError;
+
+        invoice = fallbackInvoice;
+
+        const { error: itemError } = await supabase
+          .from('opc_invoice_items')
+          .insert({
+            invoice_id: invoice.id,
+            ...itemPayload,
+          });
+
+        if (itemError) {
+          const { error: cleanupError } = await supabase
+            .from('opc_invoices')
+            .delete()
+            .eq('id', invoice.id);
+
+          if (cleanupError) {
+            console.error(
+              '[finance] Failed to clean up incomplete invoice:',
+              cleanupError,
+            );
+          }
+
+          throw itemError;
+        }
+      }
+
+      if (!invoice?.id) {
+        throw new Error(
+          'Rechnung wurde nicht vollständig erstellt.'
+        );
+      }
 
       setSuccessMessage('Rechnung wurde erstellt.');
       window.location.href = `${baseUrl}/rechnung/${invoice.id}`;

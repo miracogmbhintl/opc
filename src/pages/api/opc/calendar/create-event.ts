@@ -1,5 +1,4 @@
 import type { APIRoute } from 'astro';
-import { createClient } from '@supabase/supabase-js';
 import { getEnvValue, getRuntimeEnv, type RuntimeEnv } from '../../../../lib/google-oauth';
 import {
   createGoogleCalendarEvent,
@@ -12,51 +11,12 @@ import {
 
 type AnyRow = Record<string, any>;
 
-function getSupabaseUrl(env: RuntimeEnv) {
-  const value = getEnvValue(env, [
-    'SUPABASE_URL',
-    'PUBLIC_SUPABASE_URL',
-    'VITE_SUPABASE_URL',
-  ]);
-
-  if (!value) throw new Error('Missing Supabase URL.');
-  return value;
-}
-
-function getAnonKey(env: RuntimeEnv) {
-  const value = getEnvValue(env, [
-    'PUBLIC_SUPABASE_ANON_KEY',
-    'VITE_SUPABASE_ANON_KEY',
-    'SUPABASE_ANON_KEY',
-  ]);
-
-  if (!value) throw new Error('Missing Supabase anon key.');
-  return value;
-}
-
-function createAuthenticatedSupabase(env: RuntimeEnv, accessToken: string) {
-  return createClient(getSupabaseUrl(env), getAnonKey(env), {
-    global: {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    },
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
-}
-
 function normalizeRole(value: unknown): string {
   const role = String(value || '').toLowerCase().trim();
-
-  if (role === 'owner') return 'owner';
-  if (role === 'admin') return 'admin';
+  if (role === 'owner' || role === 'inhaber') return 'owner';
+  if (role === 'admin' || role === 'administrator') return 'admin';
   if (role === 'dispatch' || role === 'dispatcher' || role === 'disposition') return 'dispatch';
   if (role === 'employee' || role === 'mitarbeiter') return 'employee';
-  if (role === 'client' || role === 'kunde') return 'client';
-
   return 'client';
 }
 
@@ -71,58 +31,37 @@ function cleanString(value: unknown): string | null {
 
 function cleanArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-
-  return value
-    .map((item) => String(item || '').trim())
-    .filter(Boolean);
+  return Array.from(new Set(value.map((item) => String(item || '').trim()).filter(Boolean)));
 }
 
 function parseEmailList(value: unknown): string[] {
   if (!value) return [];
-
   const rawItems = Array.isArray(value)
     ? value
-    : String(value)
-        .split(/[;,\n]/g)
-        .map((item) => item.trim());
+    : String(value).split(/[;,\n]/g).map((item) => item.trim());
 
-  return Array.from(
-    new Set(
-      rawItems
-        .map((item) => String(item || '').trim().toLowerCase())
-        .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    )
-  );
+  return Array.from(new Set(
+    rawItems
+      .map((item) => String(item || '').trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)),
+  ));
 }
 
 function mergeUniqueEmails(...groups: string[][]): string[] {
-  return Array.from(
-    new Set(
-      groups
-        .flat()
-        .map((email) => String(email || '').trim().toLowerCase())
-        .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    )
-  );
+  return Array.from(new Set(groups.flat().map((email) => String(email || '').trim().toLowerCase()).filter(Boolean)));
 }
 
 function extractMeetLink(event: any): string | null {
   if (event?.hangoutLink) return event.hangoutLink;
-
   const entryPoints = event?.conferenceData?.entryPoints;
   if (!Array.isArray(entryPoints)) return null;
-
-  const videoEntry = entryPoints.find((entry: any) => {
-    return entry?.entryPointType === 'video' && entry?.uri;
-  });
-
-  return videoEntry?.uri || null;
+  return entryPoints.find((entry: any) => entry?.entryPointType === 'video' && entry?.uri)?.uri || null;
 }
 
 async function resolveStaffRole(serviceSupabase: any, userId: string) {
   const { data, error } = await serviceSupabase
     .from('opc_staff_roles')
-    .select('*')
+    .select('id,role,status,can_access_portal')
     .eq('user_id', userId)
     .in('status', ['active', 'aktiv', 'enabled'])
     .eq('can_access_portal', true)
@@ -131,8 +70,21 @@ async function resolveStaffRole(serviceSupabase: any, userId: string) {
     .maybeSingle();
 
   if (error) throw error;
-
   return data || null;
+}
+
+function assertValidPeriod(startsAtInput: unknown, endsAtInput: unknown) {
+  const startsAt = new Date(String(startsAtInput || ''));
+  const endsAt = new Date(String(endsAtInput || ''));
+
+  if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+    throw Object.assign(new Error('Start- oder Endzeit ist ungültig.'), { status: 400 });
+  }
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    throw Object.assign(new Error('Endzeit muss nach der Startzeit liegen.'), { status: 400 });
+  }
+
+  return { startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() };
 }
 
 async function updateGoogleCalendarEvent(params: {
@@ -142,18 +94,7 @@ async function updateGoogleCalendarEvent(params: {
   requestUrl: string;
   googleCalendarId: string;
   googleEventId: string;
-  input: {
-    title: string;
-    description?: string | null;
-    starts_at: string;
-    ends_at: string;
-    timezone?: string | null;
-    is_all_day?: boolean;
-    location_name?: string | null;
-    location_address?: string | null;
-    attendeeEmails?: string[];
-    createMeetLink?: boolean;
-  };
+  input: AnyRow;
 }) {
   const accessToken = await getValidGoogleAccessToken({
     supabase: params.supabase,
@@ -162,45 +103,27 @@ async function updateGoogleCalendarEvent(params: {
     requestUrl: params.requestUrl,
   });
 
-  const attendeeEmails = Array.from(
-    new Set(
-      (params.input.attendeeEmails || [])
-        .map((email) => String(email || '').trim())
-        .filter(Boolean)
-    )
-  );
-
-  const reminderMinutes = Number((params.input as any).reminder_minutes ?? 30);
-  const visibility = String((params.input as any).visibility || 'default');
+  const attendeeEmails = mergeUniqueEmails(params.input.attendeeEmails || []);
+  const reminderMinutes = Number(params.input.reminder_minutes ?? 30);
+  const visibility = String(params.input.visibility || 'default');
 
   const body: Record<string, any> = {
     summary: params.input.title || 'Orange Pro Clean Termin',
     description: params.input.description || '',
     location: params.input.location_address || params.input.location_name || '',
     attendees: attendeeEmails.map((email) => ({ email })),
-    guestsCanInviteOthers: (params.input as any).guests_can_invite_others !== false,
-    guestsCanModify: Boolean((params.input as any).guests_can_modify),
-    guestsCanSeeOtherGuests: (params.input as any).guests_can_see_other_guests !== false,
+    guestsCanInviteOthers: params.input.guests_can_invite_others !== false,
+    guestsCanModify: Boolean(params.input.guests_can_modify),
+    guestsCanSeeOtherGuests: params.input.guests_can_see_other_guests !== false,
     visibility: ['default', 'public', 'private'].includes(visibility) ? visibility : 'default',
-    reminders:
-      Number.isFinite(reminderMinutes) && reminderMinutes >= 0
-        ? {
-            useDefault: false,
-            overrides: [
-              {
-                method: 'popup',
-                minutes: reminderMinutes,
-              },
-            ],
-          }
-        : {
-            useDefault: true,
-          },
+    reminders: Number.isFinite(reminderMinutes) && reminderMinutes >= 0
+      ? { useDefault: false, overrides: [{ method: 'popup', minutes: reminderMinutes }] }
+      : { useDefault: true },
   };
 
   if (params.input.is_all_day) {
-    body.start = { date: params.input.starts_at.slice(0, 10) };
-    body.end = { date: params.input.ends_at.slice(0, 10) };
+    body.start = { date: String(params.input.starts_at).slice(0, 10) };
+    body.end = { date: String(params.input.ends_at).slice(0, 10) };
   } else {
     body.start = {
       dateTime: params.input.starts_at,
@@ -213,26 +136,19 @@ async function updateGoogleCalendarEvent(params: {
   }
 
   let conferenceRequestId: string | null = null;
-
   if (params.input.createMeetLink) {
     conferenceRequestId = globalThis.crypto.randomUUID();
-
     body.conferenceData = {
       createRequest: {
         requestId: conferenceRequestId,
-        conferenceSolutionKey: {
-          type: 'hangoutsMeet',
-        },
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
       },
     };
   }
 
   const url = new URL(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
-      params.googleCalendarId
-    )}/events/${encodeURIComponent(params.googleEventId)}`
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(params.googleCalendarId)}/events/${encodeURIComponent(params.googleEventId)}`,
   );
-
   url.searchParams.set('conferenceDataVersion', params.input.createMeetLink ? '1' : '0');
   url.searchParams.set('sendUpdates', attendeeEmails.length > 0 ? 'all' : 'none');
 
@@ -241,9 +157,7 @@ async function updateGoogleCalendarEvent(params: {
     url: url.toString(),
     init: {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
   });
@@ -268,14 +182,9 @@ async function syncSavedEventToGoogle(params: {
   payload: AnyRow;
   attendeeEmails: string[];
 }) {
-  const shouldSync = params.payload.sync_google_calendar !== false;
-
-  if (!shouldSync) {
-    return params.event;
-  }
+  if (params.payload.sync_google_calendar === false) return params.event;
 
   const account = await getOwnGoogleAccount(params.serviceSupabase, params.userId);
-
   if (!account || account.status !== 'connected') {
     const { data } = await params.serviceSupabase
       .from('opc_calendar_events')
@@ -287,7 +196,6 @@ async function syncSavedEventToGoogle(params: {
       .eq('id', params.event.id)
       .select('*')
       .single();
-
     return data || params.event;
   }
 
@@ -303,29 +211,32 @@ async function syncSavedEventToGoogle(params: {
       location_address: params.event.location_address,
       attendeeEmails: params.attendeeEmails,
       createMeetLink: Boolean(params.payload.create_google_meet),
+      reminder_minutes: Number(params.payload.reminder_minutes ?? 30),
+      visibility: params.payload.visibility || 'default',
+      guests_can_invite_others: params.payload.guests_can_invite_others !== false,
+      guests_can_modify: Boolean(params.payload.guests_can_modify),
+      guests_can_see_other_guests: params.payload.guests_can_see_other_guests !== false,
     };
 
-    const googleResult =
-      params.event.google_event_id && params.event.google_calendar_id
-        ? await updateGoogleCalendarEvent({
-            supabase: params.serviceSupabase,
-            env: params.env,
-            account,
-            requestUrl: params.requestUrl,
-            googleCalendarId: params.event.google_calendar_id,
-            googleEventId: params.event.google_event_id,
-            input,
-          })
-        : await createGoogleCalendarEvent({
-            supabase: params.serviceSupabase,
-            env: params.env,
-            account,
-            requestUrl: params.requestUrl,
-            input,
-          });
+    const googleResult = params.event.google_event_id && params.event.google_calendar_id
+      ? await updateGoogleCalendarEvent({
+          supabase: params.serviceSupabase,
+          env: params.env,
+          account,
+          requestUrl: params.requestUrl,
+          googleCalendarId: params.event.google_calendar_id,
+          googleEventId: params.event.google_event_id,
+          input,
+        })
+      : await createGoogleCalendarEvent({
+          supabase: params.serviceSupabase,
+          env: params.env,
+          account,
+          requestUrl: params.requestUrl,
+          input,
+        });
 
     const syncedAt = new Date().toISOString();
-
     const nextMetadata = {
       ...(params.event.metadata || {}),
       google_sync: {
@@ -358,11 +269,9 @@ async function syncSavedEventToGoogle(params: {
       .single();
 
     if (error) throw error;
-
     return data || params.event;
   } catch (error: any) {
     const message = error?.message || 'Google Kalender konnte nicht synchronisiert werden.';
-
     const { data } = await params.serviceSupabase
       .from('opc_calendar_events')
       .update({
@@ -386,13 +295,7 @@ export const POST: APIRoute = async (context) => {
   const env = getRuntimeEnv(context);
 
   try {
-    const { supabase: serviceSupabase, user, accessToken } = await getAuthenticatedContext(
-      context.request,
-      env
-    );
-
-    const userSupabase = createAuthenticatedSupabase(env, accessToken);
-
+    const { supabase: serviceSupabase, user } = await getAuthenticatedContext(context.request, env);
     const payload = await context.request.json().catch(() => null);
 
     if (!payload || typeof payload !== 'object') {
@@ -401,64 +304,76 @@ export const POST: APIRoute = async (context) => {
 
     const calendarId = cleanString(payload.calendar_id);
     const title = cleanString(payload.title);
-
-    if (!calendarId) {
-      return jsonResponse({ error: 'calendar_id fehlt.' }, 400);
-    }
-
-    if (!title) {
-      return jsonResponse({ error: 'Titel fehlt.' }, 400);
-    }
-
+    if (!calendarId) return jsonResponse({ error: 'calendar_id fehlt.' }, 400);
+    if (!title) return jsonResponse({ error: 'Titel fehlt.' }, 400);
     if (!payload.starts_at || !payload.ends_at) {
       return jsonResponse({ error: 'Start- und Endzeit fehlen.' }, 400);
     }
 
+    const { startsAt, endsAt } = assertValidPeriod(payload.starts_at, payload.ends_at);
     const staffRole = await resolveStaffRole(serviceSupabase, user.id);
     const currentRole = normalizeRole(staffRole?.role);
-
     if (!staffRole || !canManageCalendar(currentRole)) {
       return jsonResponse({ error: 'Keine Berechtigung für Kalenderänderungen.' }, 403);
     }
 
-    const { data: calendar, error: calendarError } = await userSupabase
+    const { data: calendar, error: calendarError } = await serviceSupabase
       .from('opc_calendars')
-      .select('*')
+      .select('id,is_active')
       .eq('id', calendarId)
       .eq('is_active', true)
       .maybeSingle();
-
     if (calendarError) throw calendarError;
-
-    if (!calendar) {
-      return jsonResponse({ error: 'Kalender wurde nicht gefunden.' }, 404);
-    }
-
-    const assignedStaffRoleIds = cleanArray(payload.assigned_staff_role_ids);
-    const typedAttendeeEmails = mergeUniqueEmails(
-      parseEmailList(payload.attendee_emails),
-      parseEmailList(payload.guest_emails),
-      parseEmailList(payload.guestEmails),
-      parseEmailList(payload.attendeeEmails)
-    );
+    if (!calendar) return jsonResponse({ error: 'Kalender wurde nicht gefunden.' }, 404);
 
     let existingEvent: AnyRow | null = null;
-
     if (payload.id) {
-      const { data, error } = await userSupabase
+      const { data, error } = await serviceSupabase
         .from('opc_calendar_events')
         .select('*')
         .eq('id', payload.id)
         .maybeSingle();
-
       if (error) throw error;
-
-      if (!data) {
-        return jsonResponse({ error: 'Kalendereintrag wurde nicht gefunden.' }, 404);
-      }
-
+      if (!data) return jsonResponse({ error: 'Kalendereintrag wurde nicht gefunden.' }, 404);
       existingEvent = data;
     }
+
+    const assignedStaffRoleIds = cleanArray(payload.assigned_staff_role_ids);
+    let staffRows: AnyRow[] = [];
+    if (assignedStaffRoleIds.length > 0) {
+      const { data, error } = await serviceSupabase
+        .from('opc_staff_roles')
+        .select('id,user_id,email,status,can_access_portal')
+        .in('id', assignedStaffRoleIds)
+        .in('status', ['active', 'aktiv', 'enabled'])
+        .eq('can_access_portal', true);
+      if (error) throw error;
+      staffRows = data || [];
+
+      if (staffRows.length !== assignedStaffRoleIds.length) {
+        return jsonResponse({ error: 'Mindestens ein zugewiesener Mitarbeiter ist nicht mehr aktiv.' }, 409);
+      }
+    }
+
+    const typedAttendeeEmails = mergeUniqueEmails(
+      parseEmailList(payload.attendee_emails),
+      parseEmailList(payload.guest_emails),
+      parseEmailList(payload.guestEmails),
+      parseEmailList(payload.attendeeEmails),
+    );
+    const staffAttendeeEmails = staffRows
+      .map((staff) => String(staff.email || '').trim().toLowerCase())
+      .filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+    const attendeeEmails = mergeUniqueEmails(typedAttendeeEmails, staffAttendeeEmails);
+
+    const attendeeRows = staffRows.map((staff) => ({
+      staff_role_id: staff.id,
+      user_id: staff.user_id || null,
+      attendee_role: 'assigned_worker',
+      status: payload.requires_acceptance ? 'needs_action' : 'accepted',
+      notified_at: null,
+      notification_status: 'pending',
+    }));
 
     const localEventPayload: AnyRow = {
       calendar_id: calendarId,
@@ -466,8 +381,8 @@ export const POST: APIRoute = async (context) => {
       status: cleanString(payload.status) || 'confirmed',
       title,
       description: cleanString(payload.description),
-      starts_at: new Date(payload.starts_at).toISOString(),
-      ends_at: new Date(payload.ends_at).toISOString(),
+      starts_at: startsAt,
+      ends_at: endsAt,
       timezone: cleanString(payload.timezone) || 'Europe/Zurich',
       is_all_day: Boolean(payload.is_all_day),
       location_name: cleanString(payload.location_name),
@@ -480,7 +395,6 @@ export const POST: APIRoute = async (context) => {
       source_channel: cleanString(payload.source_channel) || 'portal',
       source_external_id: cleanString(payload.source_external_id),
       requires_acceptance: Boolean(payload.requires_acceptance),
-      updated_by: user.id,
       metadata: {
         ...(existingEvent?.metadata || {}),
         ...(payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
@@ -496,86 +410,17 @@ export const POST: APIRoute = async (context) => {
       },
     };
 
-    let savedEvent: AnyRow;
-
-    if (existingEvent?.id) {
-      const { data, error } = await userSupabase
-        .from('opc_calendar_events')
-        .update(localEventPayload)
-        .eq('id', existingEvent.id)
-        .select('*')
-        .single();
-
-      if (error) throw error;
-
-      savedEvent = data;
-    } else {
-      const { data, error } = await userSupabase
-        .from('opc_calendar_events')
-        .insert({
-          ...localEventPayload,
-          created_by: user.id,
-          google_sync_status: 'not_synced',
-          google_sync_error: null,
-        })
-        .select('*')
-        .single();
-
-      if (error) throw error;
-
-      savedEvent = data;
-    }
-
-    if (payload.id) {
-      const { error: deleteError } = await userSupabase
-        .from('opc_calendar_event_attendees')
-        .delete()
-        .eq('event_id', savedEvent.id);
-
-      if (deleteError) throw deleteError;
-    }
-
-    let attendeeEmails: string[] = typedAttendeeEmails;
-
-    if (assignedStaffRoleIds.length > 0) {
-      const { data: staffRows, error: staffError } = await serviceSupabase
-        .from('opc_staff_roles')
-        .select('*')
-        .in('id', assignedStaffRoleIds);
-
-      if (staffError) throw staffError;
-
-      const staffAttendeeEmails = Array.from(
-        new Set(
-          (staffRows || [])
-            .map((staff: AnyRow) => staff.email || staff.staff_email || '')
-            .map((email: string) => String(email || '').trim())
-            .filter((email: string) => email.includes('@'))
-        )
-      );
-
-      attendeeEmails = mergeUniqueEmails(typedAttendeeEmails, staffAttendeeEmails);
-
-      const attendeeRows = assignedStaffRoleIds.map((staffRoleId) => {
-        const staff = (staffRows || []).find((row: AnyRow) => row.id === staffRoleId);
-
-        return {
-          event_id: savedEvent.id,
-          staff_role_id: staffRoleId,
-          user_id: staff?.user_id || staff?.auth_user_id || null,
-          attendee_role: 'assigned_worker',
-          status: payload.requires_acceptance ? 'needs_action' : 'accepted',
-          notified_at: null,
-          notification_status: 'pending',
-        };
-      });
-
-      const { error: attendeeError } = await userSupabase
-        .from('opc_calendar_event_attendees')
-        .insert(attendeeRows);
-
-      if (attendeeError) throw attendeeError;
-    }
+    const { data: savedEvent, error: saveError } = await serviceSupabase.rpc(
+      'opc_save_calendar_event_atomic',
+      {
+        p_event_id: existingEvent?.id || null,
+        p_payload: localEventPayload,
+        p_attendees: attendeeRows,
+        p_actor_user_id: user.id,
+      },
+    );
+    if (saveError) throw saveError;
+    if (!savedEvent?.id) throw new Error('Kalendereintrag konnte nicht atomar gespeichert werden.');
 
     const eventWithGoogleSync = await syncSavedEventToGoogle({
       serviceSupabase,
@@ -594,10 +439,8 @@ export const POST: APIRoute = async (context) => {
     });
   } catch (error: any) {
     return jsonResponse(
-      {
-        error: error?.message || 'Calendar event could not be saved.',
-      },
-      error?.status || 500
+      { error: error?.message || 'Calendar event could not be saved.' },
+      error?.status || 500,
     );
   }
 };

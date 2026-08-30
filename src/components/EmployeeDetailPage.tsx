@@ -39,6 +39,8 @@ import MirakaDashboardShell from './MirakaDashboardShell';
 import PayrollOwnerPanel from './PayrollOwnerPanel';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
+import { maskAhvNumber } from '../lib/opc-sensitive-data';
+import EmployeePortalAccessPanel from './EmployeePortalAccessPanel';
 import {
   buildPayrollHtml,
   downloadBase64Pdf,
@@ -264,13 +266,6 @@ function addressText(address: JsonRow | null) {
   ].filter(Boolean).join(', ');
 }
 
-function maskAhv(value?: string | null) {
-  const text = String(value || '').trim();
-  if (!text) return 'Nicht hinterlegt';
-  const digits = text.replace(/\D/g, '');
-  if (digits.length < 6) return text;
-  return `${digits.slice(0, 3)}.••••.••${digits.slice(-2)}`;
-}
 
 function statusVisual(detail: JsonRow | null) {
   const status = normalize(detail?.employee?.status);
@@ -737,6 +732,13 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
             <MetricCard label="Personalakte" value={formatStatus(employee.profile_completion_status)} icon={<FileText size={18} />} />
           </div>
 
+          {role === 'owner' ? (
+            <EmployeePortalAccessPanel
+              employeeId={employeeId}
+              suggestedEmail={employee.business_email || employee.private_email || ''}
+            />
+          ) : null}
+
           {editMode ? (
             <section className="opc-employee-edit-panel" style={cardStyle}>
               <div className="opc-edit-head"><div><h2>Mitarbeiter bearbeiten</h2><p>HR-Stammdaten, Skills und Verfügbarkeit aktualisieren.</p></div><div><button className="opc-btn opc-btn-light" onClick={() => setEditMode(false)}>Abbrechen</button><button className="opc-btn opc-btn-dark" disabled={saving} onClick={() => void saveDetail()}>{saving ? <Loader2 size={15} className="spin" /> : <Save size={15} />}Speichern</button></div></div>
@@ -818,7 +820,7 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
 
           <div className="opc-section-title-row"><h2>Mitarbeiterdaten</h2><div><button onClick={() => scrollStrip('left')}><ChevronLeft size={16} /></button><button onClick={() => scrollStrip('right')}><ChevronRight size={16} /></button></div></div>
           <div className="opc-employee-detail-strip" ref={detailStripRef}>
-            <DetailCard title="Personal"><MiniField label="Personalnummer" value={employee.employee_number} /><MiniField label="Geburtsdatum" value={formatDate(employee.date_of_birth)} /><MiniField label="Zivilstand" value={formatStatus(employee.civil_status)} /><MiniField label="AHV" value={maskAhv(employee.ahv_number)} /></DetailCard>
+            <DetailCard title="Personal"><MiniField label="Personalnummer" value={employee.employee_number} /><MiniField label="Geburtsdatum" value={formatDate(employee.date_of_birth)} /><MiniField label="Zivilstand" value={formatStatus(employee.civil_status)} /><MiniField label="AHV" value={maskAhvNumber(employee.ahv_number)} /></DetailCard>
             <DetailCard title="Kontakt"><MiniField label="Telefon" value={employee.phone_e164 || employee.phone_raw} /><MiniField label="E-Mail" value={employee.business_email || employee.private_email} /><MiniField label="Adresse" value={addressText(address)} /><MiniField label="Sprache" value={employee.preferred_language} /></DetailCard>
             <DetailCard title="Organisation"><MiniField label="Rechtsträger" value={entity.legal_name} /><MiniField label="Position" value={position.title_de} /><MiniField label="Personentyp" value={formatPersonnelType(employee.personnel_type)} /><MiniField label="Eintritt" value={formatDate(employee.entry_date)} /></DetailCard>
             <DetailCard title="Bewilligung"><MiniField label="Nationalität" value={detail.current_nationality?.country_code} /><MiniField label="Ausweis" value={permit.permit_type ? String(permit.permit_type).toUpperCase() : null} /><MiniField label="Status" value={formatStatus(permit.permit_status)} /><MiniField label="Gültig bis" value={formatDate(permit.valid_until)} /></DetailCard>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { safeNavigate } from '../lib/opc-navigation-guard';
 import { supabase } from '../lib/supabase';
+import { consumeOpcAuthReturnTarget } from '../lib/opc-auth-return';
 import {
   clearCachedOpcAuthProfile,
   refreshOpcAuthProfile,
@@ -194,7 +195,10 @@ export default function OPCLogin() {
         });
 
         if (mounted) {
-          safeNavigate('/dashboard', { replace: true });
+          safeNavigate(
+          consumeOpcAuthReturnTarget() || '/dashboard',
+          { replace: true },
+        );
         }
       } catch {
         if (mounted) setSessionChecking(false);
@@ -247,7 +251,10 @@ export default function OPCLogin() {
       window.localStorage.removeItem('mco_logged_out');
       window.sessionStorage.removeItem('mco_logged_out');
 
-      safeNavigate('/dashboard', { replace: true });
+      safeNavigate(
+          consumeOpcAuthReturnTarget() || '/dashboard',
+          { replace: true },
+        );
     } catch (err: any) {
       setError(err?.message || 'Login fehlgeschlagen.');
       setLoading(false);

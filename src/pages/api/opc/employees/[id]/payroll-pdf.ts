@@ -2,11 +2,14 @@ import type { APIRoute } from 'astro';
 import { jsPDF } from 'jspdf';
 import {
   cleanText,
-  errorStatus,
   jsonResponse,
   requireEmployeeHrAccess,
 } from '../../../../../lib/opc-employee-api';
-import { calculateEmployeePayroll } from '../../../../../lib/opc-payroll-engine';
+import {
+  calculateEmployeePayroll,
+  payrollErrorStatus,
+} from '../../../../../lib/opc-payroll-engine';
+import { maskAhvNumber } from '../../../../../lib/opc-sensitive-data';
 
 export const prerender = false;
 
@@ -39,7 +42,13 @@ function pdfText(value: unknown) {
 function createPayrollPdf(calculation: Awaited<ReturnType<typeof calculateEmployeePayroll>>) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
   const payroll = (calculation.payrollDocument?.payroll || {}) as Record<string, any>;
-  const employee = (calculation.payrollDocument?.employee || {}) as Record<string, any>;
+  const employeeSource =
+    (calculation.payrollDocument?.employee || {}) as Record<string, any>;
+
+  const employee = {
+    ...employeeSource,
+    ahvNumber: maskAhvNumber(employeeSource.ahvNumber),
+  };
   const document = (calculation.payrollDocument?.document || {}) as Record<string, any>;
   const pageWidth = 210;
   const left = 18;
@@ -226,7 +235,7 @@ export const GET: APIRoute = async ({ request, locals, cookies, params }) => {
     console.error('[opc/employees/id/payroll-pdf] GET failed', error);
     return jsonResponse(
       { success: false, error: error?.message || 'Lohnabrechnung-PDF konnte nicht erstellt werden.' },
-      errorStatus(error),
+      payrollErrorStatus(error),
     );
   }
 };

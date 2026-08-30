@@ -115,6 +115,7 @@ function activeRow(rows: JsonRow[]) {
     null;
 }
 
+
 async function accessToken() {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -237,6 +238,7 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
 
   const employee = settings?.employee || employeeProp || {};
   const activeRuleSet = settings?.activeRuleSet || null;
+
 
   async function load() {
     setLoading(true);
@@ -526,9 +528,46 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
 
       <div className="opc-payroll-panel">
         <div className="opc-payroll-panel-title"><Calculator size={17} /><div><strong>Sozialabgaben und Auszahlung</strong><span>Arbeitnehmer- und Arbeitgeberanteile werden getrennt gespeichert.</span></div></div>
+
         <div className="opc-payroll-grid four">
           <Input label="Gültig ab"><input type="date" value={profile.valid_from || ''} onChange={(e) => setProfileField('valid_from', e.target.value)} /></Input>
           <Input label="Gültig bis"><input type="date" value={profile.valid_until || ''} onChange={(e) => setProfileField('valid_until', e.target.value)} /></Input>
+          <Input label="AHV/IV/EO Arbeitnehmer %">
+            <input
+              type="number"
+              readOnly
+              aria-readonly="true"
+              value={activeRuleSet?.ahv_employee_rate ?? ''}
+              title={`Globaler Payroll-Regelsatz ${activeRuleSet?.rule_year || ''}`}
+            />
+          </Input>
+          <Input label="AHV/IV/EO Arbeitgeber %">
+            <input
+              type="number"
+              readOnly
+              aria-readonly="true"
+              value={activeRuleSet?.ahv_employer_rate ?? ''}
+              title={`Globaler Payroll-Regelsatz ${activeRuleSet?.rule_year || ''}`}
+            />
+          </Input>
+          <Input label="ALV Arbeitnehmer %">
+            <input
+              type="number"
+              readOnly
+              aria-readonly="true"
+              value={activeRuleSet?.alv_employee_rate ?? ''}
+              title={`Globaler Payroll-Regelsatz ${activeRuleSet?.rule_year || ''}`}
+            />
+          </Input>
+          <Input label="ALV Arbeitgeber %">
+            <input
+              type="number"
+              readOnly
+              aria-readonly="true"
+              value={activeRuleSet?.alv_employer_rate ?? ''}
+              title={`Globaler Payroll-Regelsatz ${activeRuleSet?.rule_year || ''}`}
+            />
+          </Input>
           <Input label="NBU Arbeitnehmer %"><input type="number" min="0" step="0.0001" value={profile.nbu_employee_rate ?? 0} onChange={(e) => setProfileField('nbu_employee_rate', e.target.value)} /></Input>
           <Input label="NBU Arbeitgeber %"><input type="number" min="0" step="0.0001" value={profile.nbu_employer_rate ?? 0} onChange={(e) => setProfileField('nbu_employer_rate', e.target.value)} /></Input>
           <Input label="KTG Arbeitnehmer %"><input type="number" min="0" step="0.0001" value={profile.ktg_employee_rate ?? 0} onChange={(e) => setProfileField('ktg_employee_rate', e.target.value)} /></Input>

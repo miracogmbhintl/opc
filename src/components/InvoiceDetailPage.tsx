@@ -635,8 +635,10 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const removedItemIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    removedItemIdsRef.current.clear();
     void loadInvoice({ clearMessages: true });
   }, [invoiceId]);
 
@@ -806,15 +808,11 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
     ]);
   }
 
-  async function removeItem(item: InvoiceItem, index: number) {
-    if (!supabase) return;
+  function removeItem(item: InvoiceItem, index: number) {
+    const itemId = String(item.id || '');
 
-    if (!String(item.id).startsWith('local-')) {
-      const { error } = await supabase.from('opc_invoice_items').delete().eq('id', item.id);
-      if (error) {
-        setErrorMessage(error.message);
-        return;
-      }
+    if (itemId && !itemId.startsWith('local-')) {
+      removedItemIdsRef.current.add(itemId);
     }
 
     setItems((previous) => previous.filter((_, itemIndex) => itemIndex !== index));
@@ -889,11 +887,36 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         metadata: getMetadata(item),
       }));
 
-      const atomicResponse = await supabase.rpc('opc_save_invoice_atomic', {
+      const removedItemIds = Array.from(removedItemIdsRef.current);
+      const removedItemIdSet = new Set(removedItemIds);
+      const atomicArgs = {
         p_invoice_id: invoice.id,
         p_invoice: invoicePayload,
         p_items: itemPayloads,
-      });
+      };
+
+      const syncResponse = await supabase.rpc('opc_save_invoice_sync_atomic', atomicArgs);
+      const syncMissing =
+        syncResponse.error &&
+        (
+          /opc_save_invoice_sync_atomic/i.test(String(syncResponse.error.message || '')) &&
+          /schema cache|could not find|function/i.test(String(syncResponse.error.message || ''))
+        );
+
+      if (syncResponse.error && !syncMissing) {
+        throw syncResponse.error;
+      }
+
+      let usedSyncAtomic = !syncMissing;
+      let atomicResponse = syncResponse;
+
+      if (syncMissing) {
+        console.warn(
+          '[finance] opc_save_invoice_sync_atomic is not installed yet; using opc_save_invoice_atomic compatibility path.'
+        );
+        usedSyncAtomic = false;
+        atomicResponse = await supabase.rpc('opc_save_invoice_atomic', atomicArgs);
+      }
 
       const atomicMissing =
         atomicResponse.error &&
@@ -958,9 +981,27 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
           }
         }
 
+        if (removedItemIds.length) {
+          const { error: deleteError } = await supabase
+            .from('opc_invoice_items')
+            .delete()
+            .eq('invoice_id', invoice.id)
+            .in('id', removedItemIds);
+          if (deleteError) throw deleteError;
+        }
+
         setInvoice(savedInvoice || invoice);
         await loadInvoice({ clearMessages: false });
       } else {
+        if (!usedSyncAtomic && removedItemIds.length) {
+          const { error: deleteError } = await supabase
+            .from('opc_invoice_items')
+            .delete()
+            .eq('invoice_id', invoice.id)
+            .in('id', removedItemIds);
+          if (deleteError) throw deleteError;
+        }
+
         const saved = atomicResponse.data;
 
         if (!saved?.invoice?.id) {
@@ -968,8 +1009,9 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
         }
 
         setInvoice(saved.invoice);
-        setItems(Array.isArray(saved.items) ? saved.items : items);
+        setItems((Array.isArray(saved.items) ? saved.items : items).filter((row: InvoiceItem) => !removedItemIdSet.has(String(row?.id || ''))));
       }
+      removedItemIdsRef.current.clear();
       const savedTime = new Date().toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
       setLastSavedAt(savedTime);
       if (!options.silent) setSuccessMessage(`Gespeichert um ${savedTime}.`);
@@ -1968,7 +2010,7 @@ export default function InvoiceDetailPage({ invoiceId }: InvoiceDetailPageProps)
           <OPCListCard>
             <CardHeader title="Schweizer QR-Rechnung" />
             <div style={qrInfoStyle}>
-              Bankdaten und Fusszeile sind im Rechnungs-PDF integriert. Die echte Schweizer QR-Rechnung wird im nächsten Schritt als standardkonformer Zahlteil ergänzt. Dafür verwenden wir IBAN, Kontoinhaber und Rechnungsbetrag aus dieser Rechnung.
+              Bankdaten, Fusszeile und Schweizer QR-Zahlteil sind im Rechnungs-PDF integriert. IBAN, Kontoinhaber, Rechnungsbetrag und Referenz werden aus dieser Rechnung übernommen.
             </div>
           </OPCListCard>
         </section>

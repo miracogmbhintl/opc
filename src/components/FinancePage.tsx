@@ -198,10 +198,16 @@ function getCreatedTime(record: { created_at?: string | null }) {
 }
 
 function getInvoiceBalance(invoice: InvoiceRow) {
+  /*
+   * Only genuinely issued/open invoices belong in the
+   * outstanding-balance metric. Drafts, cancelled invoices
+   * and void documents must never contribute even if an old
+   * balance_chf value is still stored on the row.
+   */
+  if (!isProbablyOpenByStatus(invoice.status)) return 0;
+
   const explicitBalance = toNumber(invoice.balance_chf);
   if (explicitBalance > 0) return explicitBalance;
-
-  if (!isProbablyOpenByStatus(invoice.status)) return 0;
 
   const total = toNumber(invoice.total_chf);
   const paid = toNumber(invoice.paid_chf);
@@ -210,15 +216,35 @@ function getInvoiceBalance(invoice: InvoiceRow) {
 
 function isProbablyOpenByStatus(status?: string | null) {
   const key = normalize(status);
-  return ['draft', 'ready', 'sent', 'partially_paid', 'overdue', 'open'].includes(key);
+
+  return [
+    'sent',
+    'viewed',
+    'partially_paid',
+    'overdue',
+    'open',
+  ].includes(key);
 }
 
 function getRevenueAmount(invoice: InvoiceRow) {
-  const paid = toNumber(invoice.paid_chf);
-  if (paid > 0) return paid;
-
+  /*
+   * Finance overview means issued invoice volume here.
+   * Draft, ready, cancelled and void documents are excluded.
+   */
   const status = normalize(invoice.status);
-  if (status === 'paid') return toNumber(invoice.total_chf);
+
+  if (
+    ![
+      'sent',
+      'viewed',
+      'partially_paid',
+      'overdue',
+      'open',
+      'paid',
+    ].includes(status)
+  ) {
+    return 0;
+  }
 
   return toNumber(invoice.total_chf);
 }
@@ -471,6 +497,46 @@ function EmptySection() {
   );
 }
 
+function FinanceNotice({
+  title,
+  text,
+  href,
+  label,
+}: {
+  title: string;
+  text: string;
+  href?: string;
+  label?: string;
+}) {
+  return (
+    <div className="opc-finance-placeholder" style={cardStyle}>
+      <FolderOpen
+        size={44}
+        strokeWidth={1.5}
+        color="#D1D5DB"
+      />
+
+      <h3>{title}</h3>
+      <p>{text}</p>
+
+      {href && label ? (
+        <a
+          className="opc-finance-more-link"
+          href={href}
+          data-astro-prefetch="false"
+          style={{
+            width: '100%',
+            marginTop: '4px',
+          }}
+        >
+          <span>{label}</span>
+          <ArrowUpRight size={16} />
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function FinanceMoreLink({ href, label }: { href: string; label: string }) {
   return (
     <a className="opc-finance-more-link" href={href} data-astro-prefetch="false">
@@ -610,7 +676,7 @@ export default function FinancePage() {
     [invoices],
   );
 
-  const expensesTotal = 0;
+  const expensesTotal: number | null = null;
   const openBalance = useMemo(
     () => invoices.reduce((sum, invoice) => sum + getInvoiceBalance(invoice), 0),
     [invoices],
@@ -669,9 +735,9 @@ export default function FinancePage() {
         {errorMessage ? <div className="opc-finance-error">{errorMessage}</div> : null}
 
         <div className="opc-finance-metrics">
-          <MetricCard value={formatMoney(revenueTotal)} label="Umsatz" icon={<WalletCards size={17} />} />
+          <MetricCard value={formatMoney(revenueTotal)} label="Verrechneter Umsatz" icon={<WalletCards size={17} />} />
           <MetricCard value={profitMargin} label="Gewinnmarge" icon={<WalletCards size={17} />} />
-          <MetricCard value={formatMoney(expensesTotal)} label="Ausgaben" icon={<FileText size={17} />} />
+          <MetricCard value={expensesTotal === null ? '—' : formatMoney(expensesTotal)} label="Ausgaben" icon={<FileText size={17} />} />
           <MetricCard value={formatMoney(openBalance)} label="Offene Rechnungen" icon={<AlertTriangle size={17} />} />
         </div>
 
@@ -717,15 +783,21 @@ export default function FinancePage() {
 
         {activeSection === 'expenses' ? (
           <section className="opc-finance-section">
-            <EmptySection />
-            <FinanceMoreLink href={`${baseUrl}/finanzen/ausgaben`} label="Ausgaben öffnen" />
+            <FinanceNotice
+              title="Ausgaben noch nicht angebunden"
+              text="Für Orange Pro Clean ist aktuell noch kein Ausgaben-Backend in diesem Portal verbunden. Deshalb zeigen wir hier bewusst keinen erfundenen CHF-0.00-Wert an."
+            />
           </section>
         ) : null}
 
         {activeSection === 'payroll' ? (
           <section className="opc-finance-section">
-            <EmptySection />
-            <FinanceMoreLink href={`${baseUrl}/finanzen/lohn`} label="Lohn öffnen" />
+            <FinanceNotice
+              title="Lohnabrechnung"
+              text="Die bestehende Lohnabrechnung wird aktuell direkt pro Mitarbeiter verwaltet. Verträge, Lohnparameter, Monatsvorschau und PDF bleiben dort angebunden."
+              href={`${baseUrl}/mitarbeiter`}
+              label="Mitarbeiter & Lohn öffnen"
+            />
           </section>
         ) : null}
       </div>

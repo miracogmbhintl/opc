@@ -3,10 +3,12 @@ import { supabase, type UserProfile, type UserRole } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
+import { ContextualOwnerDataExport } from './OwnerDataExportButton';
 import { TranslationProvider, useTranslation } from '../lib/TranslationContext';
 import { loadOpcAuthProfile, writeCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import { safeNavigate } from '../lib/opc-navigation-guard';
 
+import { rememberOpcAuthReturnTarget } from '../lib/opc-auth-return';
 interface DashboardShellProps {
   children: ReactNode;
   title?: string;
@@ -636,6 +638,7 @@ function DashboardShellContent({
       const normalizedProfile = await loadOpcAuthProfile();
 
       if (!normalizedProfile) {
+        rememberOpcAuthReturnTarget();
         safeNavigate(`${baseUrl}${OPC_ROUTES.login}`);
         return;
       }
@@ -656,6 +659,8 @@ function DashboardShellContent({
       console.error('Auth check error:', err);
       setError(err?.message || 'Authentication failed');
       setLoading(false);
+
+      rememberOpcAuthReturnTarget();
 
       setTimeout(() => {
         safeNavigate(`${baseUrl}${OPC_ROUTES.login}`);
@@ -786,6 +791,9 @@ function DashboardShellContent({
         }}
       >
         <main className="miraka-dashboard-content">
+          <ContextualOwnerDataExport
+            pathname={currentPath || window.location.pathname}
+          />
           {children}
         </main>
       </div>

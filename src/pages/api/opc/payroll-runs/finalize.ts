@@ -1,13 +1,15 @@
 import type { APIRoute } from 'astro';
 import {
   cleanText,
-  errorStatus,
   jsonResponse,
   requireEmployeeHrAccess,
   safeObject,
   throwOnError,
 } from '../../../../lib/opc-employee-api';
-import { calculateEmployeePayroll } from '../../../../lib/opc-payroll-engine';
+import {
+  calculateEmployeePayroll,
+  payrollErrorStatus,
+} from '../../../../lib/opc-payroll-engine';
 
 export const prerender = false;
 
@@ -24,9 +26,21 @@ function runNumber(employeeNumber: string, periodFrom: string, periodTo: string)
   return `OPC-LR-${employeePart}-${periodFrom.replaceAll('-', '')}-${periodTo.replaceAll('-', '')}-${stamp}`;
 }
 
+function finalizeErrorStatus(error: any) {
+  const message = String(error?.message || '').toLowerCase();
+
+  if (
+    message.includes('überschneidet sich') ||
+    message.includes('bereits im abgeschlossenen lohnlauf') ||
+    message.includes('bereits abgeschlossenen lohnlauf')
+  ) {
+    return 409;
+  }
+
+  return payrollErrorStatus(error);
+}
+
 export const POST: APIRoute = async ({ request, locals, cookies }) => {
-  let cleanupSupabase: any = null;
-  let createdRunId: string | null = null;
   try {
     const body = safeObject(await request.json().catch(() => ({})));
     const employeeId = cleanText(body.employeeId);
@@ -38,7 +52,6 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     }
 
     const { supabase, access } = await requireEmployeeHrAccess({ request, locals, cookies });
-    cleanupSupabase = supabase;
     if (!access.canManagePayroll) {
       return jsonResponse({ success: false, error: 'Keine Berechtigung für Payroll.' }, 403);
     }
@@ -114,109 +127,95 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       periodTo,
     );
 
-    const runResponse = await supabase
-      .from('opc_payroll_runs')
-      .insert({
-        run_number: number,
-        employee_id: employeeId,
-        period_from: periodFrom,
-        period_to: periodTo,
-        status: 'calculated',
-        rule_set_id: calculation.ruleSet.id || null,
-        currency_code: 'CHF',
-        total_gross_chf: calculation.grossSalary,
-        total_employee_deductions_chf: calculation.employeeDeductions,
-        total_net_chf: calculation.netSalary,
-        total_reimbursements_chf: calculation.reimbursements,
-        total_payout_chf: calculation.payout,
-        total_employer_contributions_chf: calculation.employerContributions,
-        total_employer_cost_chf: calculation.totalEmployerCost,
-        calculated_at: new Date().toISOString(),
-        approved_at: null,
-        approved_by: null,
-        created_by: actorId,
-        updated_by: actorId,
-        metadata: {
-          calculation_version: 'opc_payroll_reconciliation_v2',
-          source: 'employee_payroll_owner_panel',
-          filename: calculation.filename,
-          warnings: calculation.warnings,
-        },
-      })
-      .select('*')
-      .single();
-    throwOnError(runResponse.error, 'Lohnlauf konnte nicht angelegt werden');
-    createdRunId = runResponse.data.id;
+    const runPayload = {
+      run_number: number,
+      employee_id: employeeId,
+      period_from: periodFrom,
+      period_to: periodTo,
+      rule_set_id: calculation.ruleSet.id || null,
+      currency_code: 'CHF',
+      total_gross_chf: calculation.grossSalary,
+      total_employee_deductions_chf: calculation.employeeDeductions,
+      total_net_chf: calculation.netSalary,
+      total_reimbursements_chf: calculation.reimbursements,
+      total_payout_chf: calculation.payout,
+      total_employer_contributions_chf: calculation.employerContributions,
+      total_employer_cost_chf: calculation.totalEmployerCost,
+      metadata: {
+        calculation_version: 'opc_payroll_reconciliation_v2',
+        source: 'employee_payroll_owner_panel',
+        filename: calculation.filename,
+        warnings: calculation.warnings,
+      },
+    };
 
-    const employeeRunResponse = await supabase
-      .from('opc_payroll_run_employees')
-      .insert({
-        payroll_run_id: runResponse.data.id,
-        employee_id: employeeId,
-        contract_id: calculation.contract.id || null,
-        payroll_profile_id: calculation.payrollProfile.id || null,
-        salary_type: calculation.salaryType,
-        approved_entry_count: calculation.entriesCount,
-        approved_minutes: calculation.totalMinutes,
-        payable_days: calculation.payableDays,
-        period_working_days: calculation.periodWorkingDays,
-        base_salary_chf: calculation.baseSalary,
-        gross_salary_chf: calculation.grossSalary,
-        employee_deductions_chf: calculation.employeeDeductions,
-        net_salary_chf: calculation.netSalary,
-        reimbursements_chf: calculation.reimbursements,
-        other_adjustments_chf: calculation.otherAdjustments,
-        payout_chf: calculation.payout,
-        employer_contributions_chf: calculation.employerContributions,
-        total_employer_cost_chf: calculation.totalEmployerCost,
-        gross_per_hour_chf: calculation.grossPerHour,
-        net_per_hour_chf: calculation.netPerHour,
-        employer_cost_per_hour_chf: calculation.employerCostPerHour,
-        calculation_snapshot: calculation.snapshot,
-      })
-      .select('*')
-      .single();
-    throwOnError(employeeRunResponse.error, 'Mitarbeiterabrechnung konnte nicht gespeichert werden');
+    const employeeRunPayload = {
+      employee_id: employeeId,
+      contract_id: calculation.contract.id || null,
+      payroll_profile_id: calculation.payrollProfile.id || null,
+      salary_type: calculation.salaryType,
+      approved_entry_count: calculation.entriesCount,
+      approved_minutes: calculation.totalMinutes,
+      payable_days: calculation.payableDays,
+      period_working_days: calculation.periodWorkingDays,
+      base_salary_chf: calculation.baseSalary,
+      gross_salary_chf: calculation.grossSalary,
+      employee_deductions_chf: calculation.employeeDeductions,
+      net_salary_chf: calculation.netSalary,
+      reimbursements_chf: calculation.reimbursements,
+      other_adjustments_chf: calculation.otherAdjustments,
+      payout_chf: calculation.payout,
+      employer_contributions_chf: calculation.employerContributions,
+      total_employer_cost_chf: calculation.totalEmployerCost,
+      gross_per_hour_chf: calculation.grossPerHour,
+      net_per_hour_chf: calculation.netPerHour,
+      employer_cost_per_hour_chf: calculation.employerCostPerHour,
+      calculation_snapshot: calculation.snapshot,
+    };
 
-    if (calculation.lines.length) {
-      const lineResponse = await supabase.from('opc_payroll_lines').insert(
-        calculation.lines.map((item) => ({
-          payroll_run_employee_id: employeeRunResponse.data.id,
-          line_group: item.lineGroup,
-          line_code: item.lineCode,
-          description: item.description,
-          basis_amount_chf: item.basisAmount,
-          quantity: item.quantity,
-          rate: item.rate,
-          employee_amount_chf: item.employeeAmount,
-          employer_amount_chf: item.employerAmount,
-          sort_order: item.sortOrder,
-          source: item.source,
-          metadata: item.metadata || {},
-        })),
+    const linePayload = calculation.lines.map((item) => ({
+      line_group: item.lineGroup,
+      line_code: item.lineCode,
+      description: item.description,
+      basis_amount_chf: item.basisAmount,
+      quantity: item.quantity,
+      rate: item.rate,
+      employee_amount_chf: item.employeeAmount,
+      employer_amount_chf: item.employerAmount,
+      sort_order: item.sortOrder,
+      source: item.source,
+      metadata: item.metadata || {},
+    }));
+
+    const finalizeResponse = await supabase.rpc(
+      'opc_finalize_payroll_atomic',
+      {
+        p_run: runPayload,
+        p_employee_run: employeeRunPayload,
+        p_lines: linePayload,
+        p_actor_user_id: actorId,
+      },
+    );
+
+    throwOnError(
+      finalizeResponse.error,
+      'Lohnlauf konnte nicht atomar abgeschlossen werden',
+    );
+
+    const atomicResult = safeObject(finalizeResponse.data);
+    const approvedRun = safeObject(atomicResult.run);
+    const employeeRun = safeObject(atomicResult.employeeRun);
+
+    if (!approvedRun.id || !employeeRun.id) {
+      throw new Error(
+        'Die atomare Payroll-Finalisierung lieferte kein vollständiges Ergebnis.',
       );
-      throwOnError(lineResponse.error, 'Lohnpositionen konnten nicht gespeichert werden');
     }
-
-    const approvedResponse = await supabase
-      .from('opc_payroll_runs')
-      .update({
-        status: 'approved',
-        approved_at: new Date().toISOString(),
-        approved_by: actorId,
-        updated_by: actorId,
-      })
-      .eq('id', runResponse.data.id)
-      .eq('status', 'calculated')
-      .select('*')
-      .single();
-    throwOnError(approvedResponse.error, 'Lohnlauf konnte nicht abgeschlossen werden');
-    createdRunId = null;
 
     return jsonResponse({
       success: true,
-      run: approvedResponse.data,
-      employeeRun: employeeRunResponse.data,
+      run: approvedRun,
+      employeeRun,
       payroll: calculation.payrollDocument,
       filename: calculation.filename,
       summary: {
@@ -236,21 +235,10 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       },
     });
   } catch (error: any) {
-    if (createdRunId && cleanupSupabase) {
-      try {
-        await cleanupSupabase
-          .from('opc_payroll_runs')
-          .delete()
-          .eq('id', createdRunId)
-          .eq('status', 'calculated');
-      } catch (cleanupError) {
-        console.error('[opc/payroll-runs/finalize] cleanup failed', cleanupError);
-      }
-    }
     console.error('[opc/payroll-runs/finalize] POST failed', error);
     return jsonResponse(
       { success: false, error: error?.message || 'Lohnlauf konnte nicht abgeschlossen werden.' },
-      errorStatus(error),
+      finalizeErrorStatus(error),
     );
   }
 };

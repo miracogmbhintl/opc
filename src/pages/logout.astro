@@ -40,6 +40,7 @@ const supabaseAnonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
         
         const supabase = createClient(supabaseUrl, supabaseAnonKey);
         
+        window.sessionStorage.removeItem('opc:auth-return-to:v1');
         await supabase.auth.signOut({ scope: 'local' });
         
         // Small delay to ensure signout completes
