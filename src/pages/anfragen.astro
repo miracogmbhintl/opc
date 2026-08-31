@@ -51,6 +51,136 @@ export const prerender = false;
       }
     })();
   </script>
+
+  <script is:inline>
+    (() => {
+      const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v14-schema-aware-progressive';
+
+      const clean = (value) => String(value ?? '').trim();
+      const isMissing = (value) => {
+        const normalized = clean(value).toLowerCase();
+        return !normalized || normalized === '—' || normalized === '-' || normalized === 'null' || normalized === 'undefined';
+      };
+      const normalizePhone = (value) => clean(value).replace(/\D/g, '');
+
+      const readCachedItems = () => {
+        try {
+          const raw = window.sessionStorage.getItem(REQUESTS_PAGE_CACHE_KEY);
+          if (!raw) return [];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed?.data?.items) ? parsed.data.items : [];
+        } catch {
+          return [];
+        }
+      };
+
+      const findPreviewBox = (modal, label) => {
+        return Array.from(modal.querySelectorAll('.opc-preview-box')).find((box) => {
+          return clean(box.querySelector('span')?.textContent).toLowerCase() === label.toLowerCase();
+        });
+      };
+
+      const getBoxValue = (box) => clean(box?.querySelector('strong')?.textContent);
+
+      const findCachedInquiry = (modal) => {
+        const items = readCachedItems();
+        if (!items.length) return null;
+
+        const title = clean(modal.querySelector('.opc-modal-head h2')?.textContent);
+        const email = getBoxValue(findPreviewBox(modal, 'E-Mail'));
+        const phone = normalizePhone(getBoxValue(findPreviewBox(modal, 'Telefon')));
+
+        if (email && email !== '—') {
+          const byEmail = items.find((item) => clean(item?.email).toLowerCase() === email.toLowerCase());
+          if (byEmail) return byEmail;
+        }
+
+        if (phone) {
+          const byPhone = items.find((item) => {
+            const itemPhone = normalizePhone(item?.phoneE164 || item?.phoneRaw);
+            return itemPhone && itemPhone === phone;
+          });
+          if (byPhone) return byPhone;
+        }
+
+        if (title) {
+          return items.find((item) => clean(item?.title) === title || clean(item?.clientName) === title) || null;
+        }
+
+        return null;
+      };
+
+      const uniqueParts = (values) => {
+        const seen = new Set();
+        return values
+          .map(clean)
+          .filter(Boolean)
+          .filter((value) => {
+            const key = value.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+      };
+
+      const patchInquiryModal = (modal) => {
+        if (!(modal instanceof HTMLElement) || !modal.querySelector('.opc-preview-grid')) return;
+
+        const item = findCachedInquiry(modal);
+        if (!item) return;
+
+        const locationBox = findPreviewBox(modal, 'Standort');
+        const addressBox = findPreviewBox(modal, 'Adresse');
+        const locationValue = getBoxValue(locationBox);
+        const addressValue = getBoxValue(addressBox);
+
+        if (locationBox && isMissing(locationValue)) {
+          const zipCity = uniqueParts([item?.postalCode, item?.city]).join(' ');
+          const baseLocation = clean(item?.locationLine) || uniqueParts([
+            item?.objectTypeLabel || item?.siteName,
+            item?.addressText,
+            zipCity,
+          ]).join(' · ');
+
+          const detailParts = uniqueParts([
+            baseLocation,
+            item?.surfaceLabel ? `${item.surfaceLabel} m²` : '',
+            item?.roomCount ? `${item.roomCount} Zimmer` : '',
+            item?.floorLabel ? `Etage ${item.floorLabel}` : '',
+            item?.elevatorLabel,
+          ]);
+
+          const strong = locationBox.querySelector('strong');
+          if (strong && detailParts.length) strong.textContent = detailParts.join(' · ');
+        }
+
+        if (addressBox && isMissing(addressValue)) {
+          const zipCity = uniqueParts([item?.postalCode, item?.city]).join(' ');
+          const addressParts = uniqueParts([item?.addressText, zipCity || item?.city]);
+          const strong = addressBox.querySelector('strong');
+          if (strong && addressParts.length) strong.textContent = addressParts.join(', ');
+        }
+      };
+
+      const scan = () => {
+        document.querySelectorAll('.opc-modal-card').forEach(patchInquiryModal);
+      };
+
+      const start = () => {
+        scan();
+        const observer = new MutationObserver(scan);
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+      };
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start, { once: true });
+      } else {
+        start();
+      }
+
+      document.addEventListener('astro:page-load', scan);
+    })();
+  </script>
   
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
