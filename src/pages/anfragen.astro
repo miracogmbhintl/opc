@@ -54,6 +54,9 @@ export const prerender = false;
 
   <script is:inline>
     (() => {
+      if (window.__OPC_INQUIRY_DETAIL_LOCATION_PATCH__) return;
+      window.__OPC_INQUIRY_DETAIL_LOCATION_PATCH__ = true;
+
       const REQUESTS_PAGE_CACHE_KEY = 'opc:page-cache:requests:v14-schema-aware-progressive';
 
       const clean = (value) => String(value ?? '').trim();
