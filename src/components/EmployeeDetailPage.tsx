@@ -721,26 +721,25 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
             <div className="opc-employee-hero-actions">
               {(employee.phone_e164 || employee.phone_raw) ? <a className="opc-btn opc-btn-light" href={`tel:${employee.phone_e164 || employee.phone_raw}`}><Phone size={16} />Anrufen</a> : null}
               {(employee.phone_e164 || employee.phone_raw) ? <a className="opc-btn opc-btn-light" target="_blank" rel="noreferrer" href={`https://wa.me/${String(employee.phone_e164 || employee.phone_raw).replace(/\D/g,'')}`}><MessageCircle size={16} />WhatsApp</a> : null}
-              <button type="button" className="opc-btn opc-btn-dark" onClick={() => { setDraft(makeDraft(detail)); setDayRules(makeDayRules(detail)); setEditMode((current) => !current); }}>{editMode ? 'Bearbeitung schliessen' : 'Mitarbeiter bearbeiten'}</button>
+              <button
+                type="button"
+                className="opc-btn opc-btn-dark"
+                aria-expanded={editMode}
+                aria-controls="opc-employee-inline-editor"
+                onClick={() => {
+                  setDraft(makeDraft(detail));
+                  setDayRules(makeDayRules(detail));
+                  setEditMode((current) => !current);
+                }}
+              >
+                <ShieldCheck size={16} />
+                {editMode ? 'Bearbeitung schliessen' : 'Mitarbeiter bearbeiten'}
+              </button>
             </div>
           </section>
 
-          <div className="opc-employee-metrics-grid">
-            <MetricCard label="Status" value={visual.label} icon={<CheckCircle2 size={18} />} />
-            <MetricCard label="Verfügbarkeit" value={availabilityLabel} helper={`${asArray(detail.availability_rules).length} Zeitfenster`} icon={<Clock3 size={18} />} />
-            <MetricCard label="Skills" value={skills.length} helper={skills.filter((skill) => skill.is_preferred).length ? `${skills.filter((skill) => skill.is_preferred).length} bevorzugt` : 'Keine bevorzugt'} icon={<BadgeCheck size={18} />} />
-            <MetricCard label="Personalakte" value={formatStatus(employee.profile_completion_status)} icon={<FileText size={18} />} />
-          </div>
-
-          {role === 'owner' ? (
-            <EmployeePortalAccessPanel
-              employeeId={employeeId}
-              suggestedEmail={employee.business_email || employee.private_email || ''}
-            />
-          ) : null}
-
           {editMode ? (
-            <section className="opc-employee-edit-panel" style={cardStyle}>
+            <section id="opc-employee-inline-editor" className="opc-employee-edit-panel opc-employee-edit-panel-inline" style={cardStyle}>
               <div className="opc-edit-head"><div><h2>Mitarbeiter bearbeiten</h2><p>HR-Stammdaten, Skills und Verfügbarkeit aktualisieren.</p></div><div><button className="opc-btn opc-btn-light" onClick={() => setEditMode(false)}>Abbrechen</button><button className="opc-btn opc-btn-dark" disabled={saving} onClick={() => void saveDetail()}>{saving ? <Loader2 size={15} className="spin" /> : <Save size={15} />}Speichern</button></div></div>
 
               <div className="opc-edit-section"><h3>Personalien und Organisation</h3><div className="opc-edit-grid three">
@@ -817,6 +816,22 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
               </div><Field label="Interne Hinweise"><textarea value={draft.internal_notes} onChange={(event) => updateRoot('internal_notes',event.target.value)} /></Field></div>
             </section>
           ) : null}
+
+
+          <div className="opc-employee-metrics-grid">
+            <MetricCard label="Status" value={visual.label} icon={<CheckCircle2 size={18} />} />
+            <MetricCard label="Verfügbarkeit" value={availabilityLabel} helper={`${asArray(detail.availability_rules).length} Zeitfenster`} icon={<Clock3 size={18} />} />
+            <MetricCard label="Skills" value={skills.length} helper={skills.filter((skill) => skill.is_preferred).length ? `${skills.filter((skill) => skill.is_preferred).length} bevorzugt` : 'Keine bevorzugt'} icon={<BadgeCheck size={18} />} />
+            <MetricCard label="Personalakte" value={formatStatus(employee.profile_completion_status)} icon={<FileText size={18} />} />
+          </div>
+
+          {role === 'owner' ? (
+            <EmployeePortalAccessPanel
+              employeeId={employeeId}
+              suggestedEmail={employee.business_email || employee.private_email || ''}
+            />
+          ) : null}
+
 
           <div className="opc-section-title-row"><h2>Mitarbeiterdaten</h2><div><button onClick={() => scrollStrip('left')}><ChevronLeft size={16} /></button><button onClick={() => scrollStrip('right')}><ChevronRight size={16} /></button></div></div>
           <div className="opc-employee-detail-strip" ref={detailStripRef}>
@@ -1015,6 +1030,7 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         .opc-employee-metric-helper { margin-top: 3px; color: ${BRAND.faint}; font-size: 11px; font-weight: 650; }
         .opc-employee-metric-icon { width: 36px; height: 36px; border: 1px solid ${BRAND.border}; border-radius: 13px; display: flex; align-items: center; justify-content: center; background: ${BRAND.soft}; flex-shrink: 0; }
         .opc-employee-edit-panel { padding: 18px; margin-bottom: 18px; }
+        .opc-employee-edit-panel-inline { margin-top: 0; margin-bottom: 14px; scroll-margin-top: 18px; }
         .opc-edit-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
         .opc-edit-head h2 { margin: 0; font-size: 19px; font-weight: 860; letter-spacing: -.03em; }
         .opc-edit-head p { margin: 5px 0 0; color: ${BRAND.muted}; font-size: 12px; font-weight: 650; }
