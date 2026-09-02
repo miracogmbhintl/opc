@@ -422,9 +422,9 @@ export default function PayrollOwnerPanel({ employeeId, employee: employeeProp, 
     setMessage('');
     try {
       const query = new URLSearchParams({ from: periodFrom, to: periodTo });
-      if (zeroPayroll) query.set('zeroPayroll', '1');
+      const endpoint = zeroPayroll ? 'payroll-preview-zero' : 'payroll-preview';
       const payload = await requestJson<PreviewPayload>(
-        `/api/opc/employees/${employeeId}/payroll-preview?${query.toString()}`,
+        `/api/opc/employees/${employeeId}/${endpoint}?${query.toString()}`,
       );
       setPreview(payload);
       if (download && payload.payroll) {
