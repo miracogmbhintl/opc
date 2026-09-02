@@ -6,6 +6,7 @@ import {
 } from '../../../../../lib/opc-employee-api';
 import {
   calculateEmployeePayroll,
+  calculateEmployeeZeroPayroll,
   payrollErrorStatus,
 } from '../../../../../lib/opc-payroll-engine';
 
@@ -28,6 +29,9 @@ export const GET: APIRoute = async ({ request, locals, cookies, params }) => {
     const url = new URL(request.url);
     const periodFrom = isoDate(url.searchParams.get('from'));
     const periodTo = isoDate(url.searchParams.get('to'));
+    const zeroPayroll = ['1', 'true', 'yes'].includes(
+      String(url.searchParams.get('zeroPayroll') || '').trim().toLowerCase(),
+    );
     if (!periodFrom || !periodTo || periodFrom > periodTo) {
       return jsonResponse({ success: false, error: 'Ungültiger Abrechnungszeitraum.' }, 400);
     }
@@ -52,12 +56,19 @@ export const GET: APIRoute = async ({ request, locals, cookies, params }) => {
       );
     }
 
-    const calculation = await calculateEmployeePayroll({
-      supabase,
-      employeeId,
-      periodFrom,
-      periodTo,
-    });
+    const calculation = zeroPayroll
+      ? await calculateEmployeeZeroPayroll({
+          supabase,
+          employeeId,
+          periodFrom,
+          periodTo,
+        })
+      : await calculateEmployeePayroll({
+          supabase,
+          employeeId,
+          periodFrom,
+          periodTo,
+        });
 
     return jsonResponse({
       success: true,

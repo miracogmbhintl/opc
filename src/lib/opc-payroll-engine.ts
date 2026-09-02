@@ -1496,3 +1496,357 @@ export async function calculateEmployeePayroll({
     snapshot,
   };
 }
+
+export async function calculateEmployeeZeroPayroll({
+  supabase,
+  employeeId,
+  periodFrom,
+  periodTo,
+}: {
+  supabase: any;
+  employeeId: string;
+  periodFrom: string;
+  periodTo: string;
+}): Promise<PayrollCalculation> {
+  if (!ISO_DATE.test(periodFrom) || !ISO_DATE.test(periodTo) || periodFrom > periodTo) {
+    throw new Error('Ungültiger Abrechnungszeitraum.');
+  }
+
+  const {
+    employee,
+    address,
+    contract,
+    profile,
+    ruleSet,
+  } = await loadPayrollData(supabase, employeeId, periodFrom, periodTo);
+
+  const salaryType = String(contract.salary_type || '').toLowerCase() as 'hourly' | 'monthly';
+  if (!['hourly', 'monthly'].includes(salaryType)) {
+    throw new Error(`Nicht unterstützte Lohnart im Vertrag: ${salaryType || 'leer'}.`);
+  }
+
+  const lines: PayrollLine[] = [];
+  const warnings: string[] = [
+    'Nullsummen-Lohnabrechnung wurde administrativ erzeugt. Alle Lohnbestandteile, Abzüge und Auszahlungen wurden bewusst auf CHF 0.00 gesetzt.',
+  ];
+
+  const profileMetadata = safeObject(profile.metadata);
+  const ruleMetadata = safeObject(ruleSet.metadata);
+  const gavApplicable = contract.is_gav_applicable === true;
+
+  if (salaryType === 'hourly') {
+    const hourlyRate = asNumber(contract.hourly_rate_chf);
+    lines.push(line('earning', 'BASIC_HOURLY_PAY', 'Grundlohn Stundenlohn', {
+      basisAmount: hourlyRate,
+      quantity: 0,
+      employeeAmount: 0,
+      sortOrder: 10,
+      source: 'zero_payroll_backend',
+      metadata: {
+        contract_id: contract.id || null,
+        document_basis: '0.00 Std.',
+        document_rate: hourlyRate > 0 ? `CHF ${hourlyRate.toFixed(2)}` : '',
+        zero_payroll: true,
+      },
+    }));
+
+    const publicHolidayRate = gavApplicable
+      ? metadataNumber(
+          ruleMetadata,
+          'public_holiday_maintenance_rate',
+          asNumber(contract.public_holiday_percentage),
+        )
+      : asNumber(contract.public_holiday_percentage);
+
+    if (publicHolidayRate > 0) {
+      lines.push(line('earning', 'PUBLIC_HOLIDAY_PAY_MAINTENANCE', 'Feiertagsentschädigung Unterhaltsreinigung', {
+        basisAmount: 0,
+        rate: publicHolidayRate,
+        employeeAmount: 0,
+        sortOrder: 30,
+        source: 'zero_payroll_backend',
+        metadata: {
+          contract_id: contract.id || null,
+          document_basis: 'CHF 0.00',
+          zero_payroll: true,
+        },
+      }));
+    }
+  } else {
+    const monthlySalary = asNumber(contract.monthly_salary_chf);
+    lines.push(line('earning', 'MONTHLY_SALARY', 'Monatslohn', {
+      basisAmount: monthlySalary,
+      quantity: 0,
+      employeeAmount: 0,
+      sortOrder: 10,
+      source: 'zero_payroll_backend',
+      metadata: {
+        contract_id: contract.id || null,
+        proration_method: 'zero_payroll_backend',
+        document_basis: monthlySalary > 0 ? `CHF ${monthlySalary.toFixed(2)}` : 'CHF 0.00',
+        document_rate: '0',
+        zero_payroll: true,
+      },
+    }));
+  }
+
+  const contributionBasis = 0;
+  const grossSalary = 0;
+  const employeeDeductions = 0;
+  const netSalary = 0;
+  const reimbursements = 0;
+  const otherAdjustments = 0;
+  const payout = 0;
+  const employerContributions = 0;
+  const totalEmployerCost = 0;
+  const totalMinutes = 0;
+  const totalHours = 0;
+  const payableDays = 0;
+  const periodWorkingDays = countWorkingDays(periodFrom, periodTo);
+
+  const ahvEmployeeRate = asNumber(ruleSet.ahv_employee_rate);
+  const ahvEmployerRate = asNumber(ruleSet.ahv_employer_rate);
+  const alvEmployeeRate = asNumber(ruleSet.alv_employee_rate);
+  const alvEmployerRate = asNumber(ruleSet.alv_employer_rate);
+
+  lines.push(line('employee_deduction', 'AHV_IV_EO', 'AHV/IV/EO Arbeitnehmer', {
+    basisAmount: 0,
+    rate: ahvEmployeeRate,
+    employeeAmount: 0,
+    sortOrder: 110,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, zero_payroll: true },
+  }));
+  lines.push(line('employer_contribution', 'AHV_IV_EO_EMPLOYER', 'AHV/IV/EO Arbeitgeber', {
+    basisAmount: 0,
+    rate: ahvEmployerRate,
+    employerAmount: 0,
+    sortOrder: 210,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, zero_payroll: true },
+  }));
+  lines.push(line('employee_deduction', 'ALV', 'ALV Arbeitnehmer', {
+    basisAmount: 0,
+    rate: alvEmployeeRate,
+    employeeAmount: 0,
+    sortOrder: 120,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, annual_cap_chf: ruleSet.alv_annual_max_chf, zero_payroll: true },
+  }));
+  lines.push(line('employer_contribution', 'ALV_EMPLOYER', 'ALV Arbeitgeber', {
+    basisAmount: 0,
+    rate: alvEmployerRate,
+    employerAmount: 0,
+    sortOrder: 220,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, annual_cap_chf: ruleSet.alv_annual_max_chf, zero_payroll: true },
+  }));
+
+  const nbuMode = String(profileMetadata.nbu_eligibility_mode || 'auto').toLowerCase();
+  const nbuEligible = nbuMode === 'never' ? false : asNumber(profile.nbu_employee_rate) > 0 || asNumber(profile.nbu_employer_rate) > 0;
+
+  const profileRatePairs: Array<{
+    code: string;
+    employerCode: string;
+    label: string;
+    employeeRate: number;
+    employerRate: number;
+    sort: number;
+  }> = [
+    {
+      code: 'NBU',
+      employerCode: 'NBU_EMPLOYER',
+      label: 'NBU',
+      employeeRate: nbuEligible ? asNumber(profile.nbu_employee_rate) : 0,
+      employerRate: nbuEligible ? asNumber(profile.nbu_employer_rate) : 0,
+      sort: 130,
+    },
+    {
+      code: 'KTG',
+      employerCode: 'KTG_EMPLOYER',
+      label: 'KTG',
+      employeeRate: asNumber(profile.ktg_employee_rate),
+      employerRate: asNumber(profile.ktg_employer_rate),
+      sort: 140,
+    },
+    {
+      code: 'GAV',
+      employerCode: 'GAV_EMPLOYER',
+      label: 'GAV-Beitrag',
+      employeeRate: gavApplicable ? asNumber(profile.gav_employee_rate) : 0,
+      employerRate: gavApplicable ? asNumber(profile.gav_employer_rate) : 0,
+      sort: 150,
+    },
+  ];
+
+  for (const item of profileRatePairs) {
+    if (item.employeeRate > 0) {
+      lines.push(line('employee_deduction', item.code, `${item.label} Arbeitnehmer`, {
+        basisAmount: 0,
+        rate: item.employeeRate,
+        employeeAmount: 0,
+        sortOrder: item.sort,
+        source: 'zero_payroll_backend',
+        metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+      }));
+    }
+    if (item.employerRate > 0) {
+      lines.push(line('employer_contribution', item.employerCode, `${item.label} Arbeitgeber`, {
+        basisAmount: 0,
+        rate: item.employerRate,
+        employerAmount: 0,
+        sortOrder: item.sort + 100,
+        source: 'zero_payroll_backend',
+        metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+      }));
+    }
+  }
+
+  if (asNumber(profile.bvg_employee_amount_chf) > 0) {
+    lines.push(line('employee_deduction', 'BVG', 'BVG Arbeitnehmer', {
+      employeeAmount: 0,
+      sortOrder: 160,
+      source: 'zero_payroll_backend',
+      metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+    }));
+  }
+  if (asNumber(profile.bvg_employer_amount_chf) > 0) {
+    lines.push(line('employer_contribution', 'BVG_EMPLOYER', 'BVG Arbeitgeber', {
+      employerAmount: 0,
+      sortOrder: 260,
+      source: 'zero_payroll_backend',
+      metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+    }));
+  }
+
+  if (profile.source_tax_subject === true) {
+    const sourceTaxRate = asNumber(profile.source_tax_rate);
+    lines.push(line('employee_deduction', 'SOURCE_TAX', 'Quellensteuer', {
+      basisAmount: 0,
+      rate: sourceTaxRate,
+      employeeAmount: 0,
+      sortOrder: 170,
+      source: 'zero_payroll_backend',
+      metadata: {
+        canton: profile.source_tax_canton || null,
+        tariff_code: profile.source_tax_tariff_code || null,
+        fixed_amount: false,
+        zero_payroll: true,
+      },
+    }));
+  }
+
+  const fullName = [employee.legal_first_name, employee.legal_last_name]
+    .map(cleanText)
+    .filter(Boolean)
+    .join(' ');
+  const heading = monthHeading(periodFrom, periodTo);
+  const earnings = lines.filter((item) => item.lineGroup === 'earning').map(documentLine);
+  const deductions = lines.filter((item) => item.lineGroup === 'employee_deduction').map(documentLine);
+  const reimbursementsForDocument: JsonRow[] = [];
+
+  const payrollDocument = {
+    document: {
+      city: 'Basel',
+      date: formatDate(new Date().toISOString().slice(0, 10)),
+    },
+    employee: {
+      fullName,
+      street: [address.street, address.house_number].map(cleanText).filter(Boolean).join(' '),
+      postalCode: cleanText(address.postal_code),
+      city: cleanText(address.city),
+      country: cleanText(address.country_code) || 'CH',
+      salutationLine: employeeSalutation(employee),
+      employeeNumber: cleanText(employee.employee_number),
+      ahvNumber: maskAhvNumber(employee.ahv_number),
+    },
+    payroll: {
+      month: heading.month,
+      year: heading.year,
+      periodFrom: formatDate(periodFrom),
+      periodTo: formatDate(periodTo),
+      grossSalary,
+      totalDeductions: employeeDeductions,
+      netSalary,
+      totalReimbursements: reimbursements,
+      otherAdjustments,
+      payout,
+      earnings,
+      deductions,
+      reimbursements: reimbursementsForDocument,
+    },
+  };
+
+  const fileIdentity = cleanText(employee.employee_number) || fullName || employeeId;
+  const filename = safeFilename(`Lohnabrechnung_${fileIdentity}_${periodFrom}_${periodTo}.pdf`);
+
+  const snapshot = {
+    calculation_version: 'opc_payroll_zero_sum_v1',
+    zero_payroll: true,
+    employee_id: employeeId,
+    employee_number: employee.employee_number || null,
+    period_from: periodFrom,
+    period_to: periodTo,
+    salary_type: salaryType,
+    contract: safeObject(contract),
+    payroll_profile: safeObject(profile),
+    rule_set: safeObject(ruleSet),
+    approved_entry_ids: [],
+    time_entry_pay_rates: [],
+    period_adjustments: [],
+    reconciliation: null,
+    accruals: [],
+    contribution_basis_chf: contributionBasis,
+    totals: {
+      entries_count: 0,
+      minutes: 0,
+      hours: 0,
+      gross_salary_chf: 0,
+      employee_deductions_chf: 0,
+      net_salary_chf: 0,
+      reimbursements_chf: 0,
+      other_adjustments_chf: 0,
+      payout_chf: 0,
+      employer_contributions_chf: 0,
+      total_employer_cost_chf: 0,
+    },
+    warnings,
+  };
+
+  return {
+    employee,
+    address,
+    contract,
+    payrollProfile: profile,
+    ruleSet,
+    periodFrom,
+    periodTo,
+    salaryType,
+    entriesCount: 0,
+    totalMinutes,
+    totalHours,
+    payableDays,
+    periodWorkingDays,
+    baseSalary: 0,
+    grossSalary,
+    employeeDeductions,
+    netSalary,
+    reimbursements,
+    otherAdjustments,
+    payout,
+    employerContributions,
+    totalEmployerCost,
+    grossPerHour: null,
+    netPerHour: null,
+    employerCostPerHour: null,
+    rateBreakdown: [],
+    accruals: [],
+    periodAdjustments: [],
+    reconciliation: null,
+    lines,
+    warnings,
+    payrollDocument,
+    filename,
+    snapshot,
+  };
+}
