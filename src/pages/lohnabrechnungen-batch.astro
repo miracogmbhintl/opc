@@ -1,0 +1,34 @@
+---
+import MirakaDashboardShell from '../components/MirakaDashboardShell';
+import PayrollBatchGenerator from '../components/PayrollBatchGenerator';
+import '../styles/miraka-portal.css';
+---
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+  <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
+  <link rel="apple-touch-icon" href="/icons/orange-pro-clean-webicon.png" />
+  <meta name="theme-color" content="#ff6a00" />
+  <meta name="application-name" content="Orange Pro Clean" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lohnabrechnungen Batch | Orange Pro Clean</title>
+</head>
+<body>
+  <MirakaDashboardShell
+    client:only="react"
+    title="Lohnabrechnungen"
+    requiredRole={["owner", "admin"]}
+    currentPath="/mitarbeiter"
+  >
+    <PayrollBatchGenerator client:only="react" />
+  </MirakaDashboardShell>
+</body>
+</html>
