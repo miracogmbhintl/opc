@@ -220,7 +220,10 @@ export function getOpcPublicOrigin(source: any, request?: Request) {
 }
 
 export function createOpcSupabaseAdmin(source?: any): SupabaseClient {
-  const { supabaseUrl, serviceRoleKey } = getOpcSupabaseServerConfig(source);
+  // Admin operations use the service-role key directly and must not
+  // depend on the public anonymous key being available at runtime.
+  const supabaseUrl = getOpcSupabaseUrl(source);
+  const serviceRoleKey = getOpcSupabaseServiceRoleKey(source);
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
