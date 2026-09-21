@@ -4,38 +4,206 @@ import '../styles/miraka-portal.css';
 import '../styles/miraka-dashboard.css';
 ---
 
+<!-- OPC_ZEITERFASSUNG_HIDE_APPROVAL_FOR_PINO_THOMAS_V1 -->
+<script is:inline>
+  (() => {
+    const restrictedTerms = [
+      '71a46f9a-357d-4283-a225-d37cd67a3d24',
+      '6077d66c-5030-4e14-b0f4-51140066ca59',
+      'pino@orangeproclean.ch',
+      'wirth@orangeproclean.ch',
+      'OPC-MA-000017',
+      'OPC-MA-000018',
+    ];
+
+    const isPinoOrThomas = () => {
+      try {
+        const localValues = Object.keys(localStorage || {}).map((key) => {
+          try { return localStorage.getItem(key) || ''; } catch { return ''; }
+        });
+
+        const sessionValues = Object.keys(sessionStorage || {}).map((key) => {
+          try { return sessionStorage.getItem(key) || ''; } catch { return ''; }
+        });
+
+        const haystack = [...localValues, ...sessionValues].join(' ').toLowerCase();
+
+        return restrictedTerms.some((term) =>
+          haystack.includes(String(term).toLowerCase())
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    let fallbackClicked = false;
+    let timer = 0;
+
+    const applyPinoThomasTimeTabs = () => {
+      if (!isPinoOrThomas()) return;
+
+      const nodes = Array.from(
+        document.querySelectorAll('button, a, [role="tab"]')
+      );
+
+      let ownTimeButton = null;
+      let teamButton = null;
+      let approvalButton = null;
+
+      nodes.forEach((node) => {
+        const element = node;
+        const label = String(element.textContent || '')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (label.includes('Meine Zeiterfassung')) {
+          ownTimeButton = element;
+          element.style.display = '';
+          element.removeAttribute('aria-hidden');
+          element.removeAttribute('tabindex');
+        }
+
+        if (label.includes('Team & Kontakte')) {
+          teamButton = element;
+          element.style.display = '';
+          element.removeAttribute('aria-hidden');
+          element.removeAttribute('tabindex');
+        }
+
+        if (label.includes('Kontrolle & Freigabe')) {
+          approvalButton = element;
+          element.style.display = 'none';
+          element.setAttribute('aria-hidden', 'true');
+          element.setAttribute('tabindex', '-1');
+          element.setAttribute('data-opc-hidden-for-pino-thomas', 'true');
+        }
+      });
+
+      const bodyText = String(document.body.textContent || '');
+
+      const approvalIsActive =
+        bodyText.includes('Freigabe-Notiz') ||
+        bodyText.includes('Offen zur Freigabe') ||
+        bodyText.includes('Genehmigt') ||
+        bodyText.includes('Abgelehnt');
+
+      if (approvalIsActive && !fallbackClicked) {
+        fallbackClicked = true;
+
+        window.setTimeout(() => {
+          try {
+            if (ownTimeButton) {
+              ownTimeButton.click();
+            } else if (teamButton) {
+              teamButton.click();
+            }
+          } catch {
+            // no-op
+          }
+        }, 120);
+      }
+    };
+
+    const scheduleApply = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(applyPinoThomasTimeTabs, 80);
+    };
+
+    const runtimeKey = '__OPC_ZEITERFASSUNG_PINO_THOMAS_RUNTIME_CLEANUP__';
+
+    if (typeof window[runtimeKey] === 'function') {
+      window[runtimeKey]();
+    }
+
+    let observer = null;
+
+    const startRuntime = () => {
+      applyPinoThomasTimeTabs();
+      window.setTimeout(applyPinoThomasTimeTabs, 250);
+      window.setTimeout(applyPinoThomasTimeTabs, 750);
+      window.setTimeout(applyPinoThomasTimeTabs, 1500);
+
+      if (observer) {
+        observer.disconnect();
+      }
+
+      observer = new MutationObserver(scheduleApply);
+
+      if (document.body) {
+        observer.observe(document.body, {
+          childList: true,
+          subtree: true,
+        });
+      }
+    };
+
+    const stopRuntime = () => {
+      window.clearTimeout(timer);
+
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+
+      document.removeEventListener('astro:page-load', startRuntime);
+      document.removeEventListener('astro:before-swap', stopRuntime);
+
+      if (window[runtimeKey] === stopRuntime) {
+        delete window[runtimeKey];
+      }
+    };
+
+    window[runtimeKey] = stopRuntime;
+
+    queueMicrotask(startRuntime);
+
+    document.addEventListener(
+      'astro:page-load',
+      startRuntime,
+    );
+
+    document.addEventListener(
+      'astro:before-swap',
+      stopRuntime,
+      { once: true },
+    );
+  })();
+</script>
+<!-- /OPC_ZEITERFASSUNG_HIDE_APPROVAL_FOR_PINO_THOMAS_V1 -->
+
+
 <!DOCTYPE html>
 <html transition:name="root" transition:animate="none" lang="de">
 <head>
-    <script is:inline>
+  <script is:inline>
     (() => {
-      if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
-
       window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
 
-      const noMotionTransition = (callback) => {
-        let callbackResult;
+      const noMotionTransition = (input) => {
+        const update =
+          typeof input === 'function'
+            ? input
+            : input && typeof input.update === 'function'
+              ? input.update
+              : null;
 
+        let updateCallbackDone;
         try {
-          callbackResult = typeof callback === 'function' ? callback() : undefined;
+          updateCallbackDone = Promise.resolve(update ? update() : undefined);
         } catch (error) {
-          const rejected = Promise.reject(error);
-
-          return {
-            ready: rejected,
-            updateCallbackDone: rejected,
-            finished: rejected,
-            skipTransition() {},
-          };
+          updateCallbackDone = Promise.reject(error);
         }
 
-        const done = Promise.resolve(callbackResult);
-
         return {
-          ready: done,
-          updateCallbackDone: done,
-          finished: done,
+          ready: Promise.resolve(),
+          updateCallbackDone,
+          finished: updateCallbackDone.then(() => undefined),
           skipTransition() {},
+          types: new Set(
+            input && typeof input === 'object' && Array.isArray(input.types)
+              ? input.types
+              : []
+          ),
         };
       };
 
@@ -50,8 +218,7 @@ import '../styles/miraka-dashboard.css';
       }
     })();
   </script>
-  
-  <!-- Orange Pro Clean Web App / PWA -->
+
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
   <link rel="shortcut icon" type="image/png" href="/icons/orange-pro-clean-webicon.png" />
@@ -63,7 +230,7 @@ import '../styles/miraka-dashboard.css';
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Orange Pro Clean" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta charset="UTF-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Zeiterfassung - Orange Pro Clean</title>
   <link

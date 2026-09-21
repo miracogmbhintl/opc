@@ -3,9 +3,11 @@ import { supabase, type UserProfile, type UserRole } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES, getOpcDashboardRoute } from '../lib/opc-routes';
 import MirakaSidebar from './MirakaSidebar';
+import PortalErrorBoundary from './PortalErrorBoundary';
 import { TranslationProvider, useTranslation } from '../lib/TranslationContext';
-import { loadOpcAuthProfile, writeCachedOpcAuthProfile } from '../lib/opc-auth-cache';
+import { loadOpcAuthProfile, refreshOpcAuthProfile, writeCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import { safeNavigate } from '../lib/opc-navigation-guard';
+import '../lib/opc-monitoring-client';
 
 interface DashboardShellProps {
   children: ReactNode;
@@ -511,17 +513,19 @@ export default function MirakaDashboardShell({
   fullWidth = false,
 }: DashboardShellProps) {
   return (
-    <TranslationProvider>
-      <DashboardShellContent
-        title={title}
-        requiredRole={requiredRole}
-        currentPath={currentPath}
-        hideTopBar={hideTopBar}
-        fullWidth={fullWidth}
-      >
-        {children}
-      </DashboardShellContent>
-    </TranslationProvider>
+    <PortalErrorBoundary>
+      <TranslationProvider>
+        <DashboardShellContent
+          title={title}
+          requiredRole={requiredRole}
+          currentPath={currentPath}
+          hideTopBar={hideTopBar}
+          fullWidth={fullWidth}
+        >
+          {children}
+        </DashboardShellContent>
+      </TranslationProvider>
+    </PortalErrorBoundary>
   );
 }
 
@@ -633,16 +637,29 @@ function DashboardShellContent({
 
   const checkAuth = async () => {
     try {
-      const normalizedProfile = await loadOpcAuthProfile();
+      let normalizedProfile = await loadOpcAuthProfile();
 
       if (!normalizedProfile) {
         safeNavigate(`${baseUrl}${OPC_ROUTES.login}`);
         return;
       }
 
-      writeCachedOpcAuthProfile(normalizedProfile);
+      let resolvedRole = normalizeRole(normalizedProfile.role);
 
-      const resolvedRole = normalizeRole(normalizedProfile.role);
+      // OPC_STRICT_ROLE_REFRESH_BEFORE_REDIRECT_V1
+      // Protected pages such as /mitarbeiter must not redirect from a stale
+      // browser cache. If the cached role does not match the page requirement,
+      // force one live profile refresh from opc_staff_roles before redirecting.
+      if (requiredRole && !isRoleAllowed(resolvedRole)) {
+        const liveProfile = await refreshOpcAuthProfile(true);
+
+        if (liveProfile) {
+          normalizedProfile = liveProfile;
+          resolvedRole = normalizeRole(liveProfile.role);
+        }
+      }
+
+      writeCachedOpcAuthProfile(normalizedProfile);
 
       if (!isRoleAllowed(resolvedRole)) {
         handleRoleMismatch(resolvedRole);

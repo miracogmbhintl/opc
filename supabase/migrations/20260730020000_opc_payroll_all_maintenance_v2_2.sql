@@ -17,7 +17,6 @@
 
 begin;
 set local time zone 'Europe/Zurich';
-
 do $$
 begin
   if to_regclass('public.opc_employee_time_entries') is null then
@@ -34,7 +33,6 @@ begin
   end if;
 end
 $$;
-
 create table if not exists
   public.opc_employee_time_entries_backup_20260730_maintenance_v2_2
 as
@@ -58,7 +56,6 @@ and (
     and te.metadata ->> 'payroll_period_override_to' = '2026-07-23'
   )
 );
-
 -- Explicit management classification. This overrides any customer/job wording.
 update public.opc_employee_time_entries te
 set
@@ -88,7 +85,6 @@ and (
     and te.metadata ->> 'payroll_period_override_to' = '2026-07-23'
   )
 );
-
 -- The engine may still support special cleaning in the future, but only through
 -- an explicit payroll category. Text in customer names/job titles must not decide it.
 update public.opc_payroll_rule_sets
@@ -103,7 +99,6 @@ set
   updated_at = now()
 where rule_year = 2026
   and status = 'active';
-
 -- Correct reference values: all hourly work is maintenance cleaning.
 insert into public.opc_payroll_reconciliation_reference (
   employee_id, period_from, period_to,
@@ -192,7 +187,6 @@ set
   notes = excluded.notes,
   metadata = coalesce(public.opc_payroll_reconciliation_reference.metadata, '{}'::jsonb)
     || excluded.metadata;
-
 -- Preserve immutability but permit an approved, unpaid payroll run to be cancelled.
 create or replace function public.opc_guard_finalized_payroll_run()
 returns trigger
@@ -229,7 +223,6 @@ begin
   return new;
 end
 $$;
-
 -- Cancel only approved/unpaid test runs whose stored totals no longer match
 -- the corrected management-confirmed reconciliation target.
 update public.opc_payroll_runs r
@@ -257,7 +250,6 @@ where r.employee_id = ref.employee_id
     'opc_payroll_reconciliation_v2',
     'opc_payroll_reconciliation_v2_1_clean'
   );
-
 do $$
 declare
   v_special_count integer;
@@ -317,9 +309,7 @@ begin
   end if;
 end
 $$;
-
 commit;
-
 select
   e.employee_number,
   concat_ws(' ', e.legal_first_name, e.legal_last_name) as employee_name,

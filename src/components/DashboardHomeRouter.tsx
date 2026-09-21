@@ -349,8 +349,9 @@ function EmployeeDashboardContent({ profile }: { profile: UserProfile }) {
         .from('opc_employee_time_entries')
         .select('*')
         .eq('user_id', userId)
-        .in('status', ['open', 'on_break'])
+        .not('clock_in_at', 'is', null)
         .is('clock_out_at', null)
+        .in('status', ['open', 'clocked_in', 'on_break'])
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

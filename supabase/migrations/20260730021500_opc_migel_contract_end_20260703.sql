@@ -6,7 +6,6 @@
 
 begin;
 set local time zone 'Europe/Zurich';
-
 do $$
 begin
   if to_regclass('public.opc_employment_contracts') is null then
@@ -14,14 +13,12 @@ begin
   end if;
 end
 $$;
-
 create table if not exists
   public.opc_employment_contracts_backup_20260730_migel_end
 as
 select c.*
 from public.opc_employment_contracts c
 where c.contract_number = 'OPC-PAY-2026-000013';
-
 update public.opc_employment_contracts c
 set
   valid_until = date '2026-07-03',
@@ -48,7 +45,6 @@ set
   updated_at = now(),
   updated_by = auth.uid()
 where c.contract_number = 'OPC-PAY-2026-000013';
-
 do $$
 declare
   v_count integer;
@@ -68,9 +64,7 @@ begin
   end if;
 end
 $$;
-
 commit;
-
 select
   e.employee_number,
   concat_ws(

@@ -725,7 +725,97 @@ function EmployeeTimeTrackingDetailContent({ staffRoleId }: Props) {
     );
   }
 
-  if (!targetStaffRole) return null;
+  if (!targetStaffRole) {
+    return (
+      <MirakaDashboardShell
+        requiredRole={['owner', 'admin', 'dispatch', 'employee']}
+        currentPath="/zeiterfassung"
+      >
+        <div
+          role="alert"
+          style={{
+            minHeight: '60vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 560,
+              border: '1px solid #e5e7eb',
+              borderRadius: 16,
+              background: '#fff',
+              padding: 24,
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 20,
+                color: '#111827',
+              }}
+            >
+              Zeiterfassung konnte nicht geladen werden
+            </h2>
+
+            <p
+              style={{
+                margin: '10px 0 0',
+                color: '#6b7280',
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+            >
+              Das Mitarbeiterprofil konnte nicht eindeutig aufgelöst werden.
+              Die Seite bleibt deshalb nicht mehr leer.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 10,
+                marginTop: 18,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                style={{
+                  border: 0,
+                  borderRadius: 9,
+                  padding: '10px 14px',
+                  background: '#111827',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Neu laden
+              </button>
+
+              <a
+                href="/zeiterfassung"
+                style={{
+                  borderRadius: 9,
+                  padding: '10px 14px',
+                  border: '1px solid #d1d5db',
+                  color: '#111827',
+                  textDecoration: 'none',
+                  fontWeight: 700,
+                }}
+              >
+                Zur Zeiterfassung
+              </a>
+            </div>
+          </div>
+        </div>
+      </MirakaDashboardShell>
+    );
+  }
 
   const status = presence?.time_status || 'not_clocked_in';
 

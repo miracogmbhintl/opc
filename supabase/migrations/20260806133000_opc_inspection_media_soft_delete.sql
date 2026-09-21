@@ -1,11 +1,8 @@
 begin;
-
 alter table public.opc_site_inspection_media
   add column if not exists uploaded_by uuid;
-
 create index if not exists opc_site_inspection_media_uploaded_by_idx
   on public.opc_site_inspection_media (uploaded_by, inspection_id);
-
 create table if not exists public.opc_site_inspection_media_trash (
   media_id uuid primary key,
   inspection_id uuid not null,
@@ -25,14 +22,11 @@ create table if not exists public.opc_site_inspection_media_trash (
   permanently_deleted_at timestamptz,
   created_at timestamptz not null default now()
 );
-
 create index if not exists opc_site_inspection_media_trash_inspection_idx
   on public.opc_site_inspection_media_trash (inspection_id, deleted_at desc);
-
 create index if not exists opc_site_inspection_media_trash_restore_idx
   on public.opc_site_inspection_media_trash (restore_until)
   where permanently_deleted_at is null;
-
 create table if not exists public.opc_site_inspection_media_audit (
   id uuid primary key default gen_random_uuid(),
   media_id uuid,
@@ -46,21 +40,16 @@ create table if not exists public.opc_site_inspection_media_audit (
   media_snapshot jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
-
 create index if not exists opc_site_inspection_media_audit_inspection_idx
   on public.opc_site_inspection_media_audit (inspection_id, created_at desc);
-
 create index if not exists opc_site_inspection_media_audit_media_idx
   on public.opc_site_inspection_media_audit (media_id, created_at desc);
-
 alter table public.opc_site_inspection_media_trash enable row level security;
 alter table public.opc_site_inspection_media_audit enable row level security;
-
 revoke all on table public.opc_site_inspection_media_trash from anon, authenticated;
 revoke all on table public.opc_site_inspection_media_audit from anon, authenticated;
 grant all on table public.opc_site_inspection_media_trash to service_role;
 grant all on table public.opc_site_inspection_media_audit to service_role;
-
 create or replace function public.opc_set_inspection_media_uploaded_by()
 returns trigger
 language plpgsql
@@ -75,13 +64,11 @@ begin
   return new;
 end;
 $$;
-
 drop trigger if exists opc_set_inspection_media_uploaded_by on public.opc_site_inspection_media;
 create trigger opc_set_inspection_media_uploaded_by
 before insert on public.opc_site_inspection_media
 for each row
 execute function public.opc_set_inspection_media_uploaded_by();
-
 create or replace function public.opc_soft_delete_inspection_media(
   p_media_id uuid,
   p_actor_user_id uuid,
@@ -185,7 +172,6 @@ begin
   );
 end;
 $$;
-
 create or replace function public.opc_restore_inspection_media(
   p_media_id uuid,
   p_actor_user_id uuid,
@@ -254,19 +240,14 @@ begin
   );
 end;
 $$;
-
 revoke all on function public.opc_soft_delete_inspection_media(uuid, uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.opc_restore_inspection_media(uuid, uuid, text, text) from public, anon, authenticated;
 grant execute on function public.opc_soft_delete_inspection_media(uuid, uuid, text, text, text) to service_role;
 grant execute on function public.opc_restore_inspection_media(uuid, uuid, text, text) to service_role;
-
 comment on column public.opc_site_inspection_media.uploaded_by is
   'Authenticated user who originally uploaded the inspection medium.';
-
 comment on table public.opc_site_inspection_media_trash is
   'Soft-deleted inspection media retained for owner restoration for 30 days.';
-
 comment on table public.opc_site_inspection_media_audit is
   'Immutable audit trail for inspection media deletion and restoration.';
-
 commit;

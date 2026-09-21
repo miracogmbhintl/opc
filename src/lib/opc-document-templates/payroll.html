@@ -353,6 +353,14 @@
         <tbody id="earnings-rows"></tbody>
         <tbody>
           <tr class="total-row"><td colspan="3">Bruttolohn</td><td class="amount" data-amount-plain="payroll.grossSalary"></td></tr>
+        </tbody>
+
+        <tbody id="accrual-section" hidden>
+          <tr class="section-row"><td colspan="4">Rückstellungen · nicht ausbezahlt</td></tr>
+        </tbody>
+        <tbody id="accrual-rows"></tbody>
+
+        <tbody>
           <tr class="section-row"><td colspan="4">Abzüge</td></tr>
         </tbody>
         <tbody id="deduction-rows"></tbody>
@@ -451,6 +459,7 @@
           { label: "Anteil des 13. Monatslohns", basis: "{Basis}", rate: "{Ansatz in %}", amount: "{Betrag}" },
           { label: "Zulagen und Zuschläge", basis: "{Basis}", rate: "{Ansatz}", amount: "{Betrag}" }
         ],
+        accruals: [],
         deductions: [
           { label: "AHV-, IV- und EO-Beitrag", basis: "{Basis}", rate: "{Ansatz in %}", amount: "{Betrag}" },
           { label: "Beitrag an die Arbeitslosenversicherung (ALV)", basis: "{Basis}", rate: "{Ansatz in %}", amount: "{Betrag}" },
@@ -527,6 +536,16 @@
       });
 
       renderLineItems("earnings-rows", data.payroll?.earnings);
+
+      const accrualItems = Array.isArray(data.payroll?.accruals)
+        ? data.payroll.accruals
+        : [];
+      const accrualSection = document.getElementById("accrual-section");
+      if (accrualSection) {
+        accrualSection.hidden = accrualItems.length === 0;
+      }
+      renderLineItems("accrual-rows", accrualItems);
+
       renderLineItems("deduction-rows", data.payroll?.deductions);
       renderLineItems("reimbursement-rows", data.payroll?.reimbursements);
 

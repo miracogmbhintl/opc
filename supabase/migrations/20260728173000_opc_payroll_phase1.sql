@@ -1,5 +1,4 @@
 begin;
-
 -- OPC Payroll Phase 1
 -- Adds time-versioned employee contribution profiles and immutable payroll runs.
 -- Existing opc_employment_contracts and opc_payroll_rule_sets remain authoritative.
@@ -23,7 +22,6 @@ begin
   end if;
 end
 $$;
-
 -- Resolve the current contract_type check constraint without hard-coding a
 -- historical enum value in the frontend. The existing contract table is retained.
 create or replace function public.opc_resolve_employment_contract_type(
@@ -78,9 +76,7 @@ begin
   return coalesce(v_candidate, 'employment');
 end
 $$;
-
 grant execute on function public.opc_resolve_employment_contract_type(text, date) to authenticated;
-
 create table if not exists public.opc_employee_payroll_profiles (
   id uuid primary key default gen_random_uuid(),
   employee_id uuid not null references public.opc_employees(id) on delete cascade,
@@ -119,10 +115,8 @@ create table if not exists public.opc_employee_payroll_profiles (
   check (valid_until is null or valid_until >= valid_from),
   unique (employee_id, valid_from)
 );
-
 create index if not exists opc_employee_payroll_profiles_employee_validity_idx
   on public.opc_employee_payroll_profiles(employee_id, valid_from desc, valid_until);
-
 -- Optional rate snapshots for individual time entries. This is required when one
 -- employee has multiple hourly rates in the same payroll period.
 create table if not exists public.opc_time_entry_pay_rates (
@@ -140,10 +134,8 @@ create table if not exists public.opc_time_entry_pay_rates (
   created_by uuid default auth.uid(),
   updated_by uuid default auth.uid()
 );
-
 create index if not exists opc_time_entry_pay_rates_employee_idx
   on public.opc_time_entry_pay_rates(employee_id, time_entry_id);
-
 create table if not exists public.opc_payroll_runs (
   id uuid primary key default gen_random_uuid(),
   run_number text not null unique,
@@ -172,10 +164,8 @@ create table if not exists public.opc_payroll_runs (
   metadata jsonb not null default '{}'::jsonb,
   check (period_to >= period_from)
 );
-
 create index if not exists opc_payroll_runs_employee_period_idx
   on public.opc_payroll_runs(employee_id, period_from desc, period_to desc);
-
 create table if not exists public.opc_payroll_run_employees (
   id uuid primary key default gen_random_uuid(),
   payroll_run_id uuid not null references public.opc_payroll_runs(id) on delete cascade,
@@ -204,7 +194,6 @@ create table if not exists public.opc_payroll_run_employees (
   updated_at timestamptz not null default now(),
   unique (payroll_run_id, employee_id)
 );
-
 create table if not exists public.opc_payroll_lines (
   id uuid primary key default gen_random_uuid(),
   payroll_run_employee_id uuid not null references public.opc_payroll_run_employees(id) on delete cascade,
@@ -222,16 +211,13 @@ create table if not exists public.opc_payroll_lines (
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
-
 create index if not exists opc_payroll_lines_run_employee_idx
   on public.opc_payroll_lines(payroll_run_employee_id, sort_order, line_code);
-
 alter table public.opc_employee_payroll_profiles enable row level security;
 alter table public.opc_time_entry_pay_rates enable row level security;
 alter table public.opc_payroll_runs enable row level security;
 alter table public.opc_payroll_run_employees enable row level security;
 alter table public.opc_payroll_lines enable row level security;
-
 do $$
 declare
   table_name text;
@@ -253,13 +239,11 @@ begin
   end loop;
 end
 $$;
-
 grant select, insert, update, delete on public.opc_employee_payroll_profiles to authenticated;
 grant select, insert, update, delete on public.opc_time_entry_pay_rates to authenticated;
 grant select, insert, update, delete on public.opc_payroll_runs to authenticated;
 grant select, insert, update, delete on public.opc_payroll_run_employees to authenticated;
 grant select, insert, update, delete on public.opc_payroll_lines to authenticated;
-
 do $$
 begin
   if to_regprocedure('public.opc_set_updated_at()') is not null then
@@ -285,7 +269,6 @@ begin
   end if;
 end
 $$;
-
 create or replace function public.opc_guard_finalized_payroll_run()
 returns trigger
 language plpgsql
@@ -302,7 +285,6 @@ begin
   return new;
 end
 $$;
-
 create or replace function public.opc_guard_finalized_payroll_child()
 returns trigger
 language plpgsql
@@ -334,22 +316,18 @@ begin
   return new;
 end
 $$;
-
 drop trigger if exists trg_opc_guard_finalized_payroll_run on public.opc_payroll_runs;
 create trigger trg_opc_guard_finalized_payroll_run
   before update or delete on public.opc_payroll_runs
   for each row execute function public.opc_guard_finalized_payroll_run();
-
 drop trigger if exists trg_opc_guard_finalized_payroll_employee on public.opc_payroll_run_employees;
 create trigger trg_opc_guard_finalized_payroll_employee
   before update or delete on public.opc_payroll_run_employees
   for each row execute function public.opc_guard_finalized_payroll_child();
-
 drop trigger if exists trg_opc_guard_finalized_payroll_line on public.opc_payroll_lines;
 create trigger trg_opc_guard_finalized_payroll_line
   before update or delete on public.opc_payroll_lines
   for each row execute function public.opc_guard_finalized_payroll_child();
-
 comment on table public.opc_employee_payroll_profiles is
   'Time-versioned employee-specific payroll deductions, insurance rates and manual payroll amounts.';
 comment on table public.opc_time_entry_pay_rates is
@@ -360,5 +338,4 @@ comment on table public.opc_payroll_run_employees is
   'Per-employee payroll totals and calculation snapshots for a payroll run.';
 comment on table public.opc_payroll_lines is
   'Detailed earning, deduction, reimbursement and employer contribution lines.';
-
 commit;

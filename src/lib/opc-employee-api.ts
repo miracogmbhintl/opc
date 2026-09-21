@@ -224,6 +224,7 @@ async function getAuthenticatedUser(request: Request, cookies: any, supabase: Su
   throw new Error('Invalid authentication');
 }
 
+
 export async function requireEmployeeHrAccess({
   request,
   cookies,
@@ -233,39 +234,186 @@ export async function requireEmployeeHrAccess({
   cookies: any;
   locals: any;
 }) {
-  const supabase = await getEmployeeServerSupabase(locals);
-  const user = await getAuthenticatedUser(request, cookies, supabase);
+  const supabase =
+    await getEmployeeServerSupabase(locals);
 
-  const { data: staffRole, error } = await supabase
-    .from('opc_staff_roles')
-    .select('id,user_id,role,status,can_access_portal,email,display_name')
-    .eq('user_id', user.id)
-    .in('status', ['active', 'aktiv', 'enabled'])
-    .eq('can_access_portal', true)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const user =
+    await getAuthenticatedUser(
+      request,
+      cookies,
+      supabase,
+    );
 
-  if (error) {
-    throw new Error(`Role lookup failed: ${error.message}`);
+  const activeStatuses = [
+    'active',
+    'aktiv',
+    'enabled',
+  ];
+
+  const normalizeHrRole = (
+    value: unknown,
+  ): 'owner' | 'admin' | '' => {
+    const role = String(value || '')
+      .trim()
+      .toLowerCase();
+
+    if (
+      role === 'owner' ||
+      role === 'inhaber' ||
+      role === 'godmode' ||
+      role === 'superadmin' ||
+      role === 'super_admin'
+    ) {
+      return 'owner';
+    }
+
+    if (
+      role === 'admin' ||
+      role === 'administrator'
+    ) {
+      return 'admin';
+    }
+
+    return '';
+  };
+
+  const fields =
+    'id,user_id,role,status,can_access_portal,email,display_name,can_manage_employees';
+
+  const queryRows = async (
+    field: 'user_id' | 'email',
+    value: string,
+  ) => {
+    let query = supabase
+      .from('opc_staff_roles')
+      .select(fields)
+      .in('status', activeStatuses)
+      .or(
+        'can_access_portal.eq.true,can_access_portal.is.null',
+      )
+      .order('created_at', {
+        ascending: false,
+      })
+      .limit(20);
+
+    query =
+      field === 'email'
+        ? query.ilike('email', value)
+        : query.eq('user_id', value);
+
+    const result = await query;
+
+    if (result.error) {
+      throw new Error(
+        `Role lookup failed: ${result.error.message}`,
+      );
+    }
+
+    return Array.isArray(result.data)
+      ? result.data
+      : [];
+  };
+
+  let staffRows =
+    await queryRows(
+      'user_id',
+      user.id,
+    );
+
+  if (
+    staffRows.length === 0 &&
+    user.email
+  ) {
+    staffRows =
+      await queryRows(
+        'email',
+        user.email,
+      );
   }
 
-  const role = String(staffRole?.role || '').trim().toLowerCase();
+  const staffRole =
+    [...staffRows]
+      .filter((row: any) => {
+        return (
+          row &&
+          row.can_access_portal !== false &&
+          normalizeHrRole(row.role)
+        );
+      })
+      .sort((left: any, right: any) => {
+        const leftRole =
+          normalizeHrRole(left.role);
 
-  if (!staffRole || !['owner', 'admin'].includes(role)) {
-    throw new Error('Insufficient permissions');
+        const rightRole =
+          normalizeHrRole(right.role);
+
+        const priority = {
+          owner: 500,
+          admin: 400,
+          '': 0,
+        };
+
+        return (
+          priority[rightRole] -
+          priority[leftRole]
+        );
+      })[0] || null;
+
+  const role =
+    normalizeHrRole(staffRole?.role);
+
+
+  const authenticatedEmail = String(
+    user.email ||
+    staffRole?.email ||
+    '',
+  )
+    .trim()
+    .toLowerCase();
+
+  const restrictedSalesAdmin =
+    role === 'admin' &&
+    (
+      String(user.id || '') ===
+        '71a46f9a-357d-4283-a225-d37cd67a3d24' ||
+      String(user.id || '') ===
+        '6077d66c-5030-4e14-b0f4-51140066ca59' ||
+      authenticatedEmail ===
+        'pino@orangeproclean.ch' ||
+      authenticatedEmail ===
+        'wirth@orangeproclean.ch'
+    );
+
+  const canManageEmployees =
+    role === 'owner' ||
+    (
+      role === 'admin' &&
+      !restrictedSalesAdmin &&
+      staffRole?.can_manage_employees === true
+    );
+
+  if (
+    !staffRole ||
+    !canManageEmployees
+  ) {
+    throw new Error(
+      'Insufficient permissions',
+    );
   }
 
   const access: EmployeeApiAccess = {
     user,
     staffRoleId: String(staffRole.id),
-    role: role as 'owner' | 'admin',
+    role,
     isOwner: role === 'owner',
-    canManageHr: true,
+    canManageHr: canManageEmployees,
     canManagePayroll: role === 'owner',
   };
 
-  return { supabase, access };
+  return {
+    supabase,
+    access,
+  };
 }
 
 export function errorStatus(error: any) {

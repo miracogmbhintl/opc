@@ -265,7 +265,25 @@ export default function TicketDetailPage({ ticketId }: Props) {
     );
   }
 
-  if (!ticket) return null;
+  if (!ticket) {
+    return (
+      <OPCPageShell>
+        <button
+          type="button"
+          onClick={() => window.history.back()}
+          style={backButtonStyle}
+        >
+          <ArrowLeft size={17} />
+          Zurück
+        </button>
+
+        <div style={errorStyle}>
+          <AlertTriangle size={18} />
+          Ticket wurde nicht gefunden oder ist nicht mehr verfügbar.
+        </div>
+      </OPCPageShell>
+    );
+  }
 
   return (
     <OPCPageShell>

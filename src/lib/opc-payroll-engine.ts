@@ -1,9 +1,11 @@
 import {
   cleanText,
+  errorStatus,
   safeObject,
   throwOnError,
   todayIsoDate,
 } from './opc-employee-api';
+import { maskAhvNumber } from './opc-sensitive-data';
 
 type JsonRow = Record<string, any>;
 
@@ -30,7 +32,11 @@ export type PayrollCalculation = {
   periodFrom: string;
   periodTo: string;
   salaryType: 'hourly' | 'monthly';
+  payrollInputMode: 'time_entries' | 'manual';
   entriesCount: number;
+  trackedEntriesCount: number;
+  trackedMinutes: number;
+  trackedHours: number;
   totalMinutes: number;
   totalHours: number;
   payableDays: number;
@@ -66,15 +72,41 @@ export type PayrollCalculation = {
     rate: number;
     amount: number;
     status: string;
+    openingBalance?: number;
+    periodAccrual?: number;
+    periodPayout?: number;
+    closingBalance?: number;
   }>;
   periodAdjustments: JsonRow[];
   reconciliation: JsonRow | null;
+  sourceTaxReview: JsonRow;
+  manualBuckets: JsonRow[];
   lines: PayrollLine[];
   warnings: string[];
   payrollDocument: JsonRow;
   filename: string;
   snapshot: JsonRow;
 };
+
+export class PayrollDomainError extends Error {
+  code: string;
+  httpStatus: number;
+
+  constructor(code: string, message: string, httpStatus = 422) {
+    super(message);
+    this.name = 'PayrollDomainError';
+    this.code = code;
+    this.httpStatus = httpStatus;
+  }
+}
+
+export function payrollErrorStatus(error: any) {
+  if (error instanceof PayrollDomainError) {
+    return error.httpStatus;
+  }
+
+  return errorStatus(error);
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -362,13 +394,82 @@ function metadataNumber(metadata: JsonRow, key: string, fallback: number) {
   return parsed > 0 ? parsed : fallback;
 }
 
+function sourceTaxReview(
+  employee: JsonRow,
+  permit: JsonRow | null,
+  profile: JsonRow,
+) {
+  const permitType = (cleanText(permit?.permit_type) || '').toLowerCase();
+  const profileMetadata = safeObject(profile.metadata);
+  const confirmed = profileMetadata.source_tax_review_confirmed === true;
+  const note = cleanText(profileMetadata.source_tax_review_note);
+  const subject = profile.source_tax_subject === true;
+  const canton = cleanText(profile.source_tax_canton);
+  const tariffCode = cleanText(profile.source_tax_tariff_code);
+  const rate = asNumber(profile.source_tax_rate);
+  const fixed = asNumber(profile.source_tax_fixed_amount_chf);
+
+  let recommendation: 'not_subject' | 'subject' | 'special_review' | 'unknown' = 'unknown';
+  if (['swiss_citizen', 'c', 'not_required'].includes(permitType)) {
+    recommendation = 'not_subject';
+  } else if (['b', 'l', 's', 'other'].includes(permitType)) {
+    recommendation = 'subject';
+  } else if (permitType === 'g') {
+    recommendation = 'special_review';
+  }
+
+  const blockingReasons: string[] = [];
+
+  if (recommendation === 'subject' && !subject) {
+    if (!(confirmed && note)) {
+      blockingReasons.push(
+        `Bewilligung ${permitType.toUpperCase()} deutet auf Quellensteuerpflicht hin. Wenn eine Ausnahme gilt, muss sie geprüft und mit Grund dokumentiert werden.`,
+      );
+    }
+  }
+
+  if (recommendation === 'special_review' && !confirmed) {
+    blockingReasons.push('Grenzgängerstatus (Ausweis G) muss vor Abschluss des Lohnlaufs manuell geprüft und bestätigt werden.');
+  }
+
+  if (recommendation === 'unknown' && !confirmed) {
+    blockingReasons.push('Quellensteuerstatus ist wegen fehlender/unklarer Bewilligung nicht bestätigt.');
+  }
+
+  if (subject) {
+    if (!canton) blockingReasons.push('Quellensteuerpflichtig, aber Quellensteuer-Kanton fehlt.');
+    if (!tariffCode) blockingReasons.push('Quellensteuerpflichtig, aber Tarifcode fehlt.');
+    if (!(fixed > 0 || rate > 0)) blockingReasons.push('Quellensteuerpflichtig, aber weder Satz noch Fixbetrag ist hinterlegt.');
+    if (!confirmed) blockingReasons.push('Quellensteuerprüfung ist noch nicht als geprüft/bestätigt markiert.');
+  }
+
+  return {
+    permitType: permitType || null,
+    civilStatus: cleanText(employee.civil_status) || null,
+    recommendation,
+    subject,
+    confirmed,
+    reviewNote: note || null,
+    childrenCount: asNumber(profileMetadata.source_tax_children_count),
+    spouseEmployment: cleanText(profileMetadata.source_tax_spouse_employment) || null,
+    churchTax: profile.church_tax === true,
+    blockingReasons,
+    canFinalize: blockingReasons.length === 0,
+  };
+}
+
 function accrualDocumentLine(item: PayrollCalculation['accruals'][number]) {
   return {
+    code: item.code,
     label: item.label,
     basis: `CHF ${item.basisAmount.toFixed(2)}`,
     rate: `${item.rate.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')} %`,
     amount: item.amount,
     status: item.status,
+    openingBalance: roundMoney(asNumber(item.openingBalance)),
+    periodAccrual: roundMoney(asNumber(item.periodAccrual ?? item.amount)),
+    periodPayout: roundMoney(asNumber(item.periodPayout)),
+    closingBalance: roundMoney(asNumber(item.closingBalance)),
   };
 }
 
@@ -386,6 +487,9 @@ async function loadPayrollData(
     ruleSetResponse,
     adjustmentResponse,
     reconciliationResponse,
+    accrualLedgerResponse,
+    manualBucketsResponse,
+    permitResponse,
   ] = await Promise.all([
       supabase.from('opc_employees').select('*').eq('id', employeeId).maybeSingle(),
       supabase
@@ -431,6 +535,29 @@ async function loadPayrollData(
         .eq('period_from', periodFrom)
         .eq('period_to', periodTo)
         .maybeSingle(),
+      supabase
+        .from('opc_payroll_accrual_ledger')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .in('status', ['posted', 'opening_balance'])
+        .lt('period_to', periodFrom)
+        .order('period_to', { ascending: false })
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('opc_payroll_manual_rate_buckets')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .eq('period_from', periodFrom)
+        .eq('period_to', periodTo)
+        .eq('status', 'active')
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('opc_employee_permits')
+        .select('*')
+        .eq('employee_id', employeeId)
+        .order('valid_from', { ascending: false })
+        .order('updated_at', { ascending: false }),
     ]);
 
   throwOnError(employeeResponse.error, 'Mitarbeiter konnte nicht geladen werden');
@@ -440,6 +567,9 @@ async function loadPayrollData(
   throwOnError(ruleSetResponse.error, 'Payroll-Regelsatz konnte nicht geladen werden');
   throwOnError(adjustmentResponse.error, 'Periodische Lohnkorrekturen konnten nicht geladen werden');
   throwOnError(reconciliationResponse.error, 'Payroll-Abgleich konnte nicht geladen werden');
+  throwOnError(accrualLedgerResponse.error, 'Lohnguthaben konnten nicht geladen werden');
+  throwOnError(manualBucketsResponse.error, 'Manuelle Payroll-Stunden konnten nicht geladen werden');
+  throwOnError(permitResponse.error, 'Aufenthaltsbewilligung konnte nicht geladen werden');
 
   const employee = employeeResponse.data as JsonRow | null;
   if (!employee) throw new Error('Mitarbeiter wurde nicht gefunden.');
@@ -495,7 +625,18 @@ async function loadPayrollData(
   }
 
   const addressRows = (addressResponse.data || []) as JsonRow[];
+  const permitRows = (permitResponse.data || []) as JsonRow[];
   const addressToday = todayIsoDate();
+
+  const permit =
+    permitRows.find((row) => {
+      const from = isoDate(row.valid_from) || '0000-01-01';
+      const until = isoDate(row.valid_until) || '9999-12-31';
+      const status = (cleanText(row.permit_status) || 'valid').toLowerCase();
+      return from <= periodTo && until >= periodFrom && !['expired', 'revoked', 'invalid'].includes(status);
+    }) ||
+    permitRows[0] ||
+    null;
 
   // A newly generated payroll document uses the employee's current residence
   // address at generation time. Historical address rows remain available for
@@ -523,8 +664,11 @@ async function loadPayrollData(
     ruleSet,
     entries,
     payRates,
+    manualBuckets: (manualBucketsResponse.data || []) as JsonRow[],
+    permit,
     periodAdjustments: (adjustmentResponse.data || []) as JsonRow[],
     reconciliationReference: (reconciliationResponse.data || null) as JsonRow | null,
+    accrualLedgerRows: (accrualLedgerResponse.data || []) as JsonRow[],
   };
 }
 
@@ -552,11 +696,65 @@ export async function calculateEmployeePayroll({
     ruleSet,
     entries,
     payRates,
+    manualBuckets,
+    permit,
     periodAdjustments,
     reconciliationReference,
+    accrualLedgerRows,
   } = await loadPayrollData(supabase, employeeId, periodFrom, periodTo);
 
-  const positiveEntries = entries
+  const salaryType = String(contract.salary_type).toLowerCase() as 'hourly' | 'monthly';
+  const trackedPositiveEntries = entries
+    .map((entry) => ({ entry, minutes: netMinutes(entry) }))
+    .filter(({ minutes }) => minutes > 0);
+  const trackedMinutes = trackedPositiveEntries.reduce((sum, item) => sum + item.minutes, 0);
+  const trackedHours = roundFour(trackedMinutes / 60);
+
+  const payrollInputMode: 'time_entries' | 'manual' =
+    salaryType === 'hourly' && manualBuckets.length ? 'manual' : 'time_entries';
+
+  const calculationEntries = payrollInputMode === 'manual'
+    ? manualBuckets.map((bucket) => {
+        const hours = asNumber(bucket.hours);
+        const bucketId = cleanText(bucket.id) || `manual-${Math.random().toString(36).slice(2)}`;
+        return {
+          id: `manual:${bucketId}`,
+          employee_id: employeeId,
+          work_date: periodTo,
+          total_minutes: Math.round(hours * 60),
+          status: 'approved',
+          payroll_cleaning_category: cleanText(bucket.cleaning_category) || 'other',
+          metadata: {
+            manual_payroll_bucket_id: bucketId,
+            payroll_cleaning_category: cleanText(bucket.cleaning_category) || 'other',
+            object_name: cleanText(bucket.label) || 'Manueller Lohnabgleich',
+            service_type: cleanText(bucket.label) || 'Manueller Lohnabgleich',
+            manual_notes: cleanText(bucket.notes) || null,
+          },
+        };
+      })
+    : entries;
+
+  const calculationPayRates = payrollInputMode === 'manual'
+    ? manualBuckets.map((bucket) => {
+        const bucketId = cleanText(bucket.id);
+        return {
+          time_entry_id: `manual:${bucketId}`,
+          employee_id: employeeId,
+          contract_id: cleanText(contract.id) || null,
+          hourly_rate_chf: asNumber(bucket.hourly_rate_chf),
+          rate_source: 'manual_payroll_bucket',
+          notes: cleanText(bucket.notes) || null,
+          metadata: {
+            manual_payroll_bucket_id: bucketId,
+            cleaning_category: cleanText(bucket.cleaning_category) || 'other',
+            label: cleanText(bucket.label) || null,
+          },
+        };
+      })
+    : payRates;
+
+  const positiveEntries = calculationEntries
     .map((entry) => ({ entry, minutes: netMinutes(entry) }))
     .filter(({ minutes }) => minutes > 0);
   const carryoverEntries = positiveEntries.filter(({ entry }) => {
@@ -565,7 +763,6 @@ export async function calculateEmployeePayroll({
   });
   const totalMinutes = positiveEntries.reduce((sum, item) => sum + item.minutes, 0);
   const totalHours = roundFour(totalMinutes / 60);
-  const salaryType = String(contract.salary_type).toLowerCase() as 'hourly' | 'monthly';
   const lines: PayrollLine[] = [];
   const warnings: string[] = [];
   const accruals: PayrollCalculation['accruals'] = [];
@@ -573,6 +770,11 @@ export async function calculateEmployeePayroll({
   const profileMetadata = safeObject(profile.metadata);
   const ruleMetadata = safeObject(ruleSet.metadata);
   const gavApplicable = contract.is_gav_applicable === true;
+  const taxReview = sourceTaxReview(employee, permit, profile);
+
+  if (taxReview.blockingReasons.length) {
+    warnings.push(...taxReview.blockingReasons.map((reason: string) => `Quellensteuerprüfung: ${reason}`));
+  }
 
   if (carryoverEntries.length) {
     const carryoverHours = roundFour(
@@ -583,13 +785,28 @@ export async function calculateEmployeePayroll({
     );
   }
 
+  if (payrollInputMode === 'manual') {
+    const difference = roundFour(totalHours - trackedHours);
+    if (Math.abs(difference) > 0.01) {
+      warnings.push(
+        `Manueller Stundenabgleich weicht von der Zeiterfassung ab: Zeiterfassung ${trackedHours.toFixed(2)} h, manuell ${totalHours.toFixed(2)} h, Differenz ${difference >= 0 ? '+' : ''}${difference.toFixed(2)} h.`,
+      );
+    } else {
+      warnings.push(`Manueller Lohnabgleich aktiv: ${totalHours.toFixed(2)} Stunden stimmen mit der Zeiterfassung überein.`);
+    }
+  }
+
   let baseSalary = 0;
   let payableDays = 0;
   let periodWorkingDays = countWorkingDays(periodFrom, periodTo);
 
   if (salaryType === 'hourly') {
     if (!positiveEntries.length) {
-      throw new Error('Im Zeitraum bestehen keine genehmigten Arbeitsstunden.');
+      throw new PayrollDomainError(
+        'NO_APPROVED_HOURS',
+        'Im Zeitraum bestehen keine genehmigten Arbeitsstunden.',
+        422,
+      );
     }
 
     const minimumMaintenanceRate = metadataNumber(
@@ -641,7 +858,7 @@ export async function calculateEmployeePayroll({
     let minimumAdjustmentMinutes = 0;
     let minimumAdjustmentAmount = 0;
     const payRateByEntryId = new Map(
-      payRates.map((row) => [String(row.time_entry_id), row]),
+      calculationPayRates.map((row) => [String(row.time_entry_id), row]),
     );
 
     for (const { entry, minutes } of positiveEntries) {
@@ -871,11 +1088,21 @@ export async function calculateEmployeePayroll({
 
     const holidayRate = asNumber(contract.holiday_pay_percentage) || (gavApplicable ? 8.33 : 0);
     const payVacationMonthly = profileMetadata.pay_vacation_monthly === true;
+    // Ferienguthaben is accrued on the hourly base wage (including a possible
+    // minimum-wage correction), but not again on the separate public-holiday
+    // compensation. This keeps the accrual transparent and matches the
+    // reconciled source workbook for the current OPC payroll periods.
+    const vacationAccrualBasis = roundMoney(
+      lines
+        .filter((item) => item.lineGroup === 'earning')
+        .filter((item) => ['BASIC_HOURLY_PAY', 'GAV_MINIMUM_WAGE_ADJUSTMENT'].includes(item.lineCode))
+        .reduce((sum, item) => sum + item.employeeAmount, 0),
+    );
     if (holidayRate > 0) {
-      const amount = percentageAmount(entitlementBasis, holidayRate);
+      const amount = percentageAmount(vacationAccrualBasis, holidayRate);
       if (payVacationMonthly) {
         lines.push(line('earning', 'HOLIDAY_PAY', 'Ferienentschädigung', {
-          basisAmount: entitlementBasis,
+          basisAmount: vacationAccrualBasis,
           rate: holidayRate,
           employeeAmount: amount,
           sortOrder: 20,
@@ -884,8 +1111,8 @@ export async function calculateEmployeePayroll({
       } else {
         accruals.push({
           code: 'VACATION_PAY_ACCRUAL',
-          label: 'Ferienlohn-Rückstellung (nicht ausbezahlt)',
-          basisAmount: entitlementBasis,
+          label: 'Ferienguthaben',
+          basisAmount: vacationAccrualBasis,
           rate: holidayRate,
           amount,
           status: 'accrued',
@@ -1349,6 +1576,26 @@ export async function calculateEmployeePayroll({
     );
   }
 
+  const latestAccrualByCode = new Map<string, JsonRow>();
+  for (const row of accrualLedgerRows) {
+    const code = cleanText(row.accrual_code);
+    if (code && !latestAccrualByCode.has(code)) {
+      latestAccrualByCode.set(code, row);
+    }
+  }
+
+  for (const accrual of accruals) {
+    if (accrual.status !== 'accrued') continue;
+    const previous = latestAccrualByCode.get(accrual.code);
+    const openingBalance = roundMoney(asNumber(previous?.closing_balance_chf));
+    const periodAccrual = roundMoney(accrual.amount);
+    const periodPayout = 0;
+    accrual.openingBalance = openingBalance;
+    accrual.periodAccrual = periodAccrual;
+    accrual.periodPayout = periodPayout;
+    accrual.closingBalance = roundMoney(openingBalance + periodAccrual - periodPayout);
+  }
+
   const grossPerHour = totalMinutes > 0 ? roundFour(grossSalary / (totalMinutes / 60)) : null;
   const netPerHour = totalMinutes > 0 ? roundFour(netSalary / (totalMinutes / 60)) : null;
   const employerCostPerHour = totalMinutes > 0
@@ -1379,7 +1626,7 @@ export async function calculateEmployeePayroll({
       country: cleanText(address.country_code) || 'CH',
       salutationLine: employeeSalutation(employee),
       employeeNumber: cleanText(employee.employee_number),
-      ahvNumber: cleanText(employee.ahv_number),
+      ahvNumber: maskAhvNumber(employee.ahv_number),
     },
     payroll: {
       month: heading.month,
@@ -1395,6 +1642,7 @@ export async function calculateEmployeePayroll({
       earnings,
       deductions,
       reimbursements: reimbursementsForDocument,
+      accruals: accruals.map(accrualDocumentLine),
     },
   };
 
@@ -1402,7 +1650,7 @@ export async function calculateEmployeePayroll({
   const filename = safeFilename(`Lohnabrechnung_${fileIdentity}_${periodFrom}_${periodTo}.pdf`);
 
   const snapshot = {
-    calculation_version: 'opc_payroll_reconciliation_v2_2_maintenance',
+    calculation_version: 'opc_payroll_reconciliation_v2_3_accrual_ledger',
     employee_id: employeeId,
     employee_number: employee.employee_number || null,
     period_from: periodFrom,
@@ -1411,14 +1659,22 @@ export async function calculateEmployeePayroll({
     contract: safeObject(contract),
     payroll_profile: safeObject(profile),
     rule_set: safeObject(ruleSet),
-    approved_entry_ids: positiveEntries.map((item) => item.entry.id),
+    payroll_input_mode: payrollInputMode,
+    approved_entry_ids: trackedPositiveEntries.map((item) => item.entry.id),
     time_entry_pay_rates: payRates.map((row) => safeObject(row)),
+    manual_rate_buckets: manualBuckets.map((row) => safeObject(row)),
+    tracked_minutes: trackedMinutes,
+    tracked_hours: trackedHours,
+    source_tax_review: taxReview,
     period_adjustments: periodAdjustments.map((row) => safeObject(row)),
     reconciliation,
     accruals,
     contribution_basis_chf: contributionBasis,
     totals: {
       entries_count: positiveEntries.length,
+      tracked_entries_count: trackedPositiveEntries.length,
+      tracked_minutes: trackedMinutes,
+      tracked_hours: trackedHours,
       minutes: totalMinutes,
       hours: totalHours,
       gross_salary_chf: grossSalary,
@@ -1442,7 +1698,11 @@ export async function calculateEmployeePayroll({
     periodFrom,
     periodTo,
     salaryType,
+    payrollInputMode,
     entriesCount: positiveEntries.length,
+    trackedEntriesCount: trackedPositiveEntries.length,
+    trackedMinutes,
+    trackedHours,
     totalMinutes,
     totalHours,
     payableDays,
@@ -1463,6 +1723,378 @@ export async function calculateEmployeePayroll({
     accruals,
     periodAdjustments,
     reconciliation,
+    sourceTaxReview: taxReview,
+    manualBuckets,
+    lines,
+    warnings,
+    payrollDocument,
+    filename,
+    snapshot,
+  };
+}
+
+export async function calculateEmployeeZeroPayroll({
+  supabase,
+  employeeId,
+  periodFrom,
+  periodTo,
+}: {
+  supabase: any;
+  employeeId: string;
+  periodFrom: string;
+  periodTo: string;
+}): Promise<PayrollCalculation> {
+  if (!ISO_DATE.test(periodFrom) || !ISO_DATE.test(periodTo) || periodFrom > periodTo) {
+    throw new Error('Ungültiger Abrechnungszeitraum.');
+  }
+
+  const {
+    employee,
+    address,
+    contract,
+    profile,
+    ruleSet,
+    permit,
+  } = await loadPayrollData(supabase, employeeId, periodFrom, periodTo);
+
+  const salaryType = String(contract.salary_type || '').toLowerCase() as 'hourly' | 'monthly';
+  if (!['hourly', 'monthly'].includes(salaryType)) {
+    throw new Error(`Nicht unterstützte Lohnart im Vertrag: ${salaryType || 'leer'}.`);
+  }
+
+  const lines: PayrollLine[] = [];
+  const warnings: string[] = [
+    'Nullsummen-Lohnabrechnung wurde administrativ erzeugt. Alle Lohnbestandteile, Abzüge und Auszahlungen wurden bewusst auf CHF 0.00 gesetzt.',
+  ];
+
+  const profileMetadata = safeObject(profile.metadata);
+  const ruleMetadata = safeObject(ruleSet.metadata);
+  const gavApplicable = contract.is_gav_applicable === true;
+  const taxReview = sourceTaxReview(employee, permit, profile);
+
+  if (salaryType === 'hourly') {
+    const hourlyRate = asNumber(contract.hourly_rate_chf);
+    lines.push(line('earning', 'BASIC_HOURLY_PAY', 'Grundlohn Stundenlohn', {
+      basisAmount: hourlyRate,
+      quantity: 0,
+      employeeAmount: 0,
+      sortOrder: 10,
+      source: 'zero_payroll_backend',
+      metadata: {
+        contract_id: contract.id || null,
+        document_basis: '0.00 Std.',
+        document_rate: hourlyRate > 0 ? `CHF ${hourlyRate.toFixed(2)}` : '',
+        zero_payroll: true,
+      },
+    }));
+
+    const publicHolidayRate = gavApplicable
+      ? metadataNumber(
+          ruleMetadata,
+          'public_holiday_maintenance_rate',
+          asNumber(contract.public_holiday_percentage),
+        )
+      : asNumber(contract.public_holiday_percentage);
+
+    if (publicHolidayRate > 0) {
+      lines.push(line('earning', 'PUBLIC_HOLIDAY_PAY_MAINTENANCE', 'Feiertagsentschädigung Unterhaltsreinigung', {
+        basisAmount: 0,
+        rate: publicHolidayRate,
+        employeeAmount: 0,
+        sortOrder: 30,
+        source: 'zero_payroll_backend',
+        metadata: {
+          contract_id: contract.id || null,
+          document_basis: 'CHF 0.00',
+          zero_payroll: true,
+        },
+      }));
+    }
+  } else {
+    const monthlySalary = asNumber(contract.monthly_salary_chf);
+    lines.push(line('earning', 'MONTHLY_SALARY', 'Monatslohn', {
+      basisAmount: monthlySalary,
+      quantity: 0,
+      employeeAmount: 0,
+      sortOrder: 10,
+      source: 'zero_payroll_backend',
+      metadata: {
+        contract_id: contract.id || null,
+        proration_method: 'zero_payroll_backend',
+        document_basis: monthlySalary > 0 ? `CHF ${monthlySalary.toFixed(2)}` : 'CHF 0.00',
+        document_rate: '0',
+        zero_payroll: true,
+      },
+    }));
+  }
+
+  const contributionBasis = 0;
+  const grossSalary = 0;
+  const employeeDeductions = 0;
+  const netSalary = 0;
+  const reimbursements = 0;
+  const otherAdjustments = 0;
+  const payout = 0;
+  const employerContributions = 0;
+  const totalEmployerCost = 0;
+  const totalMinutes = 0;
+  const totalHours = 0;
+  const payableDays = 0;
+  const periodWorkingDays = countWorkingDays(periodFrom, periodTo);
+
+  const ahvEmployeeRate = asNumber(ruleSet.ahv_employee_rate);
+  const ahvEmployerRate = asNumber(ruleSet.ahv_employer_rate);
+  const alvEmployeeRate = asNumber(ruleSet.alv_employee_rate);
+  const alvEmployerRate = asNumber(ruleSet.alv_employer_rate);
+
+  lines.push(line('employee_deduction', 'AHV_IV_EO', 'AHV/IV/EO Arbeitnehmer', {
+    basisAmount: 0,
+    rate: ahvEmployeeRate,
+    employeeAmount: 0,
+    sortOrder: 110,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, zero_payroll: true },
+  }));
+  lines.push(line('employer_contribution', 'AHV_IV_EO_EMPLOYER', 'AHV/IV/EO Arbeitgeber', {
+    basisAmount: 0,
+    rate: ahvEmployerRate,
+    employerAmount: 0,
+    sortOrder: 210,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, zero_payroll: true },
+  }));
+  lines.push(line('employee_deduction', 'ALV', 'ALV Arbeitnehmer', {
+    basisAmount: 0,
+    rate: alvEmployeeRate,
+    employeeAmount: 0,
+    sortOrder: 120,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, annual_cap_chf: ruleSet.alv_annual_max_chf, zero_payroll: true },
+  }));
+  lines.push(line('employer_contribution', 'ALV_EMPLOYER', 'ALV Arbeitgeber', {
+    basisAmount: 0,
+    rate: alvEmployerRate,
+    employerAmount: 0,
+    sortOrder: 220,
+    source: 'zero_payroll_backend',
+    metadata: { rule_set_id: ruleSet.id || null, annual_cap_chf: ruleSet.alv_annual_max_chf, zero_payroll: true },
+  }));
+
+  const nbuMode = String(profileMetadata.nbu_eligibility_mode || 'auto').toLowerCase();
+  const nbuEligible = nbuMode === 'never' ? false : asNumber(profile.nbu_employee_rate) > 0 || asNumber(profile.nbu_employer_rate) > 0;
+
+  const profileRatePairs: Array<{
+    code: string;
+    employerCode: string;
+    label: string;
+    employeeRate: number;
+    employerRate: number;
+    sort: number;
+  }> = [
+    {
+      code: 'NBU',
+      employerCode: 'NBU_EMPLOYER',
+      label: 'NBU',
+      employeeRate: nbuEligible ? asNumber(profile.nbu_employee_rate) : 0,
+      employerRate: nbuEligible ? asNumber(profile.nbu_employer_rate) : 0,
+      sort: 130,
+    },
+    {
+      code: 'KTG',
+      employerCode: 'KTG_EMPLOYER',
+      label: 'KTG',
+      employeeRate: asNumber(profile.ktg_employee_rate),
+      employerRate: asNumber(profile.ktg_employer_rate),
+      sort: 140,
+    },
+    {
+      code: 'GAV',
+      employerCode: 'GAV_EMPLOYER',
+      label: 'GAV-Beitrag',
+      employeeRate: gavApplicable ? asNumber(profile.gav_employee_rate) : 0,
+      employerRate: gavApplicable ? asNumber(profile.gav_employer_rate) : 0,
+      sort: 150,
+    },
+  ];
+
+  for (const item of profileRatePairs) {
+    if (item.employeeRate > 0) {
+      lines.push(line('employee_deduction', item.code, `${item.label} Arbeitnehmer`, {
+        basisAmount: 0,
+        rate: item.employeeRate,
+        employeeAmount: 0,
+        sortOrder: item.sort,
+        source: 'zero_payroll_backend',
+        metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+      }));
+    }
+    if (item.employerRate > 0) {
+      lines.push(line('employer_contribution', item.employerCode, `${item.label} Arbeitgeber`, {
+        basisAmount: 0,
+        rate: item.employerRate,
+        employerAmount: 0,
+        sortOrder: item.sort + 100,
+        source: 'zero_payroll_backend',
+        metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+      }));
+    }
+  }
+
+  if (asNumber(profile.bvg_employee_amount_chf) > 0) {
+    lines.push(line('employee_deduction', 'BVG', 'BVG Arbeitnehmer', {
+      employeeAmount: 0,
+      sortOrder: 160,
+      source: 'zero_payroll_backend',
+      metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+    }));
+  }
+  if (asNumber(profile.bvg_employer_amount_chf) > 0) {
+    lines.push(line('employer_contribution', 'BVG_EMPLOYER', 'BVG Arbeitgeber', {
+      employerAmount: 0,
+      sortOrder: 260,
+      source: 'zero_payroll_backend',
+      metadata: { payroll_profile_id: profile.id || null, zero_payroll: true },
+    }));
+  }
+
+  if (profile.source_tax_subject === true) {
+    const sourceTaxRate = asNumber(profile.source_tax_rate);
+    lines.push(line('employee_deduction', 'SOURCE_TAX', 'Quellensteuer', {
+      basisAmount: 0,
+      rate: sourceTaxRate,
+      employeeAmount: 0,
+      sortOrder: 170,
+      source: 'zero_payroll_backend',
+      metadata: {
+        canton: profile.source_tax_canton || null,
+        tariff_code: profile.source_tax_tariff_code || null,
+        fixed_amount: false,
+        zero_payroll: true,
+      },
+    }));
+  }
+
+  const fullName = [employee.legal_first_name, employee.legal_last_name]
+    .map(cleanText)
+    .filter(Boolean)
+    .join(' ');
+  const heading = monthHeading(periodFrom, periodTo);
+  const earnings = lines.filter((item) => item.lineGroup === 'earning').map(documentLine);
+  const deductions = lines.filter((item) => item.lineGroup === 'employee_deduction').map(documentLine);
+  const reimbursementsForDocument: JsonRow[] = [];
+
+  const payrollDocument = {
+    document: {
+      city: 'Basel',
+      date: formatDate(new Date().toISOString().slice(0, 10)),
+    },
+    employee: {
+      fullName,
+      street: [address.street, address.house_number].map(cleanText).filter(Boolean).join(' '),
+      postalCode: cleanText(address.postal_code),
+      city: cleanText(address.city),
+      country: cleanText(address.country_code) || 'CH',
+      salutationLine: employeeSalutation(employee),
+      employeeNumber: cleanText(employee.employee_number),
+      ahvNumber: maskAhvNumber(employee.ahv_number),
+    },
+    payroll: {
+      month: heading.month,
+      year: heading.year,
+      periodFrom: formatDate(periodFrom),
+      periodTo: formatDate(periodTo),
+      grossSalary,
+      totalDeductions: employeeDeductions,
+      netSalary,
+      totalReimbursements: reimbursements,
+      otherAdjustments,
+      payout,
+      earnings,
+      deductions,
+      reimbursements: reimbursementsForDocument,
+    },
+  };
+
+  const fileIdentity = cleanText(employee.employee_number) || fullName || employeeId;
+  const filename = safeFilename(`Lohnabrechnung_${fileIdentity}_${periodFrom}_${periodTo}.pdf`);
+
+  const snapshot = {
+    calculation_version: 'opc_payroll_zero_sum_v1',
+    zero_payroll: true,
+    employee_id: employeeId,
+    employee_number: employee.employee_number || null,
+    period_from: periodFrom,
+    period_to: periodTo,
+    salary_type: salaryType,
+    payroll_input_mode: 'time_entries',
+    contract: safeObject(contract),
+    payroll_profile: safeObject(profile),
+    rule_set: safeObject(ruleSet),
+    approved_entry_ids: [],
+    time_entry_pay_rates: [],
+    manual_rate_buckets: [],
+    tracked_minutes: 0,
+    tracked_hours: 0,
+    source_tax_review: taxReview,
+    period_adjustments: [],
+    reconciliation: null,
+    accruals: [],
+    contribution_basis_chf: contributionBasis,
+    totals: {
+      entries_count: 0,
+      tracked_entries_count: 0,
+      tracked_minutes: 0,
+      tracked_hours: 0,
+      minutes: 0,
+      hours: 0,
+      gross_salary_chf: 0,
+      employee_deductions_chf: 0,
+      net_salary_chf: 0,
+      reimbursements_chf: 0,
+      other_adjustments_chf: 0,
+      payout_chf: 0,
+      employer_contributions_chf: 0,
+      total_employer_cost_chf: 0,
+    },
+    warnings,
+  };
+
+  return {
+    employee,
+    address,
+    contract,
+    payrollProfile: profile,
+    ruleSet,
+    periodFrom,
+    periodTo,
+    salaryType,
+    payrollInputMode: 'time_entries',
+    entriesCount: 0,
+    trackedEntriesCount: 0,
+    trackedMinutes: 0,
+    trackedHours: 0,
+    totalMinutes,
+    totalHours,
+    payableDays,
+    periodWorkingDays,
+    baseSalary: 0,
+    grossSalary,
+    employeeDeductions,
+    netSalary,
+    reimbursements,
+    otherAdjustments,
+    payout,
+    employerContributions,
+    totalEmployerCost,
+    grossPerHour: null,
+    netPerHour: null,
+    employerCostPerHour: null,
+    rateBreakdown: [],
+    accruals: [],
+    periodAdjustments: [],
+    reconciliation: null,
+    sourceTaxReview: taxReview,
+    manualBuckets: [],
     lines,
     warnings,
     payrollDocument,

@@ -1,28 +1,26 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
-import { AlertTriangle, CarFront, Clock3, Gauge, MapPin, Navigation, RefreshCw, Route, Satellite } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CarFront, LocateFixed, MapPin, RefreshCw, Search, Wifi, WifiOff, Wrench } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { OPC_BRAND, OPC_PAGE_FONT, opcBlackButtonStyle, opcCardStyle, opcInputWithIconStyle, opcSecondaryButtonStyle, opcSelectStyle } from './opc/OPCPageTop';
 
-type FleetVehicle = {
+type Vehicle = {
   id: string;
-  display_name?: string | null;
+  display_name: string;
   license_plate?: string | null;
-  vehicle_identifier?: string | null;
-  vehicle_type?: string | null;
+  make?: string | null;
+  model?: string | null;
   status?: string | null;
-  autoaid_vehicle_id?: string | null;
 };
 
 type VehicleStatus = {
   vehicle_id: string;
-  recorded_at?: string | null;
-  ignition_on?: boolean | null;
-  engine_on?: boolean | null;
-  vehicle_speed_kmh?: number | null;
-  mileage_km?: number | null;
+  last_seen_at?: string | null;
+  status?: string | null;
+  speed_kmh?: number | null;
   fuel_level_percent?: number | null;
-  battery_voltage?: number | null;
-  dtc_count?: number | null;
-  raw_status?: Record<string, unknown> | null;
+  range_km?: number | null;
+  odometer_km?: number | null;
+  dtc_active_count?: number | null;
 };
 
 type VehicleLocation = {
@@ -30,174 +28,87 @@ type VehicleLocation = {
   recorded_at?: string | null;
   latitude?: number | null;
   longitude?: number | null;
-  speed_kmh?: number | null;
-  heading_degrees?: number | null;
   address?: string | null;
+  speed_kmh?: number | null;
 };
 
-type FleetAlert = {
-  id: string;
-  vehicle_id?: string | null;
-  severity?: string | null;
-  alert_type?: string | null;
-  title?: string | null;
-  message?: string | null;
-  status?: string | null;
-  created_at?: string | null;
-};
-
-const BRAND = {
-  text: '#111827',
-  muted: '#6B7280',
-  faint: '#9CA3AF',
-  border: '#E5E7EB',
-  black: '#0F1115',
-  card: '#FFFFFF',
-  soft: '#FAFAFA',
-  green: '#166534',
-  greenBg: '#F0FDF4',
-  orange: '#ff6a00',
-  orangeBg: '#FFF7ED',
-  red: '#B91C1C',
-  redBg: '#FEF2F2',
-};
-
-const pageFont =
-  '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", Segoe UI, Roboto, sans-serif';
-
-const cardStyle: CSSProperties = {
-  background: BRAND.card,
-  border: `1px solid ${BRAND.border}`,
-  borderRadius: '20px',
-  boxShadow: '0 1px 2px rgba(15, 17, 21, 0.04)',
-};
-
-function fmtDate(value?: string | null) {
-  if (!value) return 'Noch keine Daten';
+function formatDate(value?: string | null) {
+  if (!value) return '—';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Noch keine Daten';
-  return date.toLocaleString('de-CH', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('de-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function VehicleMarker({
-  vehicle,
-  location,
-  x,
-  y,
-}: {
-  vehicle: FleetVehicle;
-  location: VehicleLocation;
-  x: number;
-  y: number;
-}) {
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        left: `${x}%`,
-        top: `${y}%`,
-        transform: 'translate(-50%, -50%)',
-        display: 'grid',
-        placeItems: 'center',
-      }}
-      title={`${vehicle.display_name || vehicle.license_plate || 'Fahrzeug'} · ${location.address || ''}`}
-    >
-      <div
-        style={{
-          width: '42px',
-          height: '42px',
-          borderRadius: '16px',
-          background: BRAND.black,
-          color: '#FFFFFF',
-          display: 'grid',
-          placeItems: 'center',
-          boxShadow: '0 12px 30px rgba(15, 17, 21, 0.24)',
-          border: '3px solid #FFFFFF',
-        }}
-      >
-        <CarFront size={19} />
-      </div>
-      <div
-        style={{
-          marginTop: '6px',
-          padding: '5px 8px',
-          borderRadius: '999px',
-          background: '#FFFFFF',
-          border: `1px solid ${BRAND.border}`,
-          color: BRAND.text,
-          fontSize: '11px',
-          fontWeight: 820,
-          whiteSpace: 'nowrap',
-          boxShadow: '0 6px 18px rgba(15, 17, 21, 0.10)',
-        }}
-      >
-        {vehicle.license_plate || vehicle.display_name || 'OPC Fahrzeug'}
-      </div>
-    </div>
-  );
+function formatKm(value?: number | null) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return '—';
+  return `${Math.round(next).toLocaleString('de-CH')} km`;
+}
+
+function formatFuel(value?: number | null) {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return '—';
+  return `${Math.round(next)}%`;
+}
+
+function stateFor(vehicle?: Vehicle, status?: VehicleStatus) {
+  const raw = String(status?.status || vehicle?.status || '').toLowerCase();
+  if (raw.includes('maintenance') || (status?.dtc_active_count || 0) > 0) return 'warning';
+  if (raw.includes('offline') || raw.includes('inactive')) return 'offline';
+  return 'online';
+}
+
+function mapUrl(points: Array<{ location: VehicleLocation }>, selected?: VehicleLocation | null) {
+  const source = selected || points[0]?.location;
+  const lat = Number(source?.latitude || 47.5596);
+  const lng = Number(source?.longitude || 7.5886);
+  const span = points.length > 1 ? 0.08 : 0.02;
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - span}%2C${lat - span}%2C${lng + span}%2C${lat + span}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
 
 export default function OPCFleetMapPage() {
+  const mapShellRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
-  const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [statuses, setStatuses] = useState<VehicleStatus[]>([]);
   const [locations, setLocations] = useState<VehicleLocation[]>([]);
-  const [alerts, setAlerts] = useState<FleetAlert[]>([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
-  async function loadFleet(options: { refresh?: boolean } = {}) {
-    if (options.refresh) setRefreshing(true);
+  const loadFleet = useCallback(async (silent = false) => {
+    if (silent) setRefreshing(true);
     else setLoading(true);
     setError('');
-
     try {
-      const [vehiclesResult, statusResult, locationResult, alertResult] = await Promise.all([
-        supabase
-          .from('opc_fleet_vehicles')
-          .select('id, display_name, license_plate, vehicle_identifier, vehicle_type, status, autoaid_vehicle_id')
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('opc_vehicle_status_current')
-          .select('*'),
-        supabase
-          .from('opc_vehicle_locations')
-          .select('*')
-          .order('recorded_at', { ascending: false })
-          .limit(250),
-        supabase
-          .from('opc_fleet_alerts')
-          .select('id, vehicle_id, severity, alert_type, title, message, status, created_at')
-          .in('status', ['open', 'new', 'active'])
-          .order('created_at', { ascending: false })
-          .limit(8),
+      const [vehiclesResult, statusResult, locationResult] = await Promise.all([
+        supabase.from('opc_fleet_vehicles').select('id, display_name, license_plate, make, model, status').order('display_name', { ascending: true }),
+        supabase.from('opc_vehicle_status_current').select('vehicle_id, last_seen_at, status, speed_kmh, fuel_level_percent, range_km, odometer_km, dtc_active_count'),
+        supabase.from('opc_vehicle_locations').select('vehicle_id, recorded_at, latitude, longitude, address, speed_kmh').order('recorded_at', { ascending: false }).limit(300),
       ]);
-
       if (vehiclesResult.error) throw vehiclesResult.error;
-      if (statusResult.error) throw statusResult.error;
-      if (locationResult.error) throw locationResult.error;
-      if (alertResult.error) throw alertResult.error;
-
-      setVehicles((vehiclesResult.data || []) as FleetVehicle[]);
-      setStatuses((statusResult.data || []) as VehicleStatus[]);
-      setLocations((locationResult.data || []) as VehicleLocation[]);
-      setAlerts((alertResult.data || []) as FleetAlert[]);
+      setVehicles((vehiclesResult.data || []) as Vehicle[]);
+      if (!statusResult.error) setStatuses((statusResult.data || []) as VehicleStatus[]);
+      if (!locationResult.error) setLocations((locationResult.data || []) as VehicleLocation[]);
     } catch (err: any) {
-      setError(err?.message || 'Fuhrparkdaten konnten nicht geladen werden.');
+      setError(err?.message || 'Fuhrpark-Karte konnte nicht geladen werden.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     void loadFleet();
-  }, []);
+  }, [loadFleet]);
+
+  const statusByVehicle = useMemo(() => {
+    const map = new Map<string, VehicleStatus>();
+    statuses.forEach((status) => status.vehicle_id && map.set(status.vehicle_id, status));
+    return map;
+  }, [statuses]);
 
   const latestLocationByVehicle = useMemo(() => {
     const map = new Map<string, VehicleLocation>();
@@ -209,248 +120,131 @@ export default function OPCFleetMapPage() {
     return map;
   }, [locations]);
 
-  const statusByVehicle = useMemo(() => {
-    const map = new Map<string, VehicleStatus>();
-    statuses.forEach((status) => {
-      if (status.vehicle_id) map.set(status.vehicle_id, status);
-    });
-    return map;
-  }, [statuses]);
-
   const points = useMemo(() => {
+    const needle = query.trim().toLowerCase();
     return vehicles
-      .map((vehicle) => ({ vehicle, location: latestLocationByVehicle.get(vehicle.id), status: statusByVehicle.get(vehicle.id) }))
-      .filter((point): point is { vehicle: FleetVehicle; location: VehicleLocation; status?: VehicleStatus } => Boolean(point.location));
-  }, [latestLocationByVehicle, statusByVehicle, vehicles]);
+      .map((vehicle) => ({ vehicle, status: statusByVehicle.get(vehicle.id), location: latestLocationByVehicle.get(vehicle.id) }))
+      .filter((entry): entry is { vehicle: Vehicle; status?: VehicleStatus; location: VehicleLocation } => Boolean(entry.location))
+      .filter((entry) => {
+        const state = stateFor(entry.vehicle, entry.status);
+        const matchesStatus = statusFilter === 'all' || statusFilter === state;
+        const haystack = [entry.vehicle.display_name, entry.vehicle.license_plate, entry.vehicle.make, entry.vehicle.model, entry.location.address].filter(Boolean).join(' ').toLowerCase();
+        return matchesStatus && (!needle || haystack.includes(needle));
+      });
+  }, [latestLocationByVehicle, query, statusByVehicle, statusFilter, vehicles]);
 
-  const bounds = useMemo(() => {
-    if (!points.length) return null;
-    const lats = points.map((point) => point.location.latitude as number);
-    const lngs = points.map((point) => point.location.longitude as number);
-    return {
-      minLat: Math.min(...lats),
-      maxLat: Math.max(...lats),
-      minLng: Math.min(...lngs),
-      maxLng: Math.max(...lngs),
-    };
-  }, [points]);
+  const selected = points.find((point) => point.vehicle.id === selectedVehicleId) || points[0] || null;
+  const onlineCount = points.filter((point) => stateFor(point.vehicle, point.status) === 'online').length;
+  const warningCount = points.filter((point) => stateFor(point.vehicle, point.status) === 'warning').length;
+  const offlineCount = vehicles.length - onlineCount - warningCount;
 
-  function pointToPosition(location: VehicleLocation) {
-    if (!bounds || bounds.minLat === bounds.maxLat || bounds.minLng === bounds.maxLng) {
-      return { x: 50, y: 50 };
-    }
-
-    const lng = location.longitude as number;
-    const lat = location.latitude as number;
-    const x = 12 + ((lng - bounds.minLng) / (bounds.maxLng - bounds.minLng)) * 76;
-    const y = 88 - ((lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * 76;
-    return { x, y };
+  function handleFocusMap() {
+    mapShellRef.current?.querySelector('iframe')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
-  const onlineCount = points.length;
-  const alertCount = alerts.length;
-  const movingCount = points.filter((point) => Number(point.location.speed_kmh || point.status?.vehicle_speed_kmh || 0) > 3).length;
-
   return (
-    <div style={{ width: '100%', minHeight: '100%', fontFamily: pageFont, color: BRAND.text }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '18px', marginBottom: '18px' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-            <span
-              style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '16px',
-                background: BRAND.orangeBg,
-                color: BRAND.orange,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Satellite size={22} />
-            </span>
-            <div>
-              <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 860, letterSpacing: '-0.045em' }}>Fuhrpark Live Map</h1>
-              <p style={{ margin: '4px 0 0', color: BRAND.muted, fontSize: '14px', fontWeight: 650 }}>
-                AutoAid-Fahrzeuge, Live-Positionen, Status und Warnungen im OPC-Portal.
-              </p>
-            </div>
-          </div>
+    <div
+      ref={mapShellRef}
+      style={{
+        position: 'relative',
+        width: 'calc(100% + 56px)',
+        height: 'calc(100vh - 0px)',
+        minHeight: '720px',
+        margin: '-24px -28px -112px',
+        overflow: 'hidden',
+        background: '#F3F4F6',
+        fontFamily: OPC_PAGE_FONT,
+        color: OPC_BRAND.text,
+        overscrollBehavior: 'contain',
+      }}
+    >
+      <iframe
+        title="Fuhrpark Live Map"
+        src={mapUrl(points, selected?.location || null)}
+        loading="lazy"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          border: 0,
+          background: '#EEF2F7',
+        }}
+      />
+
+      <div style={{ position: 'absolute', top: 18, left: 18, right: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, pointerEvents: 'none' }}>
+        <div style={{ ...opcCardStyle, padding: '12px 14px', minWidth: 240, pointerEvents: 'auto' }}>
+          <div style={{ fontSize: '15px', fontWeight: 870, letterSpacing: '-0.035em' }}>Fuhrpark Karte</div>
+          <div style={{ marginTop: 4, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>{loading ? 'Lädt...' : `${points.length} sichtbar · ${formatDate(selected?.location.recorded_at)}`}</div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void loadFleet({ refresh: true })}
-          disabled={refreshing}
-          style={{
-            minHeight: '44px',
-            padding: '0 14px',
-            borderRadius: '14px',
-            border: `1px solid ${BRAND.black}`,
-            background: BRAND.black,
-            color: '#FFFFFF',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '13px',
-            fontWeight: 820,
-            cursor: refreshing ? 'wait' : 'pointer',
-          }}
-        >
-          <RefreshCw size={16} />
-          {refreshing ? 'Aktualisieren...' : 'Aktualisieren'}
-        </button>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 280px) 142px 42px 42px', gap: 10, pointerEvents: 'auto' }} className="opc-map-controls">
+          <div style={{ position: 'relative' }}>
+            <Search size={16} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: OPC_BRAND.faint, pointerEvents: 'none' }} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Fahrzeug suchen" style={{ ...opcInputWithIconStyle, height: 42, background: '#FFFFFF' }} />
+          </div>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} style={{ ...opcSelectStyle, height: 42, background: '#FFFFFF' }}>
+            <option value="all">Alle</option>
+            <option value="online">Online</option>
+            <option value="warning">Prüfen</option>
+            <option value="offline">Offline</option>
+          </select>
+          <button type="button" onClick={handleFocusMap} style={{ ...opcSecondaryButtonStyle, width: 42, height: 42, padding: 0 }} title="Karte fokussieren"><LocateFixed size={16} /></button>
+          <button type="button" onClick={() => void loadFleet(true)} disabled={refreshing} style={{ ...opcBlackButtonStyle, width: 42, height: 42, padding: 0 }} title="Aktualisieren"><RefreshCw size={16} /></button>
+        </div>
       </div>
 
-      {error && (
-        <div style={{ ...cardStyle, padding: '14px 16px', marginBottom: '16px', background: BRAND.redBg, borderColor: '#FCA5A5', color: BRAND.red, fontWeight: 720 }}>
-          {error}
+      <div style={{ position: 'absolute', left: 18, bottom: 18, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', pointerEvents: 'none' }}>
+        <div style={{ ...opcCardStyle, padding: '10px 12px', display: 'flex', gap: 14, alignItems: 'center', pointerEvents: 'auto' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750 }}><CarFront size={15} /> {vehicles.length} Fahrzeuge</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750, color: OPC_BRAND.green }}><Wifi size={15} /> {onlineCount} Online</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750, color: OPC_BRAND.amber }}><Wrench size={15} /> {warningCount} Prüfen</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 750, color: OPC_BRAND.muted }}><WifiOff size={15} /> {Math.max(0, offlineCount)} Offline</span>
+        </div>
+      </div>
+
+      {selected && (
+        <aside style={{ position: 'absolute', right: 18, bottom: 18, width: 340, maxWidth: 'calc(100% - 36px)', pointerEvents: 'auto', ...opcCardStyle, padding: 16 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 13, border: `1px solid ${OPC_BRAND.border}`, background: '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CarFront size={19} /></div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 850, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected.vehicle.display_name}</div>
+              <div style={{ marginTop: 3, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>{selected.vehicle.license_plate || 'Kennzeichen offen'} · {formatDate(selected.location.recorded_at)}</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+            <div style={{ border: `1px solid ${OPC_BRAND.border}`, borderRadius: 14, padding: 10 }}><div style={{ color: OPC_BRAND.faint, fontSize: 11, fontWeight: 820 }}>Tank</div><div style={{ marginTop: 3, fontSize: 15, fontWeight: 850 }}>{formatFuel(selected.status?.fuel_level_percent)}</div></div>
+            <div style={{ border: `1px solid ${OPC_BRAND.border}`, borderRadius: 14, padding: 10 }}><div style={{ color: OPC_BRAND.faint, fontSize: 11, fontWeight: 820 }}>KM-Stand</div><div style={{ marginTop: 3, fontSize: 15, fontWeight: 850 }}>{formatKm(selected.status?.odometer_km)}</div></div>
+          </div>
+          <div style={{ color: OPC_BRAND.muted, fontSize: 13, lineHeight: 1.45, marginBottom: 12 }}>{selected.location.address || 'Adresse nicht hinterlegt'}</div>
+          <a href={`/fuhrpark/fahrzeug/${selected.vehicle.id}`} style={{ ...opcBlackButtonStyle, height: 42 }}>Fahrzeug öffnen</a>
+        </aside>
+      )}
+
+      {points.length > 1 && (
+        <div style={{ position: 'absolute', left: 18, top: 92, display: 'flex', flexDirection: 'column', gap: 8, width: 250, maxHeight: 'calc(100vh - 190px)', overflow: 'auto', pointerEvents: 'auto' }} className="opc-map-list">
+          {points.slice(0, 12).map((point) => (
+            <button key={point.vehicle.id} type="button" onClick={() => setSelectedVehicleId(point.vehicle.id)} style={{ ...opcCardStyle, padding: '10px 12px', textAlign: 'left', cursor: 'pointer', borderColor: selected?.vehicle.id === point.vehicle.id ? OPC_BRAND.black : OPC_BRAND.border }}>
+              <div style={{ fontSize: 13, fontWeight: 830 }}>{point.vehicle.display_name}</div>
+              <div style={{ marginTop: 3, color: OPC_BRAND.muted, fontSize: 12, fontWeight: 650 }}>{point.vehicle.license_plate || 'Kennzeichen offen'} · {Math.round(Number(point.location.speed_kmh || point.status?.speed_kmh || 0))} km/h</div>
+            </button>
+          ))}
         </div>
       )}
 
-      <div className="opc-fleet-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '12px', marginBottom: '16px' }}>
-        {[
-          { label: 'Fahrzeuge', value: vehicles.length, icon: CarFront },
-          { label: 'Mit Position', value: onlineCount, icon: MapPin },
-          { label: 'In Bewegung', value: movingCount, icon: Navigation },
-          { label: 'Offene Warnungen', value: alertCount, icon: AlertTriangle },
-        ].map((item) => {
-          const Icon = item.icon;
-          return (
-            <div key={item.label} style={{ ...cardStyle, padding: '18px', minHeight: '96px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: '25px', fontWeight: 860, letterSpacing: '-0.04em' }}>{loading ? '—' : item.value}</div>
-                <div style={{ marginTop: '10px', color: BRAND.muted, fontSize: '13px', fontWeight: 720 }}>{item.label}</div>
-              </div>
-              <span style={{ width: '38px', height: '38px', borderRadius: '13px', border: `1px solid ${BRAND.border}`, display: 'grid', placeItems: 'center', background: '#FAFAFA' }}>
-                <Icon size={19} />
-              </span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="opc-fleet-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.45fr) minmax(340px, 0.55fr)', gap: '16px' }}>
-        <div style={{ ...cardStyle, padding: '18px', minHeight: '620px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'center', marginBottom: '14px' }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 840, letterSpacing: '-0.035em' }}>Live Karte</h2>
-              <p style={{ margin: '5px 0 0', color: BRAND.muted, fontSize: '13px', fontWeight: 650 }}>
-                Positionen werden aus `opc_vehicle_locations` gelesen. Nach dem Pull-Worker erscheinen echte AutoAid-Punkte.
-              </p>
-            </div>
-            <span style={{ padding: '8px 11px', borderRadius: '999px', background: BRAND.soft, color: BRAND.muted, fontSize: '12px', fontWeight: 820 }}>
-              {fmtDate(points[0]?.location.recorded_at)}
-            </span>
-          </div>
-
-          <div
-            style={{
-              position: 'relative',
-              height: '540px',
-              borderRadius: '20px',
-              border: `1px solid ${BRAND.border}`,
-              overflow: 'hidden',
-              background:
-                'linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 45%, #FFFFFF 100%)',
-            }}
-          >
-            <div style={{ position: 'absolute', inset: 0, opacity: 0.5, backgroundImage: 'linear-gradient(#E5E7EB 1px, transparent 1px), linear-gradient(90deg, #E5E7EB 1px, transparent 1px)', backgroundSize: '44px 44px' }} />
-            <div style={{ position: 'absolute', left: '8%', right: '8%', top: '49%', height: '18px', borderRadius: '999px', background: '#E5E7EB', transform: 'rotate(-7deg)' }} />
-            <div style={{ position: 'absolute', left: '35%', top: '8%', bottom: '8%', width: '18px', borderRadius: '999px', background: '#E5E7EB', transform: 'rotate(9deg)' }} />
-            <div style={{ position: 'absolute', left: '15%', right: '18%', top: '28%', height: '12px', borderRadius: '999px', background: '#FDE68A', opacity: 0.55, transform: 'rotate(10deg)' }} />
-
-            {points.length ? (
-              points.map((point) => {
-                const position = pointToPosition(point.location);
-                return <VehicleMarker key={point.vehicle.id} vehicle={point.vehicle} location={point.location} x={position.x} y={position.y} />;
-              })
-            ) : (
-              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', textAlign: 'center', padding: '24px' }}>
-                <div>
-                  <MapPin size={32} color={BRAND.faint} />
-                  <div style={{ marginTop: '12px', color: BRAND.text, fontSize: '15px', fontWeight: 840 }}>Noch keine AutoAid-Positionen</div>
-                  <div style={{ marginTop: '6px', color: BRAND.muted, fontSize: '13px', fontWeight: 650, lineHeight: 1.45 }}>
-                    Sobald der AutoAid Pull-Worker läuft, werden Fahrzeuge hier wie im EcoTaxi Fleet Map Pattern angezeigt.
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gap: '16px', alignContent: 'start' }}>
-          <div style={{ ...cardStyle, padding: '18px' }}>
-            <h2 style={{ margin: '0 0 14px', fontSize: '18px', fontWeight: 840, letterSpacing: '-0.035em' }}>Fahrzeugstatus</h2>
-            <div style={{ display: 'grid', gap: '12px' }}>
-              {loading ? (
-                <div style={{ color: BRAND.muted, fontSize: '13px', fontWeight: 650 }}>Fuhrparkdaten werden geladen...</div>
-              ) : vehicles.length ? (
-                vehicles.map((vehicle) => {
-                  const location = latestLocationByVehicle.get(vehicle.id);
-                  const status = statusByVehicle.get(vehicle.id);
-                  return (
-                    <div key={vehicle.id} style={{ padding: '14px', borderRadius: '16px', border: `1px solid ${BRAND.border}`, background: '#FFFFFF' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start' }}>
-                        <div>
-                          <div style={{ fontSize: '14px', fontWeight: 840 }}>{vehicle.display_name || vehicle.license_plate || 'OPC Fahrzeug'}</div>
-                          <div style={{ marginTop: '4px', color: BRAND.muted, fontSize: '12px', fontWeight: 680 }}>
-                            {vehicle.license_plate || vehicle.vehicle_identifier || vehicle.autoaid_vehicle_id || 'Ohne Kennung'}
-                          </div>
-                        </div>
-                        <span style={{ padding: '6px 8px', borderRadius: '999px', background: location ? BRAND.greenBg : BRAND.soft, color: location ? BRAND.green : BRAND.muted, fontSize: '11px', fontWeight: 820 }}>
-                          {location ? 'Position' : 'Keine Position'}
-                        </span>
-                      </div>
-                      <div style={{ marginTop: '12px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: BRAND.muted, fontSize: '12px', fontWeight: 680 }}>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Gauge size={14} />{Number(location?.speed_kmh || status?.vehicle_speed_kmh || 0).toFixed(0)} km/h</div>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Clock3 size={14} />{fmtDate(location?.recorded_at || status?.recorded_at)}</div>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Route size={14} />{status?.mileage_km ? `${Number(status.mileage_km).toFixed(0)} km` : 'km offen'}</div>
-                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><AlertTriangle size={14} />{status?.dtc_count || 0} DTC</div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div style={{ color: BRAND.muted, fontSize: '13px', fontWeight: 650 }}>Noch keine Fahrzeuge in `opc_fleet_vehicles`.</div>
-              )}
-            </div>
-          </div>
-
-          <div style={{ ...cardStyle, padding: '18px' }}>
-            <h2 style={{ margin: '0 0 14px', fontSize: '18px', fontWeight: 840, letterSpacing: '-0.035em' }}>Warnungen</h2>
-            <div style={{ display: 'grid', gap: '10px' }}>
-              {alerts.length ? (
-                alerts.map((alert) => (
-                  <div key={alert.id} style={{ padding: '12px', borderRadius: '14px', border: `1px solid ${BRAND.border}`, background: alert.severity === 'critical' ? BRAND.redBg : BRAND.soft }}>
-                    <div style={{ color: alert.severity === 'critical' ? BRAND.red : BRAND.text, fontSize: '13px', fontWeight: 840 }}>{alert.title || alert.alert_type || 'Fuhrpark-Warnung'}</div>
-                    <div style={{ marginTop: '4px', color: BRAND.muted, fontSize: '12px', fontWeight: 650, lineHeight: 1.45 }}>{alert.message || fmtDate(alert.created_at)}</div>
-                  </div>
-                ))
-              ) : (
-                <div style={{ color: BRAND.muted, fontSize: '13px', fontWeight: 650 }}>Keine offenen Fuhrpark-Warnungen.</div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+      {error && <div style={{ position: 'absolute', left: 18, right: 18, top: 82, ...opcCardStyle, padding: 12, color: OPC_BRAND.red, fontWeight: 720 }}>{error}</div>}
 
       <style>{`
+        .opc-map-controls input,
+        .opc-map-controls select,
+        .opc-map-controls button { box-shadow: 0 1px 2px rgba(15,17,21,.06); }
         @media (max-width: 980px) {
-          .opc-fleet-stats,
-          .opc-fleet-layout {
-            grid-template-columns: 1fr !important;
-          }
+          .opc-map-controls { grid-template-columns: 1fr 120px 42px 42px !important; width: 100%; }
+          .opc-map-list { display: none !important; }
         }
-        @media (max-width: 680px) {
-          .opc-fleet-stats {
-            grid-template-columns: 1fr 1fr !important;
-          }
-          .opc-settings-grid-2,
-          .opc-settings-grid-3 {
-            grid-template-columns: 1fr !important;
-          }
+        @media (max-width: 720px) {
+          .opc-map-controls { grid-template-columns: 1fr 42px 42px !important; }
+          .opc-map-controls select { display: none !important; }
         }
       `}</style>
     </div>

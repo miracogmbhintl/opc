@@ -8,7 +8,7 @@ import { supabase, type UserProfile, type UserRole } from './supabase';
  * restarts and temporary network outages. It is only profile metadata, not the
  * Supabase session itself.
  */
-const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v5:persistent';
+const AUTH_CACHE_KEY = 'opc:auth-profile-cache:v7:owner-priority';
 const LEGACY_AUTH_CACHE_KEYS = [
   'opc:auth-profile-cache',
   'opc:auth-profile-cache:v2',
@@ -331,6 +331,7 @@ function explicitRoleValue(value: unknown) {
   ].includes(clean);
 }
 
+
 async function fetchActiveStaffRoleByUser(
   userId: string,
   email?: string | null,
@@ -338,40 +339,117 @@ async function fetchActiveStaffRoleByUser(
   const fields =
     'id,user_id,employee_id,role,display_name,email,status,can_access_portal,can_manage_jobs,can_view_all_jobs';
 
+  const activeStatuses = [
+    'active',
+    'aktiv',
+    'enabled',
+  ];
+
+  const rolePriority = (
+    row: StaffRoleRow,
+  ): number => {
+    const role = normalizeRole(row?.role);
+
+    if (role === 'owner') return 500;
+    if (role === 'admin') return 400;
+    if (role === 'dispatch') return 300;
+    if (role === 'employee') return 200;
+
+    return 100;
+  };
+
+  const selectHighestRole = (
+    rows: StaffRoleRow[] | null | undefined,
+  ): StaffRoleRow | null => {
+    return [...(rows || [])]
+      .filter((row) => {
+        const status = String(
+          row?.status || '',
+        )
+          .trim()
+          .toLowerCase();
+
+        return (
+          activeStatuses.includes(status) &&
+          row?.can_access_portal !== false
+        );
+      })
+      .sort((left, right) => {
+        return (
+          rolePriority(right) -
+          rolePriority(left)
+        );
+      })[0] || null;
+  };
+
   const byUser = await withAuthTimeout(
     supabase
       .from('opc_staff_roles')
       .select(fields)
       .eq('user_id', userId)
-      .eq('status', 'active')
-      .eq('can_access_portal', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .in('status', activeStatuses)
+      .or(
+        'can_access_portal.eq.true,can_access_portal.is.null',
+      )
+      .order('created_at', {
+        ascending: false,
+      })
+      .limit(20),
     'opc_staff_roles by user',
   );
 
-  if (!byUser.error && byUser.data) return byUser.data as StaffRoleRow;
+  if (!byUser.error) {
+    const selected = selectHighestRole(
+      Array.isArray(byUser.data)
+        ? byUser.data as StaffRoleRow[]
+        : [],
+    );
 
-  // Never double the request load when Supabase is timing out.
-  if (byUser.error && isNetworkLikeError(byUser.error)) throw byUser.error;
-  if (!email) return null;
+    if (selected) {
+      return selected;
+    }
+  }
+
+  if (
+    byUser.error &&
+    isNetworkLikeError(byUser.error)
+  ) {
+    throw byUser.error;
+  }
+
+  if (!email) {
+    return null;
+  }
 
   const byEmail = await withAuthTimeout(
     supabase
       .from('opc_staff_roles')
       .select(fields)
       .ilike('email', email)
-      .eq('status', 'active')
-      .eq('can_access_portal', true)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .in('status', activeStatuses)
+      .or(
+        'can_access_portal.eq.true,can_access_portal.is.null',
+      )
+      .order('created_at', {
+        ascending: false,
+      })
+      .limit(20),
     'opc_staff_roles by email',
   );
 
-  if (!byEmail.error && byEmail.data) return byEmail.data as StaffRoleRow;
-  return null;
+  if (byEmail.error) {
+    if (isNetworkLikeError(byEmail.error)) {
+      throw byEmail.error;
+    }
+
+    return null;
+  }
+
+  return selectHighestRole(
+    Array.isArray(byEmail.data)
+      ? byEmail.data as StaffRoleRow[]
+      : [],
+  );
 }
 
 async function fetchLiveOpcAuthProfile(

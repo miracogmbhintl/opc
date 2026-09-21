@@ -33,10 +33,8 @@ pnpm-debug.log*
 lost+found/
 tmp/
 
-.env.local
 
 # Local env / secrets
-.env
 .env.*
 !.env.example
 .dev.vars
@@ -51,19 +49,8 @@ src/worker-configuration.d.ts
 src/worker-configuration.ts
 
 # Local env / secrets
-.env
-.env.*
-!.env.example
-.dev.vars
-.dev.vars.*
 
 # Wrangler / Cloudflare local generated files
-.wrangler/
-wrangler/.dev.vars
-worker-configuration.d.ts
-worker-configuration.ts
-src/worker-configuration.d.ts
-src/worker-configuration.ts
 
 # Security cleanup
 _local_security_backups_OUT_OF_GIT/
@@ -74,22 +61,11 @@ fix-*.py
 patch-google-*.py
 
 # Local env / secrets
-.env
-.env.*
-!.env.example
-.dev.vars
-.dev.vars.*
 
 # Generated Cloudflare types
-worker-configuration.d.ts
-worker-configuration.ts
-src/worker-configuration.d.ts
-src/worker-configuration.ts
 
 # Security removed local legacy files
 _legacy_security_removed/
-.env.local
-.env.local
 
 # Local review/export artifacts
 _code_review/
@@ -100,18 +76,11 @@ google-routing-meta-review.zip
 .backups/
 _debug/
 *.backup-*
-*.backup-*
 
 # Local Wrangler backup
 wrangler.manual-backup.jsonc
 
 # Local backup/debug/export files
-.backups/
-_debug/
-_code_review/
-*.zip
-*.backup-*
-wrangler.manual-backup.jsonc
 inject-opc-webapp-head.py
 patch-zeiterfassung-all-sidebars.py
 
@@ -131,7 +100,6 @@ README_STEP5B.txt
 README_STEP6.txt
 opc_audit_*/
 opc_relevant_code_*/
-opc_relevant_code_*/
 opc_audit_collect.sh
 opc_relevant_code_collect.sh
 
@@ -140,32 +108,9 @@ _exports/
 _patches/
 docs/
 export_employee_permission_scope.sh
-*.zip
 
 # Local generated/debug/export folders
-_backups/
-_exports/
-_patches/
-docs/
-backup-before-*/
-opc_audit_*/
-opc_relevant_code_*/
-*.zip
-README_FIX.txt
-README_NEXT_STEPS.txt
-README_QUOTE_STEP3.txt
-README_STEP4.txt
-README_STEP5.txt
-README_STEP5B.txt
-README_STEP6.txt
-opc_audit_collect.sh
-opc_relevant_code_collect.sh
-export_employee_permission_scope.sh
-opc_calendar_create_debug_*.txt
-opc_calendar_page_current_*.txt
-opc_pages_dump_*.txt
 
-*.zip
 sql/
 _export_*/
 _google_calendar_export_discovery_*/
@@ -178,31 +123,19 @@ pdf_*_migration_*/
 _code_backups/
 
 # Local generated/debug/export folders
-_backups/
-_exports/
-_patches/
-_debug/
-docs/
-backup-before-*/
-opc_audit_*/
-opc_relevant_code_*/
-*.zip
 *.sql
-README_FIX.txt
-README_NEXT_STEPS.txt
-README_QUOTE_STEP3.txt
-README_STEP4.txt
-README_STEP5.txt
-README_STEP5B.txt
-README_STEP6.txt
-opc_audit_collect.sh
-opc_relevant_code_collect.sh
-export_employee_permission_scope.sh
-opc_calendar_create_debug_*.txt
-opc_calendar_page_current_*.txt
-opc_pages_dump_*.txt
 
 _besichtigung_layout_discovery.sh
 _patch_*.sh
 *_layout_discovery_*/
 .env.development
+
+# OPC local performance / generated work folders
+_local_*/
+_backup*/
+audit/
+opc_discovery_*/
+supabase/.temp/
+*.miraka-backup.*
+*.before-*.astro
+._*

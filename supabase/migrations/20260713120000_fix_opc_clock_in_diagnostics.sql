@@ -1,5 +1,4 @@
 begin;
-
 create or replace function public.opc_clock_in_employee(
   p_employee_note text default null::text
 )
@@ -104,5 +103,4 @@ begin
   return v_entry_id;
 end;
 $function$;
-
 commit;

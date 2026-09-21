@@ -23,7 +23,6 @@
 ROLLBACK;
 BEGIN;
 SET LOCAL TIME ZONE 'Europe/Zurich';
-
 DO $$
 BEGIN
   IF to_regclass('public.opc_employee_payroll_profiles') IS NULL THEN
@@ -34,7 +33,6 @@ BEGIN
   END IF;
 END
 $$;
-
 CREATE TABLE IF NOT EXISTS
   public.opc_employee_payroll_profiles_backup_20260728_standardwerte_v1
 AS
@@ -52,7 +50,6 @@ WHERE employee_id IN (
   'd1428879-542b-42a0-9555-a7e13a0ea875'::uuid,
   '63f682f1-4c4f-4948-82ba-07bc028fc0c3'::uuid
 );
-
 UPDATE public.opc_payroll_rule_sets
 SET
   ahv_employee_rate = 5.3000,
@@ -73,7 +70,6 @@ SET
   updated_at = NOW()
 WHERE rule_year = 2026
   AND status = 'active';
-
 DO $$
 DECLARE
   v_missing text;
@@ -177,7 +173,6 @@ BEGIN
   END IF;
 END
 $$;
-
 WITH rates(
   employee_id, employee_name,
   nbu_employee_rate, ktg_employee_rate,
@@ -318,7 +313,6 @@ SET
 FROM rates r
 JOIN selected_profiles s ON s.employee_id = r.employee_id
 WHERE p.id = s.id;
-
 WITH rates(
   employee_id, employee_name,
   nbu_employee_rate, ktg_employee_rate,
@@ -473,7 +467,6 @@ WHERE NOT EXISTS (
     AND (p.valid_until IS NULL OR p.valid_until >= DATE '2026-07-01')
 )
 ON CONFLICT (employee_id, valid_from) DO NOTHING;
-
 DO $$
 DECLARE
   v_rule_count integer;
@@ -540,9 +533,7 @@ BEGIN
   END IF;
 END
 $$;
-
 COMMIT;
-
 SELECT
   e.employee_number,
   concat_ws(' ', e.legal_first_name, e.legal_last_name) AS employee_name,

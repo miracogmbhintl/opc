@@ -8,49 +8,8 @@ export const prerender = false;
 <!DOCTYPE html>
 <html transition:name="root" transition:animate="none" lang="de">
 <head>
-    <script is:inline>
-    (() => {
-      if (window.__OPC_NO_MOTION_VIEW_TRANSITIONS__) return;
-
-      window.__OPC_NO_MOTION_VIEW_TRANSITIONS__ = true;
-
-      const noMotionTransition = (callback) => {
-        let callbackResult;
-
-        try {
-          callbackResult = typeof callback === 'function' ? callback() : undefined;
-        } catch (error) {
-          const rejected = Promise.reject(error);
-
-          return {
-            ready: rejected,
-            updateCallbackDone: rejected,
-            finished: rejected,
-            skipTransition() {},
-          };
-        }
-
-        const done = Promise.resolve(callbackResult);
-
-        return {
-          ready: done,
-          updateCallbackDone: done,
-          finished: done,
-          skipTransition() {},
-        };
-      };
-
-      try {
-        Object.defineProperty(document, 'startViewTransition', {
-          configurable: true,
-          writable: true,
-          value: noMotionTransition,
-        });
-      } catch {
-        document.startViewTransition = noMotionTransition;
-      }
-    })();
-  </script>
+    <!-- OPC_VIEW_TRANSITION_GLOBAL_RUNTIME:
+       handled centrally by astro.config.mjs -->
   
   <!-- Orange Pro Clean Web App / PWA -->
   <link rel="manifest" href="/manifest.webmanifest" />
@@ -87,61 +46,156 @@ export const prerender = false;
 
   <script is:inline>
     (() => {
-      if (window.__OPC_TEAM_CALENDAR_DEFAULTS__) return;
-      window.__OPC_TEAM_CALENDAR_DEFAULTS__ = true;
+      const cleanupKey = '__OPC_TEAM_CALENDAR_DEFAULTS_CLEANUP__';
+
+      if (typeof window[cleanupKey] === 'function') {
+        try {
+          window[cleanupKey]();
+        } catch {}
+      }
 
       const dispatchChange = (select, value) => {
         if (!select || select.value === value) return;
+
         select.value = value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        select.dispatchEvent(
+          new Event('change', { bubbles: true }),
+        );
       };
 
       const findTeamOption = (select) =>
         Array.from(select?.options || []).find((option) => {
-          const label = String(option.textContent || '').toLowerCase();
-          return label.includes('team') || label.includes('gesamtes team');
+          const label = String(
+            option.textContent || '',
+          ).toLowerCase();
+
+          return (
+            label.includes('team') ||
+            label.includes('gesamtes team')
+          );
         });
 
       const applyDefaults = () => {
-        const page = document.querySelector('.opc-calendar-page');
+        const page = document.querySelector(
+          '.opc-calendar-page',
+        );
 
-        if (page && page.dataset.teamCalendarDefaultApplied !== 'true') {
-          const filterSelect = Array.from(page.querySelectorAll('select')).find((select) => {
-            const values = Array.from(select.options).map((option) => option.value);
-            return values.includes('team') && values.includes('all') && values.includes('employee');
+        if (
+          page &&
+          page.dataset.teamCalendarDefaultApplied !== 'true'
+        ) {
+          const filterSelect = Array.from(
+            page.querySelectorAll('select'),
+          ).find((select) => {
+            const values = Array.from(
+              select.options,
+            ).map((option) => option.value);
+
+            return (
+              values.includes('team') &&
+              values.includes('all') &&
+              values.includes('employee')
+            );
           });
 
           if (filterSelect) {
             dispatchChange(filterSelect, 'team');
-            page.dataset.teamCalendarDefaultApplied = 'true';
+
+            page.dataset.teamCalendarDefaultApplied =
+              'true';
           }
         }
 
-        document.querySelectorAll('[role="dialog"]').forEach((dialog) => {
-          const heading = String(dialog.querySelector('h2')?.textContent || '').toLowerCase();
-          const isNewEntry = heading.includes('neuer kalendereintrag') || heading.includes('google meet');
-          if (!isNewEntry) return;
+        document
+          .querySelectorAll('[role="dialog"]')
+          .forEach((dialog) => {
+            const heading = String(
+              dialog.querySelector('h2')?.textContent || '',
+            ).toLowerCase();
 
-          const calendarLabel = Array.from(dialog.querySelectorAll('label')).find((label) =>
-            String(label.childNodes[0]?.textContent || label.textContent || '')
-              .trim()
-              .toLowerCase()
-              .startsWith('kalender'),
-          );
-          const select = calendarLabel?.querySelector('select');
-          if (!select || select.dataset.teamCalendarDefaultApplied === 'true') return;
+            const isNewEntry =
+              heading.includes('neuer kalendereintrag') ||
+              heading.includes('google meet');
 
-          const teamOption = findTeamOption(select);
-          if (!teamOption) return;
+            if (!isNewEntry) return;
 
-          dispatchChange(select, teamOption.value);
-          select.dataset.teamCalendarDefaultApplied = 'true';
-        });
+            const calendarLabel = Array.from(
+              dialog.querySelectorAll('label'),
+            ).find((label) =>
+              String(
+                label.childNodes[0]?.textContent ||
+                  label.textContent ||
+                  '',
+              )
+                .trim()
+                .toLowerCase()
+                .startsWith('kalender'),
+            );
+
+            const select =
+              calendarLabel?.querySelector('select');
+
+            if (
+              !select ||
+              select.dataset.teamCalendarDefaultApplied ===
+                'true'
+            ) {
+              return;
+            }
+
+            const teamOption = findTeamOption(select);
+
+            if (!teamOption) return;
+
+            dispatchChange(select, teamOption.value);
+
+            select.dataset.teamCalendarDefaultApplied =
+              'true';
+          });
       };
 
-      const observer = new MutationObserver(applyDefaults);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-      document.addEventListener('astro:page-load', applyDefaults);
+      const observer = new MutationObserver(
+        applyDefaults,
+      );
+
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+
+      const onPageLoad = () => applyDefaults();
+
+      const cleanup = () => {
+        observer.disconnect();
+
+        document.removeEventListener(
+          'astro:page-load',
+          onPageLoad,
+        );
+
+        document.removeEventListener(
+          'astro:before-swap',
+          cleanup,
+        );
+
+        if (window[cleanupKey] === cleanup) {
+          delete window[cleanupKey];
+        }
+      };
+
+      window[cleanupKey] = cleanup;
+
+      document.addEventListener(
+        'astro:page-load',
+        onPageLoad,
+      );
+
+      document.addEventListener(
+        'astro:before-swap',
+        cleanup,
+        { once: true },
+      );
+
       applyDefaults();
     })();
   </script>

@@ -892,7 +892,7 @@ function getOnSitePhone(job: JobDetail) {
 }
 
 function plannedStartGate(job: JobDetail) {
-  if (!job.planned_start) {
+  if (!job?.planned_start) {
     return {
       allowed: true,
       needsConfirm: false,
@@ -910,22 +910,15 @@ function plannedStartGate(job: JobDetail) {
     };
   }
 
-  const now = new Date();
-  const earliest = new Date(planned.getTime() - 10 * 60 * 1000);
+  const millisecondsUntilPlannedStart =
+    planned.getTime() - Date.now();
 
-  if (now < earliest) {
-    return {
-      allowed: false,
-      needsConfirm: false,
-      message: `Dieser Einsatz ist für ${formatDate(job.planned_start)} geplant. Du kannst ihn frühestens 10 Minuten vorher starten.`,
-    };
-  }
-
-  if (now < planned) {
+  if (millisecondsUntilPlannedStart > 10 * 60 * 1000) {
     return {
       allowed: true,
       needsConfirm: true,
-      message: `Der Einsatz ist für ${formatDate(job.planned_start)} geplant. Möchtest du ihn jetzt bereits starten?`,
+      message:
+        'Der Einsatz beginnt früher als geplant. Möchtest du ihn jetzt trotzdem starten?',
     };
   }
 

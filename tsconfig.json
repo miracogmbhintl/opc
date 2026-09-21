@@ -5,12 +5,19 @@
     "jsxImportSource": "react",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     },
     "verbatimModuleSyntax": false,
-    "types": ["@cloudflare/workers-types/2023-07-01"]
+    "types": [
+      "@cloudflare/workers-types/2023-07-01"
+    ]
   },
-  "include": [".astro/types.d.ts", "**/*"],
+  "include": [
+    ".astro/types.d.ts",
+    "**/*"
+  ],
   "exclude": [
     ".astro",
     ".codesandbox",
@@ -19,6 +26,15 @@
     "generated",
     "node_modules",
     "src/site-components/**/*",
-    "lost+found"
+    "lost+found",
+    "_local_*",
+    "_backup*",
+    "audit",
+    "opc_discovery_*",
+    "supabase/.temp",
+    "**/*.backup-*",
+    "**/*.miraka-backup.*",
+    "**/*.before-*.astro",
+    "**/._*"
   ]
 }

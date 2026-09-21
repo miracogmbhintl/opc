@@ -394,7 +394,7 @@ function SettingsPageContent({ role }: SettingsPageProps) {
     { id: 'account', label: 'Konto', icon: User, roles: ['owner', 'admin', 'client'] },
     { id: 'notifications', label: 'Benachrichtigungen', icon: Bell, roles: ['owner', 'admin', 'client'] },
     { id: 'security', label: 'Sicherheit', icon: Lock, roles: ['owner', 'admin', 'client'] },
-    { id: 'system', label: 'System', icon: Shield, roles: ['owner'] }
+    { id: 'system', label: 'System', icon: Shield, roles: ['owner', 'admin', 'dispatch'] }
   ];
 
   const visibleTabs = tabs.filter(tab => tab.roles.includes(profile?.role || 'client'));

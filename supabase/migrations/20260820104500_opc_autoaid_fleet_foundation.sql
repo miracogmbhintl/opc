@@ -3,7 +3,6 @@
 -- Frontend must never read provider secrets directly; use server API endpoints with owner checks.
 
 create extension if not exists pgcrypto;
-
 create or replace function public.opc_touch_updated_at()
 returns trigger
 language plpgsql
@@ -13,7 +12,6 @@ begin
   return new;
 end;
 $$;
-
 create or replace function public.opc_is_owner_or_admin()
 returns boolean
 language sql
@@ -30,7 +28,6 @@ as $$
       and osr.role in ('owner', 'admin')
   );
 $$;
-
 create or replace function public.opc_is_owner()
 returns boolean
 language sql
@@ -47,7 +44,6 @@ as $$
       and osr.role = 'owner'
   );
 $$;
-
 create table if not exists public.opc_integration_settings (
   id uuid primary key default gen_random_uuid(),
   provider text not null unique,
@@ -69,11 +65,9 @@ create table if not exists public.opc_integration_settings (
   constraint opc_integration_settings_pull_interval_check check (pull_interval_minutes between 1 and 1440),
   constraint opc_integration_settings_ingest_mode_check check (ingest_mode in ('pull_only', 'push_only', 'pull_and_push'))
 );
-
 create trigger trg_opc_integration_settings_updated_at
 before update on public.opc_integration_settings
 for each row execute function public.opc_touch_updated_at();
-
 create table if not exists public.opc_fleet_vehicles (
   id uuid primary key default gen_random_uuid(),
   autoaid_vehicle_id text unique,
@@ -95,11 +89,9 @@ create table if not exists public.opc_fleet_vehicles (
   updated_at timestamptz not null default now(),
   constraint opc_fleet_vehicles_status_check check (status in ('active', 'inactive', 'maintenance', 'sold', 'archived'))
 );
-
 create trigger trg_opc_fleet_vehicles_updated_at
 before update on public.opc_fleet_vehicles
 for each row execute function public.opc_touch_updated_at();
-
 create table if not exists public.opc_autoaid_events_raw (
   id uuid primary key default gen_random_uuid(),
   provider text not null default 'autoaid',
@@ -116,12 +108,10 @@ create table if not exists public.opc_autoaid_events_raw (
   processed_at timestamptz,
   processing_error text
 );
-
 create index if not exists idx_opc_autoaid_events_raw_recorded_at on public.opc_autoaid_events_raw(recorded_at desc);
 create index if not exists idx_opc_autoaid_events_raw_vehicle_id on public.opc_autoaid_events_raw(vehicle_id, recorded_at desc);
 create index if not exists idx_opc_autoaid_events_raw_device_id on public.opc_autoaid_events_raw(autoaid_device_id, recorded_at desc);
 create index if not exists idx_opc_autoaid_events_raw_event_type on public.opc_autoaid_events_raw(event_type, recorded_at desc);
-
 create table if not exists public.opc_vehicle_status_current (
   vehicle_id uuid primary key references public.opc_fleet_vehicles(id) on delete cascade,
   last_seen_at timestamptz,
@@ -147,10 +137,8 @@ create table if not exists public.opc_vehicle_status_current (
   updated_at timestamptz not null default now(),
   constraint opc_vehicle_status_current_status_check check (status in ('unknown', 'online', 'driving', 'stopped', 'offline', 'warning', 'maintenance'))
 );
-
 create index if not exists idx_opc_vehicle_status_current_last_seen on public.opc_vehicle_status_current(last_seen_at desc);
 create index if not exists idx_opc_vehicle_status_current_location on public.opc_vehicle_status_current(latitude, longitude);
-
 create table if not exists public.opc_vehicle_locations (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references public.opc_fleet_vehicles(id) on delete cascade,
@@ -167,10 +155,8 @@ create table if not exists public.opc_vehicle_locations (
   source_event_id uuid references public.opc_autoaid_events_raw(id) on delete set null,
   payload jsonb not null default '{}'::jsonb
 );
-
 create index if not exists idx_opc_vehicle_locations_vehicle_time on public.opc_vehicle_locations(vehicle_id, recorded_at desc);
 create index if not exists idx_opc_vehicle_locations_time on public.opc_vehicle_locations(recorded_at desc);
-
 create table if not exists public.opc_vehicle_trips (
   id uuid primary key default gen_random_uuid(),
   provider text not null default 'autoaid',
@@ -198,14 +184,11 @@ create table if not exists public.opc_vehicle_trips (
   updated_at timestamptz not null default now(),
   constraint opc_vehicle_trips_classification_check check (classification in ('unmatched', 'job_related', 'commute', 'private', 'maintenance', 'review'))
 );
-
 create trigger trg_opc_vehicle_trips_updated_at
 before update on public.opc_vehicle_trips
 for each row execute function public.opc_touch_updated_at();
-
 create index if not exists idx_opc_vehicle_trips_vehicle_time on public.opc_vehicle_trips(vehicle_id, started_at desc);
 create index if not exists idx_opc_vehicle_trips_job on public.opc_vehicle_trips(matched_job_id);
-
 create table if not exists public.opc_vehicle_stops (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references public.opc_fleet_vehicles(id) on delete cascade,
@@ -222,10 +205,8 @@ create table if not exists public.opc_vehicle_stops (
   created_at timestamptz not null default now(),
   constraint opc_vehicle_stops_stop_type_check check (stop_type in ('unknown', 'customer_site', 'break', 'traffic', 'fuel', 'maintenance', 'home_base', 'private', 'review'))
 );
-
 create index if not exists idx_opc_vehicle_stops_vehicle_time on public.opc_vehicle_stops(vehicle_id, started_at desc);
 create index if not exists idx_opc_vehicle_stops_duration on public.opc_vehicle_stops(duration_seconds desc nulls last);
-
 create table if not exists public.opc_vehicle_dtc_codes (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references public.opc_fleet_vehicles(id) on delete cascade,
@@ -243,9 +224,7 @@ create table if not exists public.opc_vehicle_dtc_codes (
   constraint opc_vehicle_dtc_codes_status_check check (status in ('active', 'cleared', 'ignored', 'review')),
   constraint opc_vehicle_dtc_codes_severity_check check (severity in ('unknown', 'info', 'warning', 'critical'))
 );
-
 create index if not exists idx_opc_vehicle_dtc_codes_vehicle_status on public.opc_vehicle_dtc_codes(vehicle_id, status, last_seen_at desc);
-
 create table if not exists public.opc_fleet_alerts (
   id uuid primary key default gen_random_uuid(),
   vehicle_id uuid references public.opc_fleet_vehicles(id) on delete cascade,
@@ -265,14 +244,11 @@ create table if not exists public.opc_fleet_alerts (
   constraint opc_fleet_alerts_status_check check (status in ('open', 'acknowledged', 'resolved', 'ignored')),
   constraint opc_fleet_alerts_severity_check check (severity in ('info', 'warning', 'critical'))
 );
-
 create trigger trg_opc_fleet_alerts_updated_at
 before update on public.opc_fleet_alerts
 for each row execute function public.opc_touch_updated_at();
-
 create index if not exists idx_opc_fleet_alerts_status on public.opc_fleet_alerts(status, detected_at desc);
 create index if not exists idx_opc_fleet_alerts_vehicle on public.opc_fleet_alerts(vehicle_id, detected_at desc);
-
 alter table public.opc_integration_settings enable row level security;
 alter table public.opc_fleet_vehicles enable row level security;
 alter table public.opc_autoaid_events_raw enable row level security;
@@ -282,83 +258,68 @@ alter table public.opc_vehicle_trips enable row level security;
 alter table public.opc_vehicle_stops enable row level security;
 alter table public.opc_vehicle_dtc_codes enable row level security;
 alter table public.opc_fleet_alerts enable row level security;
-
 create policy "Owners can manage integration settings"
   on public.opc_integration_settings
   for all
   using (public.opc_is_owner())
   with check (public.opc_is_owner());
-
 create policy "Owners and admins can read fleet vehicles"
   on public.opc_fleet_vehicles
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can manage fleet vehicles"
   on public.opc_fleet_vehicles
   for all
   using (public.opc_is_owner_or_admin())
   with check (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read raw AutoAid events"
   on public.opc_autoaid_events_raw
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read vehicle status"
   on public.opc_vehicle_status_current
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read vehicle locations"
   on public.opc_vehicle_locations
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read vehicle trips"
   on public.opc_vehicle_trips
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can manage vehicle trips"
   on public.opc_vehicle_trips
   for all
   using (public.opc_is_owner_or_admin())
   with check (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read vehicle stops"
   on public.opc_vehicle_stops
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can manage vehicle stops"
   on public.opc_vehicle_stops
   for all
   using (public.opc_is_owner_or_admin())
   with check (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read vehicle diagnostics"
   on public.opc_vehicle_dtc_codes
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can manage vehicle diagnostics"
   on public.opc_vehicle_dtc_codes
   for all
   using (public.opc_is_owner_or_admin())
   with check (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can read fleet alerts"
   on public.opc_fleet_alerts
   for select
   using (public.opc_is_owner_or_admin());
-
 create policy "Owners and admins can manage fleet alerts"
   on public.opc_fleet_alerts
   for all
   using (public.opc_is_owner_or_admin())
   with check (public.opc_is_owner_or_admin());
-
 insert into public.opc_integration_settings (
   provider,
   enabled,

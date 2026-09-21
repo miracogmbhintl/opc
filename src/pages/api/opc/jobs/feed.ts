@@ -367,16 +367,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
       });
       jobs = assignedJobIds.length > 0 ? await fetchJobsByIds(serviceSupabase, assignedJobIds) : [];
 
-      jobs = jobs.filter((job) => {
-        if (!job.planned_start && !job.planned_end) return true;
-
-        const start = job.planned_start ? new Date(job.planned_start).getTime() : null;
-        const end = job.planned_end ? new Date(job.planned_end).getTime() : null;
-        const from = new Date(fromIso).getTime();
-        const to = new Date(toIso).getTime();
-
-        return (start === null || start <= to) && (end === null || end >= from);
-      });
+      // Assigned jobs are intentionally NOT restricted by planned date.
+      // Assignment/access is authoritative here. Employees must still be
+      // able to open a job when work starts earlier or later than planned.
     } else {
       jobs = [];
     }

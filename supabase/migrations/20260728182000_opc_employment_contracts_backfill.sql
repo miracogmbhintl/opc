@@ -16,7 +16,6 @@
 ROLLBACK;
 BEGIN;
 SET LOCAL TIME ZONE 'Europe/Zurich';
-
 DO $$
 BEGIN
   IF to_regclass('public.opc_employment_contracts') IS NULL THEN
@@ -31,7 +30,6 @@ BEGIN
   END IF;
 END
 $$;
-
 CREATE TABLE IF NOT EXISTS
   public.opc_employment_contracts_backup_20260728_backfill_v1
 AS
@@ -41,12 +39,10 @@ WHERE c.employee_id IN (
   SELECT (x->>'employee_id')::uuid
   FROM jsonb_array_elements($json$[{"employee_id": "da084053-d67a-4d65-984b-bc2ae2880a1c", "employee_name": "Emine Zieberi", "contract_number": "OPC-PAY-2026-000010", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 22.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "e044673c-2f42-484d-8f8b-5427b696cc1e", "employee_name": "Filip Andjekovic", "contract_number": "OPC-PAY-2026-000011", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 26.5, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "9ea589e4-5624-4108-bad2-6ab00a63a47d", "employee_name": "Herminia Ascensão do Vale Monteiro", "contract_number": "OPC-PAY-2026-000019", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 22.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "b62debc3-0115-4b4c-b536-240602cd11a2", "employee_name": "Luciano Marangi", "contract_number": "OPC-PAY-2026-000006", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 22.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "8742eba5-ce71-45a3-a457-489120190cab", "employee_name": "Maria Angelica Varela Malpica", "contract_number": "OPC-PAY-2026-000007", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 22.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "63a0e241-5383-445e-b778-3136d0e3cdbe", "employee_name": "Migel Mirkovic", "contract_number": "OPC-PAY-2026-000013", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 30.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "c8dc9896-c3b7-4ef1-9f48-b32a8ae295fa", "employee_name": "Rico / Ylercio", "contract_number": "OPC-PAY-2026-000016", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 22.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "0f82f804-f1a4-4eb8-a9da-4bb11d62ff83", "employee_name": "Sebastien Jasari", "contract_number": "OPC-PAY-2026-000015", "salary_type": "hourly", "valid_from": "2026-06-01", "hourly_rate_chf": 22.0, "monthly_salary_chf": null, "employment_percentage": null, "reference_weekly_hours": null, "is_gav_applicable": true}, {"employee_id": "d1428879-542b-42a0-9555-a7e13a0ea875", "employee_name": "Sara Batista", "contract_number": "OPC-PAY-2026-000014", "salary_type": "monthly", "valid_from": "2026-07-01", "hourly_rate_chf": null, "monthly_salary_chf": 5000.0, "employment_percentage": 100.0, "reference_weekly_hours": 42.0, "is_gav_applicable": false}, {"employee_id": "63f682f1-4c4f-4948-82ba-07bc028fc0c3", "employee_name": "Pravin Manotheepan", "contract_number": "OPC-PAY-2026-000005", "salary_type": "monthly", "valid_from": "2026-06-01", "hourly_rate_chf": null, "monthly_salary_chf": 6803.5, "employment_percentage": 100.0, "reference_weekly_hours": 42.0, "is_gav_applicable": false}]$json$::jsonb) x
 );
-
 COMMENT ON TABLE
   public.opc_employment_contracts_backup_20260728_backfill_v1
 IS
   'Sicherung vor OPC Arbeitsvertrags-Backfill V1 vom 28.07.2026.';
-
 DO $$
 DECLARE
   r record;
@@ -324,9 +320,7 @@ BEGIN
   END IF;
 END
 $$;
-
 COMMIT;
-
 SELECT
   e.employee_number,
   concat_ws(

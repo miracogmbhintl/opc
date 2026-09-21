@@ -45,10 +45,10 @@ async function authorize(context: {
 }
 
 async function loadSettings(supabase: any, employeeId: string) {
-  const [employeeResponse, contractResponse, profileResponse, ruleResponse] = await Promise.all([
+  const [employeeResponse, contractResponse, profileResponse, ruleResponse, permitResponse] = await Promise.all([
     supabase
       .from('opc_employees')
-      .select('id,employee_number,legal_first_name,legal_last_name,entry_date,exit_date,payroll_in_scope')
+      .select('id,employee_number,legal_first_name,legal_last_name,entry_date,exit_date,payroll_in_scope,civil_status')
       .eq('id', employeeId)
       .maybeSingle(),
     supabase
@@ -68,20 +68,40 @@ async function loadSettings(supabase: any, employeeId: string) {
       .order('valid_from', { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from('opc_employee_permits')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('valid_from', { ascending: false })
+      .order('updated_at', { ascending: false }),
   ]);
 
   throwOnError(employeeResponse.error, 'Mitarbeiter konnte nicht geladen werden');
   throwOnError(contractResponse.error, 'Arbeitsverträge konnten nicht geladen werden');
   throwOnError(profileResponse.error, 'Payroll-Profile konnten nicht geladen werden');
   throwOnError(ruleResponse.error, 'Payroll-Regelsatz konnte nicht geladen werden');
+  throwOnError(permitResponse.error, 'Aufenthaltsbewilligung konnte nicht geladen werden');
 
   if (!employeeResponse.data) throw new Error('Mitarbeiter wurde nicht gefunden.');
+
+  const today = new Date().toISOString().slice(0, 10);
+  const permitRows = (permitResponse.data || []) as JsonRow[];
+  const currentPermit =
+    permitRows.find((row) => {
+      const from = cleanText(row.valid_from) || '0000-01-01';
+      const until = cleanText(row.valid_until) || '9999-12-31';
+      const status = (cleanText(row.permit_status) || 'valid').toLowerCase();
+      return from <= today && until >= today && !['expired', 'revoked', 'invalid'].includes(status);
+    }) ||
+    permitRows[0] ||
+    null;
 
   return {
     employee: employeeResponse.data,
     contracts: contractResponse.data || [],
     payrollProfiles: profileResponse.data || [],
     activeRuleSet: ruleResponse.data || null,
+    currentPermit,
   };
 }
 

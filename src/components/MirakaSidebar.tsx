@@ -6,13 +6,14 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase, type UserProfile } from '../lib/supabase';
-import { loadOpcAuthProfile, readCachedOpcAuthProfile, clearCachedOpcAuthProfile } from '../lib/opc-auth-cache';
+import { loadOpcAuthProfile, refreshOpcAuthProfile, readCachedOpcAuthProfile, clearCachedOpcAuthProfile } from '../lib/opc-auth-cache';
 import { baseUrl } from '../lib/base-url';
 import { OPC_ROUTES } from '../lib/opc-routes';
 import {
   AlertTriangle,
   Briefcase,
   CalendarDays,
+  CarFront,
   ClipboardCheck,
   Clock,
   ChevronLeft,
@@ -110,13 +111,49 @@ function normalizeRole(role: string): NormalizedRole {
   return 'client';
 }
 
-// OPC_SARA_SPECIAL_ADMIN_V2
+// OPC_SALES_ADMIN_SPECIAL_ACCESS_V1
+const PINO_ADMIN_AUTH_USER_ID = '71a46f9a-357d-4283-a225-d37cd67a3d24';
+const THOMAS_ADMIN_AUTH_USER_ID = '6077d66c-5030-4e14-b0f4-51140066ca59';
+
 const SARA_BATISTA_AUTH_USER_ID =
   '7dcbbbb5-9087-45bc-9e2a-55f2507bf884';
+
+
 
 const SARA_BATISTA_EMAILS = new Set([
   's.batista@orangeproclean.ch',
 ]);
+
+function isRestrictedSalesAdmin(user: UserProfile | null) {
+  if (!user) return false;
+
+  const raw = user as any;
+  const userId = String(raw.id || raw.user_id || raw.auth_user_id || '').trim();
+  const employeeNumber = String(
+    raw.employee_number ||
+    raw.app_metadata?.employee_number ||
+    raw.raw_app_meta_data?.employee_number ||
+    ''
+  ).trim();
+
+  const emails = [
+    raw.email,
+    raw.business_email,
+    raw.app_metadata?.email,
+    raw.raw_app_meta_data?.email,
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase().trim());
+
+  return (
+    userId === PINO_ADMIN_AUTH_USER_ID ||
+    userId === THOMAS_ADMIN_AUTH_USER_ID ||
+    employeeNumber === 'OPC-MA-000017' ||
+    employeeNumber === 'OPC-MA-000018' ||
+    emails.includes('pino@orangeproclean.ch') ||
+    emails.includes('wirth@orangeproclean.ch')
+  );
+}
 
 function isSaraSpecialAdmin(user: UserProfile | null) {
   const profile = user as any;
@@ -126,9 +163,7 @@ function isSaraSpecialAdmin(user: UserProfile | null) {
     profile?.user_id ||
     profile?.auth_user_id ||
     '',
-  )
-    .trim()
-    .toLowerCase();
+  ).trim();
 
   const emails = [
     profile?.email,
@@ -136,12 +171,16 @@ function isSaraSpecialAdmin(user: UserProfile | null) {
     profile?.private_email,
     profile?.auth_email,
   ]
-    .map((value) => String(value || '').trim().toLowerCase())
+    .map((value) =>
+      String(value || '').trim().toLowerCase()
+    )
     .filter(Boolean);
 
   return (
     userId === SARA_BATISTA_AUTH_USER_ID ||
-    emails.some((email) => SARA_BATISTA_EMAILS.has(email))
+    emails.some((email) =>
+      SARA_BATISTA_EMAILS.has(email)
+    )
   );
 }
 
@@ -203,6 +242,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       timeTracking: routeFor('timeTracking', '/zeiterfassung'),
       files: routeFor('files', '/berichte-dateien'),
       finance: routeFor('finance', '/finanzen'),
+      fleet: routeFor('fleet', '/fuhrpark'),
       automations: routeFor('automations', '/rechnungsautomationen'),
       tickets: routeFor('tickets', '/anfragen-schaeden'),
       qrCodes: routeFor('qrCodes', '/qr-codes'),
@@ -214,11 +254,65 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const normalizedRole = normalizeRole((user as any)?.role || role);
+  const restrictedSalesAdmin = useMemo(
+    () => isRestrictedSalesAdmin(user),
+    [user]
+  );
+
   const saraSpecialAdmin = useMemo(
     () => isSaraSpecialAdmin(user),
     [user],
   );
-  const [isCollapsed, setIsCollapsed] = useState(() => {
+
+
+  // OPC_RESTRICTED_SALES_ADMIN_HIDE_NAV_ITEMS_V1
+  useEffect(() => {
+    if (!restrictedSalesAdmin) return;
+
+    const hiddenTexts = [
+      'Mitarbeiter',
+      'Berichte & Dateien',
+    ];
+
+    const blockedHrefFragments = [
+      '/mitarbeiter',
+      '/mitarbeiter-anlegen',
+      '/berichte-dateien',
+      '/dashboard/files',
+      '/dokumente',
+    ];
+
+    const hideBlockedNavigation = () => {
+      const nodes = Array.from(document.querySelectorAll('a, button')) as HTMLElement[];
+
+      nodes.forEach((node) => {
+        const label = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+        const href = String((node as HTMLAnchorElement).getAttribute?.('href') || '');
+
+        const shouldHideByText = hiddenTexts.some((text) => label === text);
+        const shouldHideByHref = blockedHrefFragments.some((fragment) => href.includes(fragment));
+
+        if (shouldHideByText || shouldHideByHref) {
+          const holder =
+            node.closest('li') ||
+            node.closest('[data-sidebar-item]') ||
+            node.closest('article') ||
+            node;
+
+          (holder as HTMLElement).style.display = 'none';
+          (holder as HTMLElement).setAttribute('aria-hidden', 'true');
+        }
+      });
+    };
+
+    hideBlockedNavigation();
+
+    const observer = new MutationObserver(hideBlockedNavigation);
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
+  }, [restrictedSalesAdmin]);
+const [isCollapsed, setIsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
 
     const savedState = window.localStorage.getItem(STORAGE_KEY_COLLAPSED);
@@ -290,13 +384,17 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
       if (cachedProfile) {
         setUser(cachedProfile);
-        return;
       }
 
-      const liveProfile = await loadOpcAuthProfile();
+      const liveProfile =
+        await refreshOpcAuthProfile(true).catch(() => loadOpcAuthProfile());
 
       if (liveProfile) {
         setUser(liveProfile);
+        return;
+      }
+
+      if (cachedProfile) {
         return;
       }
 
@@ -419,6 +517,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         href: buildUrl(routes.calendar),
         label: 'Kalender',
         icon: CalendarDays,
+  CarFront,
         key: 'calendar',
         match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
       },
@@ -459,6 +558,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       },
       ...(normalizedRole === 'owner'
         ? [
+            {
+              href: buildUrl(routes.fleet),
+              label: 'Fuhrpark',
+              icon: CarFront,
+              key: 'fleet',
+              match: [routes.fleet, '/fuhrpark', '/fuhrpark/karte'],
+            },
             {
               href: buildUrl(routes.finance),
               label: 'Finanzen',
@@ -510,6 +616,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
         href: buildUrl(routes.calendar),
         label: 'Kalender',
         icon: CalendarDays,
+  CarFront,
         key: 'calendar',
         match: [routes.calendar, '/kalender', '/calendar', '/dashboard/calendar', '/dashboard/kalender'],
       },
@@ -553,6 +660,13 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
       },
       ...(normalizedRole === 'owner'
         ? [
+            {
+              href: buildUrl(routes.fleet),
+              label: 'Fuhrpark',
+              icon: CarFront,
+              key: 'fleet',
+              match: [routes.fleet, '/fuhrpark', '/fuhrpark/karte'],
+            },
             {
               href: buildUrl(routes.finance),
               label: 'Finanzen',
@@ -643,6 +757,22 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
 
   function handleMobileNavigate() {
     setIsMobileExpanded(false);
+  }
+
+  function handleNavClick(event: any, item: NavItem) {
+    if (item.key !== 'employees') return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    try {
+      window.sessionStorage.removeItem('__opc_last_internal_link_navigation__');
+      window.sessionStorage.removeItem('__opc_jobs_access_response_session_v3__');
+    } catch {
+      // Navigation must continue even if storage is unavailable.
+    }
+
+    window.location.assign(item.href || '/mitarbeiter');
   }
 
   const userDisplayName = getUserDisplayName(user);
@@ -852,6 +982,7 @@ export default function MirakaSidebar({ role, currentPath = '' }: MirakaSidebarP
                 href={item.href}
                 data-astro-prefetch="false"
                 data-astro-reload="true"
+                onClick={(event) => handleNavClick(event, item)}
                 title={isCollapsed ? item.label : undefined}
                 style={{
                   ...desktopButtonBaseStyle,

@@ -1055,7 +1055,15 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     );
   }
 
-  if (!mounted) return null;
+  if (!mounted) {
+    return (
+      <OPCPageShell>
+        <div style={loadingCardStyle}>
+          Kundendaten werden vorbereitet.
+        </div>
+      </OPCPageShell>
+    );
+  }
 
   if (loadingClient) {
     return (
@@ -1079,7 +1087,28 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     );
   }
 
-  if (!client || !displayClient) return null;
+  if (!client || !displayClient) {
+    return (
+      <OPCPageShell>
+        <div style={errorCardStyle}>
+          <p style={errorTextStyle}>
+            Der Kunde wurde nicht gefunden oder konnte nicht vollständig geladen werden.
+          </p>
+
+          <a
+            href={`${appBaseUrl}/kunden`}
+            style={{
+              ...opcBlackButtonStyle,
+              width: 'auto',
+            }}
+          >
+            <ArrowLeft size={16} />
+            Zurück zu Kunden
+          </a>
+        </div>
+      </OPCPageShell>
+    );
+  }
 
   return (
     <OPCPageShell>

@@ -3,7 +3,6 @@
 -- Idempotent and limited to the ten payroll backfill contracts.
 
 begin;
-
 do $$
 begin
   if to_regclass('public.opc_employment_contracts') is null then
@@ -18,7 +17,6 @@ begin
   end if;
 end
 $$;
-
 create table if not exists
   public.opc_employment_contracts_backup_20260728_contract_type_repair
 as
@@ -36,7 +34,6 @@ where c.contract_number in (
   'OPC-PAY-2026-000014',
   'OPC-PAY-2026-000005'
 );
-
 update public.opc_employment_contracts c
 set
   contract_type = public.opc_resolve_employment_contract_type(
@@ -69,7 +66,6 @@ where c.contract_number in (
   'OPC-PAY-2026-000005'
 )
   and c.valid_until is null;
-
 do $$
 declare
   v_bad_count integer;
@@ -107,9 +103,7 @@ begin
   end if;
 end
 $$;
-
 commit;
-
 select
   e.employee_number,
   concat_ws(

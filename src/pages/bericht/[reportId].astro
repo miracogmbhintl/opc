@@ -5,6 +5,38 @@ import '../../styles/miraka-portal.css';
 const { reportId } = Astro.params;
 ---
 
+<script is:inline>
+  // OPC_RESTRICTED_SALES_ADMIN_PAGE_BLOCKER_V1
+  (() => {
+    const blockedTerms = [
+      '71a46f9a-357d-4283-a225-d37cd67a3d24',
+      '6077d66c-5030-4e14-b0f4-51140066ca59',
+      'pino@orangeproclean.ch',
+      'wirth@orangeproclean.ch',
+      'OPC-MA-000017',
+      'OPC-MA-000018',
+    ];
+
+    try {
+      const haystack = [
+        ...Object.keys(localStorage || {}).map((key) => localStorage.getItem(key) || ''),
+        ...Object.keys(sessionStorage || {}).map((key) => sessionStorage.getItem(key) || ''),
+      ].join(' ').toLowerCase();
+
+      const blocked = blockedTerms.some((term) =>
+        haystack.includes(String(term).toLowerCase())
+      );
+
+      if (blocked) {
+        window.location.replace('/dashboard');
+      }
+    } catch {
+      // no-op
+    }
+  })();
+</script>
+
+
 <!DOCTYPE html>
 <html transition:name="root" transition:animate="none" lang="de">
 <head>

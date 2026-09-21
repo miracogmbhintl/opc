@@ -50,6 +50,21 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       periodTo,
     });
 
+    if (calculation.sourceTaxReview?.canFinalize !== true) {
+      const reasons = Array.isArray(calculation.sourceTaxReview?.blockingReasons)
+        ? calculation.sourceTaxReview.blockingReasons
+        : [];
+      return jsonResponse(
+        {
+          success: false,
+          error: 'Quellensteuerprüfung ist noch nicht vollständig: ' + (reasons.join(' ') || 'Prüfung erforderlich.'),
+          sourceTaxReview: calculation.sourceTaxReview,
+          warnings: calculation.warnings,
+        },
+        409,
+      );
+    }
+
     if (calculation.reconciliation && calculation.reconciliation.matches !== true) {
       return jsonResponse(
         {
@@ -118,8 +133,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         created_by: actorId,
         updated_by: actorId,
         metadata: {
-          calculation_version: 'opc_payroll_reconciliation_v2',
+          calculation_version: 'opc_payroll_manual_buckets_v1',
           source: 'employee_payroll_owner_panel',
+          payroll_input_mode: calculation.payrollInputMode,
           filename: calculation.filename,
           warnings: calculation.warnings,
         },
@@ -137,8 +153,8 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         contract_id: calculation.contract.id || null,
         payroll_profile_id: calculation.payrollProfile.id || null,
         salary_type: calculation.salaryType,
-        approved_entry_count: calculation.entriesCount,
-        approved_minutes: calculation.totalMinutes,
+        approved_entry_count: calculation.trackedEntriesCount,
+        approved_minutes: calculation.trackedMinutes,
         payable_days: calculation.payableDays,
         period_working_days: calculation.periodWorkingDays,
         base_salary_chf: calculation.baseSalary,
@@ -179,6 +195,39 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       throwOnError(lineResponse.error, 'Lohnpositionen konnten nicht gespeichert werden');
     }
 
+    const accruedBalances = (calculation.accruals || []).filter(
+      (item) => item.status === 'accrued' && item.code === 'VACATION_PAY_ACCRUAL' && Number(item.periodAccrual ?? item.amount ?? 0) >= 0,
+    );
+    for (const accrual of accruedBalances) {
+      const ledgerResponse = await supabase
+        .from('opc_payroll_accrual_ledger')
+        .upsert(
+          {
+            employee_id: employeeId,
+            payroll_run_id: runResponse.data.id,
+            payroll_run_employee_id: employeeRunResponse.data.id,
+            accrual_code: accrual.code,
+            label: accrual.label,
+            period_from: periodFrom,
+            period_to: periodTo,
+            opening_balance_chf: Number(accrual.openingBalance || 0),
+            period_accrual_chf: Number(accrual.periodAccrual ?? accrual.amount ?? 0),
+            period_payout_chf: Number(accrual.periodPayout || 0),
+            closing_balance_chf: Number(accrual.closingBalance || 0),
+            status: 'posted',
+            source: 'payroll_finalize',
+            metadata: {
+              basis_amount_chf: accrual.basisAmount,
+              rate_percent: accrual.rate,
+              calculation_version: 'opc_payroll_reconciliation_v2_3_accrual_ledger',
+            },
+            updated_by: actorId,
+          },
+          { onConflict: 'employee_id,accrual_code,period_from,period_to' },
+        );
+      throwOnError(ledgerResponse.error, `Lohnguthaben ${accrual.label} konnte nicht gespeichert werden`);
+    }
+
     const approvedResponse = await supabase
       .from('opc_payroll_runs')
       .update({
@@ -202,6 +251,8 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       filename: calculation.filename,
       summary: {
         salaryType: calculation.salaryType,
+        payrollInputMode: calculation.payrollInputMode,
+        trackedHours: calculation.trackedHours,
         totalHours: calculation.totalHours,
         grossSalary: calculation.grossSalary,
         employeeDeductions: calculation.employeeDeductions,
@@ -213,6 +264,8 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         accruals: calculation.accruals,
         periodAdjustments: calculation.periodAdjustments,
         reconciliation: calculation.reconciliation,
+        sourceTaxReview: calculation.sourceTaxReview,
+        manualBuckets: calculation.manualBuckets,
         warnings: calculation.warnings,
       },
     });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import MirakaDashboardShell from './MirakaDashboardShell';
+
 import {
   CalendarDays,
   CheckCircle2,
@@ -292,7 +293,7 @@ function isAdminLikeRole(staff: StaffRole | null) {
 function canReviewTimeEntries(staff: StaffRole | null) {
   if (!staff) return false;
 
-  return (
+return (
     isOwnerRole(staff) ||
     isAdminLikeRole(staff) ||
     staff.can_manage_reports === true ||

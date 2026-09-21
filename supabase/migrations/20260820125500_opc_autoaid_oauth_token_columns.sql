@@ -10,7 +10,6 @@ alter table if exists public.opc_integration_settings
   add column if not exists refresh_token_last4 text,
   add column if not exists refresh_token_set_at timestamptz,
   add column if not exists oauth_client_id text not null default 'connectedCarApi';
-
 update public.opc_integration_settings
 set
   api_base_url = 'https://api-production.autoaid.de/cc/v3.0',
@@ -28,12 +27,9 @@ where provider = 'autoaid'
     or oauth_client_id is null
     or oauth_client_id = ''
   );
-
 comment on column public.opc_integration_settings.access_token_encrypted is
   'Encrypted AutoAid OAuth access token. Short-lived. Decrypted only server-side.';
-
 comment on column public.opc_integration_settings.refresh_token_encrypted is
   'Encrypted AutoAid OAuth refresh token. Used server-side to renew access tokens.';
-
 comment on column public.opc_integration_settings.oauth_client_id is
   'AutoAid OAuth client id, normally connectedCarApi.';

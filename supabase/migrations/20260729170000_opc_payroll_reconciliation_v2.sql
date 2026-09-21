@@ -16,7 +16,6 @@
 
 begin;
 set local time zone 'Europe/Zurich';
-
 do $$
 begin
   if to_regclass('public.opc_employee_payroll_profiles') is null then
@@ -36,7 +35,6 @@ begin
   end if;
 end
 $$;
-
 create table if not exists public.opc_payroll_period_adjustments (
   id uuid primary key default gen_random_uuid(),
   employee_id uuid not null references public.opc_employees(id) on delete cascade,
@@ -60,10 +58,8 @@ create table if not exists public.opc_payroll_period_adjustments (
   check (period_to >= period_from),
   unique (employee_id, period_from, period_to, code)
 );
-
 create index if not exists opc_payroll_period_adjustments_employee_period_idx
   on public.opc_payroll_period_adjustments(employee_id, period_from, period_to, status);
-
 alter table public.opc_payroll_period_adjustments enable row level security;
 drop policy if exists opc_payroll_period_adjustments_owner_all
   on public.opc_payroll_period_adjustments;
@@ -72,10 +68,8 @@ create policy opc_payroll_period_adjustments_owner_all
   for all to authenticated
   using (public.opc_can_manage_payroll())
   with check (public.opc_can_manage_payroll());
-
 grant select, insert, update, delete
   on public.opc_payroll_period_adjustments to authenticated;
-
 -- Preserve current relevant rows before correction.
 create table if not exists public.opc_payroll_reconciliation_backup_20260729_v2 as
 select
@@ -104,7 +98,6 @@ select
   now()
 from public.opc_employment_contracts c
 where c.contract_number like 'OPC-PAY-2026-%';
-
 -- Federal / GAV 2026 metadata used by the engine.
 update public.opc_payroll_rule_sets
 set
@@ -125,7 +118,6 @@ set
   updated_at = now()
 where rule_year = 2026
   and status = 'active';
-
 -- GAV cleaning staff: employee 0.40 %, employer 0.15 %.
 update public.opc_employee_payroll_profiles p
 set
@@ -158,7 +150,6 @@ where p.employee_id in (
   and p.status = 'active'
   and p.valid_from <= date '2026-07-23'
   and (p.valid_until is null or p.valid_until >= date '2026-06-24');
-
 -- Pravin is not currently classified as GAV-covered in the source workbook.
 update public.opc_employee_payroll_profiles p
 set
@@ -179,7 +170,6 @@ where p.employee_id = '63f682f1-4c4f-4948-82ba-07bc028fc0c3'::uuid
   and p.status = 'active'
   and p.valid_from <= date '2026-07-23'
   and (p.valid_until is null or p.valid_until >= date '2026-06-24');
-
 -- Store the Excel BVG values as explicitly provisional estimates.
 update public.opc_employee_payroll_profiles p
 set
@@ -203,7 +193,6 @@ where p.employee_id in (
   and p.status = 'active'
   and p.valid_from <= date '2026-07-23'
   and (p.valid_until is null or p.valid_until >= date '2026-06-24');
-
 -- Hourly GAV contracts accrue vacation and 13th salary; neither is paid monthly.
 update public.opc_employment_contracts c
 set
@@ -230,7 +219,6 @@ where c.contract_number in (
   'OPC-PAY-2026-000016',
   'OPC-PAY-2026-000015'
 );
-
 -- Sara: Excel assumes GAV coverage. Keep this explicit but marked for role confirmation.
 update public.opc_employment_contracts c
 set
@@ -246,7 +234,6 @@ set
   updated_at = now(),
   updated_by = auth.uid()
 where c.contract_number = 'OPC-PAY-2026-000014';
-
 -- Exact mixed hourly-rate rows from the authoritative Excel import.
 do $$
 declare
@@ -281,7 +268,6 @@ begin
   end if;
 end
 $$;
-
 with expected(source_sheet, source_row, employee_id, hourly_rate_chf) as (
   values
     ('Filip  OrangeProClean_Stundener', 7,  'e044673c-2f42-484d-8f8b-5427b696cc1e'::uuid, 30.00::numeric),
@@ -349,7 +335,6 @@ set
   metadata = coalesce(public.opc_time_entry_pay_rates.metadata, '{}'::jsonb) || excluded.metadata,
   updated_at = now(),
   updated_by = auth.uid();
-
 -- Herminia: the Excel total contains 9 hours dated 10/12 June, outside the printed period.
 -- Keep original work dates, but include them as a disclosed carryover in this exact payroll period.
 update public.opc_employee_time_entries te
@@ -365,7 +350,6 @@ where te.employee_id = '9ea589e4-5624-4108-bad2-6ab00a63a47d'::uuid
   and te.metadata ->> 'source_sheet' = 'Herminia Monteiro OrangeProClea'
   and (te.metadata ->> 'source_row')::integer in (10, 11, 12)
   and te.status = 'approved';
-
 -- Period-specific advance, not a recurring employee-profile deduction.
 insert into public.opc_payroll_period_adjustments (
   employee_id, period_from, period_to, adjustment_type, code,
@@ -387,7 +371,6 @@ set
   metadata = excluded.metadata,
   updated_at = now(),
   updated_by = auth.uid();
-
 -- Sebastian's CHF 99.75 expenses are shown in Excel as separate/already handled,
 -- therefore they are disclosed but not added to the payroll payout.
 insert into public.opc_payroll_period_adjustments (
@@ -411,7 +394,6 @@ set
   metadata = excluded.metadata,
   updated_at = now(),
   updated_by = auth.uid();
-
 -- Reference figures for the reconciliation audit.
 create table if not exists public.opc_payroll_reconciliation_reference (
   employee_id uuid not null references public.opc_employees(id) on delete cascade,
@@ -426,7 +408,6 @@ create table if not exists public.opc_payroll_reconciliation_reference (
   metadata jsonb not null default '{}'::jsonb,
   primary key (employee_id, period_from, period_to)
 );
-
 alter table public.opc_payroll_reconciliation_reference enable row level security;
 drop policy if exists opc_payroll_reconciliation_reference_owner_select
   on public.opc_payroll_reconciliation_reference;
@@ -435,7 +416,6 @@ create policy opc_payroll_reconciliation_reference_owner_select
   for select to authenticated
   using (public.opc_can_manage_payroll());
 grant select on public.opc_payroll_reconciliation_reference to authenticated;
-
 insert into public.opc_payroll_reconciliation_reference (
   employee_id, period_from, period_to,
   excel_gross_chf, excel_payout_chf,
@@ -462,9 +442,7 @@ set
   status = excluded.status,
   notes = excluded.notes,
   metadata = excluded.metadata;
-
 commit;
-
 -- Compact result.
 select
   e.employee_number,

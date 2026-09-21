@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Clock3,
   Download,
   FileText,
@@ -39,12 +40,9 @@ import MirakaDashboardShell from './MirakaDashboardShell';
 import PayrollOwnerPanel from './PayrollOwnerPanel';
 import { supabase } from '../lib/supabase';
 import { baseUrl } from '../lib/base-url';
-import {
-  buildPayrollHtml,
-  downloadBase64Pdf,
-  renderHtmlToPdfBase64,
-  type OPCPayrollHtmlInput,
-} from '../lib/opc-document-html';
+import { maskAhvNumber } from '../lib/opc-sensitive-data';
+import EmployeePortalAccessPanel from './EmployeePortalAccessPanel';
+import type { OPCPayrollHtmlInput } from '../lib/opc-document-html';
 
 type JsonRow = Record<string, any>;
 type JsonArray = JsonRow[];
@@ -166,6 +164,107 @@ function formatHours(value?: number | null) {
   }).format(amount);
 }
 
+
+function opcPayrollNumber(value: unknown) {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function opcPayrollEscapeHtml(value: unknown) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function appendPayrollAccrualAppendix(html: string, payrollDocument: OPCPayrollHtmlInput) {
+  const payroll = safeObject(payrollDocument?.payroll);
+  const accruals = Array.isArray(payroll.accruals) ? payroll.accruals : [];
+  const items = accruals.filter(
+    (item: JsonRow) =>
+      item?.status === 'accrued' &&
+      item?.code === 'VACATION_PAY_ACCRUAL',
+  );
+
+  if (!items.length) return html;
+
+  const rows = items.map((item: JsonRow) => {
+    const opening = opcPayrollNumber(item.openingBalance);
+    const accrual = opcPayrollNumber(item.periodAccrual ?? item.amount);
+    const payout = opcPayrollNumber(item.periodPayout);
+    const closing = opcPayrollNumber(item.closingBalance);
+
+    return `
+      <tr>
+        <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-weight:700;">
+          ${opcPayrollEscapeHtml(item.label || item.code || 'Ferienguthaben')}
+        </td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;text-align:right;">
+          ${opcPayrollEscapeHtml(item.basis || '')}
+        </td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;text-align:right;">
+          ${opcPayrollEscapeHtml(item.rate || '')}
+        </td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;text-align:right;">
+          CHF ${opening.toFixed(2)}
+        </td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;text-align:right;">
+          CHF ${accrual.toFixed(2)}
+        </td>
+        <td style="padding:8px 6px;border-bottom:1px solid #e5e7eb;text-align:right;">
+          CHF ${payout.toFixed(2)}
+        </td>
+        <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:800;">
+          CHF ${closing.toFixed(2)}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // IMPORTANT: the local PDF renderer captures elements with class="page".
+  // Using only page-break-before is insufficient and caused the accrual
+  // appendix to be omitted from generated PDFs.
+  const appendix = `
+    <section
+      class="page opc-payroll-accrual-page"
+      style="box-sizing:border-box;width:210mm;min-height:297mm;padding:22mm 18mm 24mm;font-family:Arial,Helvetica,sans-serif;color:#111827;background:#fff;"
+    >
+      <div style="font-size:11px;font-weight:800;letter-spacing:.04em;color:#6b7280;margin-bottom:8px;">
+        ORANGE PRO CLEAN GMBH · LOHNABRECHNUNG
+      </div>
+      <h2 style="font-size:20px;margin:0 0 8px;">Ferien- und Lohnguthaben</h2>
+      <p style="font-size:11px;line-height:1.5;color:#4b5563;margin:0 0 18px;">
+        Diese Guthaben werden separat geführt und sind nicht Bestandteil der aktuellen Auszahlung,
+        solange keine Auszahlung des Guthabens gebucht wurde.
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:7px 0;border-bottom:2px solid #111827;">Guthabenart</th>
+            <th style="text-align:right;padding:7px 6px;border-bottom:2px solid #111827;">Basis</th>
+            <th style="text-align:right;padding:7px 6px;border-bottom:2px solid #111827;">Satz</th>
+            <th style="text-align:right;padding:7px 6px;border-bottom:2px solid #111827;">Vortrag</th>
+            <th style="text-align:right;padding:7px 6px;border-bottom:2px solid #111827;">Zugang</th>
+            <th style="text-align:right;padding:7px 6px;border-bottom:2px solid #111827;">Auszahlung</th>
+            <th style="text-align:right;padding:7px 0;border-bottom:2px solid #111827;">Neuer Saldo</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="font-size:9.5px;line-height:1.5;color:#6b7280;margin:18px 0 0;">
+        Der ausgewiesene Saldo ist ein separat geführtes Lohnguthaben und verändert den
+        Auszahlungsbetrag dieser Abrechnung nicht, sofern keine Auszahlung gebucht wurde.
+      </p>
+    </section>
+  `;
+
+  return html.includes('</body>')
+    ? html.replace('</body>', `${appendix}</body>`)
+    : `${html}${appendix}`;
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return 'Nicht hinterlegt';
   const date = new Date(value);
@@ -227,7 +326,15 @@ function initials(name: string) {
 
 function employeeName(detail: JsonRow | null) {
   const employee = detail?.employee || {};
-  return employee.preferred_name || [employee.legal_first_name, employee.legal_last_name].filter(Boolean).join(' ') || 'Mitarbeiter';
+  const legalName = [employee.legal_first_name, employee.legal_last_name]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+
+  // Payroll, contracts and HR master data must use one canonical identity.
+  // preferred_name remains available separately as a display/nickname field,
+  // but must never silently replace the legal employee identity.
+  return legalName || String(employee.preferred_name || '').trim() || 'Mitarbeiter';
 }
 
 function makeHourlyRateDraft(detail: JsonRow | null): HourlyRateDraft {
@@ -256,13 +363,6 @@ function addressText(address: JsonRow | null) {
   ].filter(Boolean).join(', ');
 }
 
-function maskAhv(value?: string | null) {
-  const text = String(value || '').trim();
-  if (!text) return 'Nicht hinterlegt';
-  const digits = text.replace(/\D/g, '');
-  if (digits.length < 6) return text;
-  return `${digits.slice(0, 3)}.••••.••${digits.slice(-2)}`;
-}
 
 function statusVisual(detail: JsonRow | null) {
   const status = normalize(detail?.employee?.status);
@@ -312,6 +412,71 @@ function DetailCard({ title, children }: { title: string; children: ReactNode })
 
 function SectionHeader({ title, action }: { title: string; action?: ReactNode }) {
   return <div className="opc-employee-section-header"><h2>{title}</h2>{action}</div>;
+}
+
+function CollapsibleSection({
+  title,
+  children,
+  style,
+  className = '',
+  defaultOpen = false,
+}: {
+  title: string;
+  children: ReactNode;
+  style?: CSSProperties;
+  className?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section
+      className={`opc-section-card opc-collapsible-section ${open ? 'open' : 'closed'} ${className}`.trim()}
+      style={style}
+      data-opc-collapse="OPC_COLLAPSIBLE_WORKFLOW_20260905"
+    >
+      <button
+        type="button"
+        className="opc-collapsible-section-head"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{title}</span>
+        <ChevronDown size={17} />
+      </button>
+      {open ? <div className="opc-collapsible-section-body">{children}</div> : null}
+    </section>
+  );
+}
+
+function CollapsibleBlock({
+  title,
+  subtitle,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={`opc-collapsible-block ${open ? 'open' : 'closed'}`}>
+      <button
+        type="button"
+        className="opc-collapsible-block-head"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <div>
+          <strong>{title}</strong>
+          {subtitle ? <span>{subtitle}</span> : null}
+        </div>
+        <ChevronDown size={17} />
+      </button>
+      {open ? <div className="opc-collapsible-block-body">{children}</div> : null}
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -401,6 +566,7 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [permissionMode, setPermissionMode] = useState(false);
   const [draft, setDraft] = useState<JsonRow>(() => makeDraft(null));
   const [dayRules, setDayRules] = useState<DayRule[]>(() => makeDayRules(null));
   const [selectedSkills, setSelectedSkills] = useState<Record<string, JsonRow>>({});
@@ -500,6 +666,24 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         ...extra,
       };
       const response = await apiRequest<ApiPayload>(`/api/opc/employees/${employeeId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+
+      const persistedEmployee = safeObject(response.detail?.employee);
+      const expectedFirstName = String(draft.legal_first_name || '').trim();
+      const expectedLastName = String(draft.legal_last_name || '').trim();
+      const persistedFirstName = String(persistedEmployee.legal_first_name || '').trim();
+      const persistedLastName = String(persistedEmployee.legal_last_name || '').trim();
+
+      if (
+        persistedFirstName !== expectedFirstName ||
+        persistedLastName !== expectedLastName
+      ) {
+        throw new Error(
+          `Mitarbeitername wurde nicht vollständig gespeichert. ` +
+          `Erwartet: ${expectedFirstName} ${expectedLastName}. ` +
+          `Gespeichert: ${persistedFirstName} ${persistedLastName}.`
+        );
+      }
+
       setDetail(response.detail || detail);
       setDraft(makeDraft(response.detail || detail));
       setDayRules(makeDayRules(response.detail || detail));
@@ -657,7 +841,19 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
       }
 
       const filename = payload.filename || `Lohnabrechnung_${employee.employee_number || employeeId}_${payrollFrom}_${payrollTo}.pdf`;
-      const html = buildPayrollHtml(payload.payroll);
+
+      // OPC_PERFORMANCE_STAGE2_20260904
+      // The document renderer is one of the largest browser modules in OPC.
+      // Load it only when the owner actually requests a payroll PDF instead of
+      // making every employee-detail visit download/parse the PDF stack.
+      const {
+        buildPayrollHtml,
+        renderHtmlToPdfBase64,
+        downloadBase64Pdf,
+      } = await import('../lib/opc-document-html');
+
+      const baseHtml = buildPayrollHtml(payload.payroll);
+      const html = appendPayrollAccrualAppendix(baseHtml, payload.payroll);
       const rendered = await renderHtmlToPdfBase64(html, filename);
       downloadBase64Pdf(rendered.base64, rendered.filename || filename);
       setPayrollSummary(payload.summary || null);
@@ -700,19 +896,45 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
             <div className="opc-employee-hero-actions">
               {(employee.phone_e164 || employee.phone_raw) ? <a className="opc-btn opc-btn-light" href={`tel:${employee.phone_e164 || employee.phone_raw}`}><Phone size={16} />Anrufen</a> : null}
               {(employee.phone_e164 || employee.phone_raw) ? <a className="opc-btn opc-btn-light" target="_blank" rel="noreferrer" href={`https://wa.me/${String(employee.phone_e164 || employee.phone_raw).replace(/\D/g,'')}`}><MessageCircle size={16} />WhatsApp</a> : null}
-              <button type="button" className="opc-btn opc-btn-dark" onClick={() => { setDraft(makeDraft(detail)); setDayRules(makeDayRules(detail)); setEditMode((current) => !current); }}>{editMode ? 'Bearbeitung schliessen' : 'Mitarbeiter bearbeiten'}</button>
+              {(employee.business_email || employee.private_email) ? <a className="opc-btn opc-btn-light" href={`mailto:${employee.business_email || employee.private_email}`}><Mail size={16} />E-Mail</a> : null}
+              <button
+                type="button"
+                className="opc-btn opc-btn-dark"
+                aria-expanded={editMode}
+                aria-controls="opc-employee-inline-editor"
+                onClick={() => {
+                  setPermissionMode(false);
+                  setDraft(makeDraft(detail));
+                  setDayRules(makeDayRules(detail));
+                  setEditMode((current) => !current);
+                }}
+              >
+                <ShieldCheck size={16} />
+                {editMode ? 'Bearbeitung schliessen' : 'Mitarbeiter bearbeiten'}
+              </button>
+
+              {(role === 'owner' || role === 'admin') ? (
+                <button
+                  type="button"
+                  className="opc-btn opc-btn-light"
+                  aria-expanded={permissionMode}
+                  aria-controls="opc-employee-permission-editor"
+                  onClick={() => {
+                    setEditMode(false);
+                    setPermissionMode((current) => !current);
+                  }}
+                >
+                  <ShieldCheck size={16} />
+                  {permissionMode
+                    ? 'Berechtigungen schliessen'
+                    : 'Berechtigungen verwalten'}
+                </button>
+              ) : null}
             </div>
           </section>
 
-          <div className="opc-employee-metrics-grid">
-            <MetricCard label="Status" value={visual.label} icon={<CheckCircle2 size={18} />} />
-            <MetricCard label="Verfügbarkeit" value={availabilityLabel} helper={`${asArray(detail.availability_rules).length} Zeitfenster`} icon={<Clock3 size={18} />} />
-            <MetricCard label="Skills" value={skills.length} helper={skills.filter((skill) => skill.is_preferred).length ? `${skills.filter((skill) => skill.is_preferred).length} bevorzugt` : 'Keine bevorzugt'} icon={<BadgeCheck size={18} />} />
-            <MetricCard label="Personalakte" value={formatStatus(employee.profile_completion_status)} icon={<FileText size={18} />} />
-          </div>
-
           {editMode ? (
-            <section className="opc-employee-edit-panel" style={cardStyle}>
+            <section id="opc-employee-inline-editor" className="opc-employee-edit-panel opc-employee-edit-panel-inline" style={cardStyle}>
               <div className="opc-edit-head"><div><h2>Mitarbeiter bearbeiten</h2><p>HR-Stammdaten, Skills und Verfügbarkeit aktualisieren.</p></div><div><button className="opc-btn opc-btn-light" onClick={() => setEditMode(false)}>Abbrechen</button><button className="opc-btn opc-btn-dark" disabled={saving} onClick={() => void saveDetail()}>{saving ? <Loader2 size={15} className="spin" /> : <Save size={15} />}Speichern</button></div></div>
 
               <div className="opc-edit-section"><h3>Personalien und Organisation</h3><div className="opc-edit-grid three">
@@ -790,9 +1012,26 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
             </section>
           ) : null}
 
+
+          {(role === 'owner' || role === 'admin') && permissionMode ? (
+            <div id="opc-employee-permission-editor">
+              <EmployeePortalAccessPanel
+                employeeId={employeeId}
+                suggestedEmail={employee.business_email || employee.private_email || ''}
+              />
+            </div>
+          ) : null}
+
+          <div className="opc-employee-metrics-grid">
+            <MetricCard label="Status" value={visual.label} icon={<CheckCircle2 size={18} />} />
+            <MetricCard label="Verfügbarkeit" value={availabilityLabel} helper={`${asArray(detail.availability_rules).length} Zeitfenster`} icon={<Clock3 size={18} />} />
+            <MetricCard label="Skills" value={skills.length} helper={skills.filter((skill) => skill.is_preferred).length ? `${skills.filter((skill) => skill.is_preferred).length} bevorzugt` : 'Keine bevorzugt'} icon={<BadgeCheck size={18} />} />
+            <MetricCard label="Personalakte" value={formatStatus(employee.profile_completion_status)} icon={<FileText size={18} />} />
+          </div>
+
           <div className="opc-section-title-row"><h2>Mitarbeiterdaten</h2><div><button onClick={() => scrollStrip('left')}><ChevronLeft size={16} /></button><button onClick={() => scrollStrip('right')}><ChevronRight size={16} /></button></div></div>
           <div className="opc-employee-detail-strip" ref={detailStripRef}>
-            <DetailCard title="Personal"><MiniField label="Personalnummer" value={employee.employee_number} /><MiniField label="Geburtsdatum" value={formatDate(employee.date_of_birth)} /><MiniField label="Zivilstand" value={formatStatus(employee.civil_status)} /><MiniField label="AHV" value={maskAhv(employee.ahv_number)} /></DetailCard>
+            <DetailCard title="Personal"><MiniField label="Personalnummer" value={employee.employee_number} /><MiniField label="Geburtsdatum" value={formatDate(employee.date_of_birth)} /><MiniField label="Zivilstand" value={formatStatus(employee.civil_status)} /><MiniField label="AHV" value={maskAhvNumber(employee.ahv_number)} /></DetailCard>
             <DetailCard title="Kontakt"><MiniField label="Telefon" value={employee.phone_e164 || employee.phone_raw} /><MiniField label="E-Mail" value={employee.business_email || employee.private_email} /><MiniField label="Adresse" value={addressText(address)} /><MiniField label="Sprache" value={employee.preferred_language} /></DetailCard>
             <DetailCard title="Organisation"><MiniField label="Rechtsträger" value={entity.legal_name} /><MiniField label="Position" value={position.title_de} /><MiniField label="Personentyp" value={formatPersonnelType(employee.personnel_type)} /><MiniField label="Eintritt" value={formatDate(employee.entry_date)} /></DetailCard>
             <DetailCard title="Bewilligung"><MiniField label="Nationalität" value={detail.current_nationality?.country_code} /><MiniField label="Ausweis" value={permit.permit_type ? String(permit.permit_type).toUpperCase() : null} /><MiniField label="Status" value={formatStatus(permit.permit_status)} /><MiniField label="Gültig bis" value={formatDate(permit.valid_until)} /></DetailCard>
@@ -800,14 +1039,11 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
 
           <div className="opc-employee-main-grid">
             <div className="opc-employee-left-col">
-              <section className="opc-section-card" style={cardStyle}><SectionHeader title="Skills und Einsatzarten" />{skills.length ? <div className="opc-skill-display-grid">{skills.map((skill) => <div key={skill.id}><span>{skill.catalog?.category_group || 'Skill'}</span><strong>{skill.catalog?.name_de || 'Skill'}</strong><small>{formatStatus(skill.proficiency_level)}{skill.is_preferred ? ' · bevorzugt' : ''}</small></div>)}</div> : <div className="opc-empty-box">Noch keine Skills hinterlegt.</div>}</section>
-              <section className="opc-section-card" style={cardStyle}><SectionHeader title="Verfügbarkeit" /><div className="opc-availability-summary"><MiniField label="Modell" value={availabilityLabel} /><MiniField label="Wochenende" value={availability.weekend_available ? 'Ja' : 'Nein'} /><MiniField label="Samstag" value={availability.saturday_available ? 'Ja' : 'Nein'} /><MiniField label="Sonntag" value={availability.sunday_available ? 'Ja' : 'Nein'} /><MiniField label="Kurzfristig" value={availability.short_notice_available ? 'Ja' : 'Nein'} /><MiniField label="Max. Wochenstunden" value={availability.maximum_weekly_hours ? `${availability.maximum_weekly_hours} h` : null} /></div>{asArray(detail.availability_rules).length ? <div className="opc-availability-list">{asArray(detail.availability_rules).filter((rule) => rule.is_active !== false).map((rule) => <div key={rule.id}><strong>{DAY_LABELS[Number(rule.day_of_week)]}</strong><span>{String(rule.start_time).slice(0,5)} – {String(rule.end_time).slice(0,5)}</span><small>{formatStatus(rule.availability_type)}</small></div>)}</div> : null}</section>
-              <section className="opc-section-card" style={cardStyle}><SectionHeader title="Ausbildung und Qualifikation" /><div className="opc-two-col"><div className="opc-info-stack"><MiniField label="Stufe" value={formatQualification(qualification.qualification_level_code)} /><MiniField label="Abschluss" value={qualification.qualification_title} /><MiniField label="Fachrichtung" value={qualification.field_of_study} /><MiniField label="Institut" value={qualification.institution_name} /></div><div className="opc-info-stack"><MiniField label="Abschlussdatum" value={formatDate(qualification.completed_on)} /><MiniField label="Anerkennung" value={formatStatus(qualification.swiss_recognition_status)} /><MiniField label="Verifizierung" value={formatStatus(qualification.verification_status)} /><MiniField label="GAV-relevant" value={qualification.relevant_for_cleaning_gav ? 'Ja' : 'Nein'} /></div></div></section>
-              <section className="opc-section-card" style={cardStyle}>
-                <SectionHeader
-                  title="Dokumente"
-                  action={
-                    <div className="opc-document-upload-head">
+              <CollapsibleSection title="Skills und Einsatzarten" style={cardStyle}>{skills.length ? <div className="opc-skill-display-grid">{skills.map((skill) => <div key={skill.id}><span>{skill.catalog?.category_group || 'Skill'}</span><strong>{skill.catalog?.name_de || 'Skill'}</strong><small>{formatStatus(skill.proficiency_level)}{skill.is_preferred ? ' · bevorzugt' : ''}</small></div>)}</div> : <div className="opc-empty-box">Noch keine Skills hinterlegt.</div>}</CollapsibleSection>
+              <CollapsibleSection title="Verfügbarkeit" style={cardStyle}><div className="opc-availability-summary"><MiniField label="Modell" value={availabilityLabel} /><MiniField label="Wochenende" value={availability.weekend_available ? 'Ja' : 'Nein'} /><MiniField label="Samstag" value={availability.saturday_available ? 'Ja' : 'Nein'} /><MiniField label="Sonntag" value={availability.sunday_available ? 'Ja' : 'Nein'} /><MiniField label="Kurzfristig" value={availability.short_notice_available ? 'Ja' : 'Nein'} /><MiniField label="Max. Wochenstunden" value={availability.maximum_weekly_hours ? `${availability.maximum_weekly_hours} h` : null} /></div>{asArray(detail.availability_rules).length ? <div className="opc-availability-list">{asArray(detail.availability_rules).filter((rule) => rule.is_active !== false).map((rule) => <div key={rule.id}><strong>{DAY_LABELS[Number(rule.day_of_week)]}</strong><span>{String(rule.start_time).slice(0,5)} – {String(rule.end_time).slice(0,5)}</span><small>{formatStatus(rule.availability_type)}</small></div>)}</div> : null}</CollapsibleSection>
+              <CollapsibleSection title="Ausbildung und Qualifikation" style={cardStyle}><div className="opc-two-col"><div className="opc-info-stack"><MiniField label="Stufe" value={formatQualification(qualification.qualification_level_code)} /><MiniField label="Abschluss" value={qualification.qualification_title} /><MiniField label="Fachrichtung" value={qualification.field_of_study} /><MiniField label="Institut" value={qualification.institution_name} /></div><div className="opc-info-stack"><MiniField label="Abschlussdatum" value={formatDate(qualification.completed_on)} /><MiniField label="Anerkennung" value={formatStatus(qualification.swiss_recognition_status)} /><MiniField label="Verifizierung" value={formatStatus(qualification.verification_status)} /><MiniField label="GAV-relevant" value={qualification.relevant_for_cleaning_gav ? 'Ja' : 'Nein'} /></div></div></CollapsibleSection>
+              <CollapsibleSection title="Dokumente" style={cardStyle}>
+                    <div className="opc-document-upload-head opc-collapsible-toolbar">
                       <select value={documentType} onChange={(event) => setDocumentType(event.target.value)}>
                         <option value="identity_document">Identitätsdokument</option>
                         <option value="passport">Pass</option>
@@ -834,8 +1070,6 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                         <input type="file" multiple disabled={uploading} onChange={(event) => void handleDocumentUpload(event)} />
                       </label>
                     </div>
-                  }
-                />
                 <div className="opc-document-meta-row">
                   <input placeholder="Dokumenttitel (optional)" value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} />
                   <input type="date" value={documentValidUntil} onChange={(event) => setDocumentValidUntil(event.target.value)} />
@@ -855,7 +1089,7 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                     ))}
                   </div>
                 ) : <div className="opc-empty-box">Noch keine Dokumente vorhanden.</div>}
-              </section>
+              </CollapsibleSection>
               {canManagePayroll ? (
                 <section className="opc-section-card opc-payroll-owner-card" style={cardStyle}>
                   <SectionHeader title="Vertrag und Lohn · Owner" />
@@ -870,11 +1104,10 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                     onSaved={() => loadDetail(false)}
                   />
 
-                  <div className="opc-contract-upload-panel">
-                    <div className="opc-contract-upload-copy">
-                      <strong>Unterzeichneten Vertrag hinterlegen</strong>
-                      <span>Die gewählte Vertragsart wird bereits als Dokument-Untertyp gespeichert. Die automatische Vorlagengenerierung kann später auf genau dieser Auswahl aufbauen.</span>
-                    </div>
+                  <CollapsibleBlock
+                    title="Unterzeichneten Vertrag hinterlegen"
+                    subtitle="Arbeitsvertrag, Nachtrag oder andere Vertragsdatei verwalten."
+                  >
 
                     <div className="opc-contract-upload-grid">
                       <select value={contractSubtype} onChange={(event) => setContractSubtype(event.target.value)}>
@@ -911,7 +1144,6 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                       <FileText size={14} />
                       Vertragsvorlage generieren · folgt
                     </button>
-                  </div>
 
                   {contractDocuments.length ? (
                     <div className="opc-contract-document-list">
@@ -943,14 +1175,15 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
                   {!contracts.length && !contractDocuments.length ? (
                     <div className="opc-empty-box">Noch kein Arbeitsvertrag und keine Vertragsdatei hinterlegt.</div>
                   ) : null}
+                  </CollapsibleBlock>
                 </section>
               ) : null}
             </div>
 
             <aside className="opc-employee-right-col">
               <section className="opc-section-card" style={cardStyle}><SectionHeader title="Kontakt" /><div className="opc-contact-card"><div className="opc-contact-avatar">{initials(name)}</div><div><strong>{name}</strong><span>{employee.phone_e164 || employee.phone_raw || 'Telefon fehlt'}</span><span>{employee.business_email || employee.private_email || 'E-Mail fehlt'}</span></div></div><div className="opc-contact-actions">{(employee.phone_e164 || employee.phone_raw) ? <a href={`tel:${employee.phone_e164 || employee.phone_raw}`}><Phone size={15} />Anrufen</a> : null}{(employee.business_email || employee.private_email) ? <a href={`mailto:${employee.business_email || employee.private_email}`}><Mail size={15} />E-Mail</a> : null}</div></section>
-              <section className="opc-section-card" style={cardStyle}><SectionHeader title="Bankverbindung" /><div className="opc-info-stack"><MiniField label="Bank" value={bank.bank_name} /><MiniField label="IBAN" value={bank.iban} /><MiniField label="Kontoinhaber" value={bank.account_holder} /><MiniField label="Verifizierung" value={formatStatus(bank.verification_status)} /></div></section>
-              <section className="opc-section-card" style={cardStyle}><SectionHeader title="Notfallkontakt" /><div className="opc-info-stack"><MiniField label="Name" value={emergency.full_name} /><MiniField label="Beziehung" value={emergency.relationship_label} /><MiniField label="Telefon" value={emergency.phone_e164 || emergency.phone_raw} /><MiniField label="E-Mail" value={emergency.email} /></div></section>
+              <CollapsibleSection title="Bankverbindung" style={cardStyle}><div className="opc-info-stack"><MiniField label="Bank" value={bank.bank_name} /><MiniField label="IBAN" value={bank.iban} /><MiniField label="Kontoinhaber" value={bank.account_holder} /><MiniField label="Verifizierung" value={formatStatus(bank.verification_status)} /></div></CollapsibleSection>
+              <CollapsibleSection title="Notfallkontakt" style={cardStyle}><div className="opc-info-stack"><MiniField label="Name" value={emergency.full_name} /><MiniField label="Beziehung" value={emergency.relationship_label} /><MiniField label="Telefon" value={emergency.phone_e164 || emergency.phone_raw} /><MiniField label="E-Mail" value={emergency.email} /></div></CollapsibleSection>
               <section className="opc-section-card" style={cardStyle}><SectionHeader title="Notiz erfassen" /><div className="opc-note-form"><select value={noteType} onChange={(event) => setNoteType(event.target.value)}><option value="general">Allgemein</option><option value="availability">Verfügbarkeit</option><option value="skill">Skill</option><option value="preference">Präferenz</option><option value="performance">Leistung</option><option value="restriction">Einschränkung</option><option value="training">Schulung</option><option value="incident">Vorfall</option><option value="other">Andere</option></select><input placeholder="Titel (optional)" value={noteTitle} onChange={(event) => setNoteTitle(event.target.value)} /><textarea placeholder="Interne Notiz zum Mitarbeiter" value={noteText} onChange={(event) => setNoteText(event.target.value)} /><button className="opc-btn opc-btn-dark" disabled={saving || !noteText.trim()} onClick={() => void saveDetail({ append_note: noteText, append_note_type: noteType, append_note_title: noteTitle })}><Plus size={15} />Notiz speichern</button></div></section>
               <section className="opc-section-card" style={cardStyle}><SectionHeader title="Notizen" />{notes.length ? <div className="opc-note-list">{notes.map((note) => <div key={note.id}><div><strong>{note.title || formatStatus(note.note_type)}</strong><span>{note.visibility_scope === 'owners_only' ? 'Owner' : 'HR'}</span></div><p>{note.note_text}</p><small>{formatDateTime(note.created_at)}</small></div>)}</div> : <div className="opc-empty-box">Keine Notizen vorhanden.</div>}</section>
               <section className="opc-section-card" style={cardStyle}><SectionHeader title="Kurzinfo" /><div className="opc-info-stack"><MiniField label="Mitarbeiter-ID" value={employee.id} /><MiniField label="Staff-Role-ID" value={employee.staff_role_id} /><MiniField label="User-ID" value={employee.user_id} /><MiniField label="Payroll" value={employee.payroll_in_scope ? 'Im Umfang' : 'Ausgeschlossen'} /><MiniField label="Letzte Änderung" value={formatDateTime(employee.updated_at)} /></div></section>
@@ -987,6 +1220,7 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         .opc-employee-metric-helper { margin-top: 3px; color: ${BRAND.faint}; font-size: 11px; font-weight: 650; }
         .opc-employee-metric-icon { width: 36px; height: 36px; border: 1px solid ${BRAND.border}; border-radius: 13px; display: flex; align-items: center; justify-content: center; background: ${BRAND.soft}; flex-shrink: 0; }
         .opc-employee-edit-panel { padding: 18px; margin-bottom: 18px; }
+        .opc-employee-edit-panel-inline { margin-top: 0; margin-bottom: 14px; scroll-margin-top: 18px; }
         .opc-edit-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
         .opc-edit-head h2 { margin: 0; font-size: 19px; font-weight: 860; letter-spacing: -.03em; }
         .opc-edit-head p { margin: 5px 0 0; color: ${BRAND.muted}; font-size: 12px; font-weight: 650; }
@@ -1050,6 +1284,20 @@ export default function EmployeeDetailPage({ employeeId }: EmployeeDetailPagePro
         .opc-employee-main-grid { display: grid; grid-template-columns: minmax(0,1.65fr) minmax(300px,.8fr); gap: 14px; align-items: start; }
         .opc-employee-left-col, .opc-employee-right-col { display: grid; gap: 14px; }
         .opc-section-card { padding: 18px; }
+        .opc-collapsible-section { transition: border-color .15s ease, box-shadow .15s ease; }
+        .opc-collapsible-section.closed { padding-top: 12px; padding-bottom: 12px; }
+        .opc-collapsible-section-head { width: 100%; border: 0; padding: 0; background: transparent; color: ${BRAND.text}; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; font-family: ${pageFont}; text-align: left; }
+        .opc-collapsible-section-head span { font-size: 16px; font-weight: 860; letter-spacing: -.025em; }
+        .opc-collapsible-section-head svg, .opc-collapsible-block-head svg { flex: 0 0 auto; transition: transform .18s ease; }
+        .opc-collapsible-section.open .opc-collapsible-section-head svg, .opc-collapsible-block.open .opc-collapsible-block-head svg { transform: rotate(180deg); }
+        .opc-collapsible-section-body { margin-top: 15px; }
+        .opc-collapsible-toolbar { margin-bottom: 10px; }
+        .opc-collapsible-block { margin-top: 12px; border: 1px solid ${BRAND.border}; border-radius: 14px; background: #FFFFFF; overflow: hidden; }
+        .opc-collapsible-block-head { width: 100%; border: 0; background: ${BRAND.soft}; color: ${BRAND.text}; padding: 12px 13px; display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; font-family: ${pageFont}; text-align: left; }
+        .opc-collapsible-block-head > div { display: grid; gap: 3px; }
+        .opc-collapsible-block-head strong { font-size: 12px; font-weight: 840; }
+        .opc-collapsible-block-head span { color: ${BRAND.muted}; font-size: 10px; line-height: 1.4; font-weight: 650; }
+        .opc-collapsible-block-body { padding: 13px; }
         .opc-employee-section-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
         .opc-employee-section-header h2 { margin: 0; font-size: 16px; font-weight: 860; letter-spacing: -.025em; }
         .opc-empty-box { min-height: 86px; border: 1px dashed ${BRAND.borderStrong}; border-radius: 14px; display: flex; align-items: center; justify-content: center; color: ${BRAND.muted}; font-size: 12px; font-weight: 650; text-align: center; padding: 15px; }

@@ -2,7 +2,6 @@
 -- opc_staff_roles is the authoritative access source.
 
 begin;
-
 -- Sara Batista: promote the authoritative OPC staff role to Owner.
 update public.opc_staff_roles
 set
@@ -18,7 +17,6 @@ set
   updated_at = now()
 where user_id = '7dcbbbb5-9087-45bc-9e2a-55f2507bf884'::uuid
    or lower(coalesce(email, '')) = 's.batista@orangeproclean.ch';
-
 -- user_profiles is a compatibility VIEW in the production database and is not
 -- directly updatable. Keep opc_staff_roles authoritative and install a narrow
 -- compatibility trigger so legacy role-only writes cannot break portal-role edits.
@@ -40,7 +38,6 @@ begin
   return new;
 end
 $$;
-
 do $$
 begin
   if exists (
@@ -56,7 +53,6 @@ begin
   end if;
 end
 $$;
-
 -- Ensure Sara's HR row and portal role stay linked when both records already exist.
 update public.opc_employees e
 set
@@ -74,7 +70,6 @@ where (
     or lower(coalesce(e.private_email, '')) = lower(coalesce(s.email, ''))
   )
   and e.staff_role_id is distinct from s.id;
-
 -- Audit helper: surfaces employees with more than one currently-valid permit candidate.
 -- It does not delete historical permit data automatically.
 create or replace view public.opc_employee_permit_duplicate_audit
@@ -92,14 +87,11 @@ where coalesce(permit_status, 'valid') not in ('revoked', 'cancelled')
   and (valid_until is null or valid_until >= current_date)
 group by employee_id
 having count(*) > 1;
-
 comment on view public.opc_employee_permit_duplicate_audit is
   'Server-side audit view for employees with multiple currently-valid permit candidates. No automatic deletion is performed.';
-
 -- Never expose the permit audit view to normal portal sessions.
 revoke all on public.opc_employee_permit_duplicate_audit from public;
 revoke all on public.opc_employee_permit_duplicate_audit from anon;
 revoke all on public.opc_employee_permit_duplicate_audit from authenticated;
 grant select on public.opc_employee_permit_duplicate_audit to service_role;
-
 commit;

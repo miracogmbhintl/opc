@@ -36,7 +36,26 @@ export default function SettingsPageWrapper() {
     }
   }
 
-  if (loading || !role) return null;
+  if (loading || !role) {
+    return (
+      <div
+        role="status"
+        style={{
+          minHeight: '100vh',
+          display: 'grid',
+          placeItems: 'center',
+          background: '#f6f7f8',
+          color: '#6b7280',
+          fontFamily:
+            'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontSize: 14,
+          fontWeight: 600,
+        }}
+      >
+        Einstellungen werden geladen...
+      </div>
+    );
+  }
 
   return (
     <>
