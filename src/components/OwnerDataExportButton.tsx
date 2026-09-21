@@ -106,16 +106,26 @@ async function authHeaders() {
 
 async function postJson(path: string, body: Record<string, unknown>) {
   const headers = await authHeaders();
-  const response = await fetch(path, {
-    method: 'POST',
-    credentials: 'include',
-    cache: 'no-store',
-    headers,
-    body: JSON.stringify(body),
-  });
+
+  let response: Response;
+
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(
+      'Verbindungsfehler. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.',
+    );
+  }
 
   const text = await response.text();
   let payload: any = null;
+
   try {
     payload = text ? JSON.parse(text) : null;
   } catch {
@@ -123,9 +133,24 @@ async function postJson(path: string, body: Record<string, unknown>) {
   }
 
   if (!response.ok) {
-    const error = new Error(
-      String(payload?.error || `Anfrage fehlgeschlagen (HTTP ${response.status}).`),
-    ) as Error & { status?: number; payload?: any };
+    const isConnectionError =
+      response.status === 500 ||
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504;
+
+    const message = isConnectionError
+      ? 'Verbindungsfehler. Bitte prüfen Sie Ihre Internetverbindung und versuchen Sie es erneut.'
+      : String(
+          payload?.error ||
+          'Die Anfrage konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.',
+        );
+
+    const error = new Error(message) as Error & {
+      status?: number;
+      payload?: any;
+    };
+
     error.status = response.status;
     error.payload = payload;
     throw error;
