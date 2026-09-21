@@ -1,3 +1,4 @@
+import { pbkdf2Sync, timingSafeEqual } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   createOpcSupabaseAdmin,
@@ -232,29 +233,28 @@ async function verifyPostalCode(args: {
     throw new Error('Der Unternehmens-Sicherheitscode ist noch nicht vollständig konfiguriert.');
   }
 
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(normalized),
-    'PBKDF2',
-    false,
-    ['deriveBits'],
+  // Cloudflare WebCrypto rejects PBKDF2 iteration counts above
+  // 100000 in this runtime. OPC intentionally uses 310000 iterations,
+  // so verification uses the Node-compatible crypto implementation.
+  //
+  // Do not lower postal_code_iterations in the database because that
+  // would invalidate the existing permanent company security code.
+  const salt = hexToBytes(saltHex);
+  const expected = hexToBytes(expectedHash);
+
+  const derived = pbkdf2Sync(
+    normalized,
+    salt,
+    iterations,
+    32,
+    'sha256',
   );
 
-  const derived = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      hash: 'SHA-256',
-      salt: hexToBytes(saltHex),
-      iterations,
-    },
-    key,
-    256,
-  );
+  if (derived.length !== expected.length) {
+    return false;
+  }
 
-  return constantTimeStringEqual(
-    bytesToHex(new Uint8Array(derived)),
-    expectedHash,
-  );
+  return timingSafeEqual(derived, expected);
 }
 
 function maskEmail(email: string) {
