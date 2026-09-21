@@ -248,6 +248,23 @@ async function invokeMailer(
   );
 }
 
+async function markExportDiagnosticStage(
+  supabase: any,
+  auditId: string,
+  stage: string,
+) {
+  try {
+    await supabase
+      .from('opc_data_export_audit')
+      .update({
+        error_message: `diagnostic:${stage}`,
+      })
+      .eq('id', auditId);
+  } catch {
+    // Diagnostic markers must never affect the export.
+  }
+}
+
 function partitionFiles(
   files: Array<{
     filename: string;
@@ -456,11 +473,23 @@ export const POST: APIRoute =
         );
       }
 
+      await markExportDiagnosticStage(
+        supabase,
+        auditId,
+        'build-start',
+      );
+
       const files =
         await buildOpcDataExportFiles(
           supabase,
           scope,
         );
+
+      await markExportDiagnosticStage(
+        supabase,
+        auditId,
+        `build-complete:${files.length}-files`,
+      );
 
       const rowCount =
         files.reduce(
@@ -502,6 +531,12 @@ export const POST: APIRoute =
                 index + 1
               }/${batches.length}`
             : '';
+
+        await markExportDiagnosticStage(
+          supabase,
+          auditId,
+          `mail-start:${index + 1}/${batches.length}`,
+        );
 
         await invokeMailer({
           ...config,
@@ -559,6 +594,12 @@ export const POST: APIRoute =
             },
           },
         });
+
+        await markExportDiagnosticStage(
+          supabase,
+          auditId,
+          `mail-complete:${index + 1}/${batches.length}`,
+        );
       }
 
       await supabase
@@ -567,6 +608,7 @@ export const POST: APIRoute =
         )
         .update({
           status: 'sent',
+          error_message: null,
           row_count: rowCount,
           file_count:
             files.length,
