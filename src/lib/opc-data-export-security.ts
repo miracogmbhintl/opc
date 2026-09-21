@@ -1,4 +1,5 @@
-import { pbkdf2Sync, timingSafeEqual } from 'node:crypto';
+import { pbkdf2Async } from '@noble/hashes/pbkdf2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   createOpcSupabaseAdmin,
@@ -233,28 +234,36 @@ async function verifyPostalCode(args: {
     throw new Error('Der Unternehmens-Sicherheitscode ist noch nicht vollständig konfiguriert.');
   }
 
-  // Cloudflare WebCrypto rejects PBKDF2 iteration counts above
-  // 100000 in this runtime. OPC intentionally uses 310000 iterations,
-  // so verification uses the Node-compatible crypto implementation.
+  // Keep the existing PBKDF2-SHA256 configuration exactly as stored.
+  // We intentionally derive in application code instead of relying on
+  // the Cloudflare/WebCrypto PBKDF2 implementation, because some
+  // workerd runtimes cap native PBKDF2 at 100000 iterations.
   //
-  // Do not lower postal_code_iterations in the database because that
-  // would invalidate the existing permanent company security code.
+  // This preserves:
+  // - the existing security code
+  // - the existing salt
+  // - the existing hash
+  // - the configured iteration count (currently 310000)
+  //
+  // @noble/hashes implements PBKDF2-HMAC-SHA256 independently of that
+  // runtime-specific iteration cap.
   const salt = hexToBytes(saltHex);
-  const expected = hexToBytes(expectedHash);
+  const password = new TextEncoder().encode(normalized);
 
-  const derived = pbkdf2Sync(
-    normalized,
+  const derived = await pbkdf2Async(
+    sha256,
+    password,
     salt,
-    iterations,
-    32,
-    'sha256',
+    {
+      c: iterations,
+      dkLen: 32,
+    },
   );
 
-  if (derived.length !== expected.length) {
-    return false;
-  }
-
-  return timingSafeEqual(derived, expected);
+  return constantTimeStringEqual(
+    bytesToHex(derived),
+    expectedHash,
+  );
 }
 
 function maskEmail(email: string) {
