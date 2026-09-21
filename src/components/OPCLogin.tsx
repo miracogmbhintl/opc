@@ -13,32 +13,6 @@ const LOGO_URL =
 
 const AUTH_COOKIE_SYNC_KEY = 'opc:auth-cookie-sync-at:v1';
 
-const LOGIN_SESSION_TIMEOUT_MS = 5000;
-const LOGIN_PROFILE_TIMEOUT_MS = 6000;
-
-function withLoginTimeout<T>(
-  request: PromiseLike<T>,
-  label: string,
-  timeoutMs: number,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      reject(new Error(`${label} konnte nicht rechtzeitig abgeschlossen werden.`));
-    }, timeoutMs);
-
-    Promise.resolve(request).then(
-      (value) => {
-        window.clearTimeout(timeout);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timeout);
-        reject(error);
-      },
-    );
-  });
-}
-
 async function syncLoginSessionToServer(session: {
   access_token: string;
   refresh_token: string;
@@ -108,18 +82,14 @@ async function writeAuthoritativeLoginProfile(session: {
     user_metadata?: Record<string, any>;
   };
 }) {
-  const response = await withLoginTimeout(
-    fetch('/api/opc/jobs/access', {
-      method: 'GET',
-      cache: 'no-store',
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        Accept: 'application/json',
-      },
-    }),
-    'Berechtigungsprüfung',
-    LOGIN_PROFILE_TIMEOUT_MS,
-  );
+  const response = await fetch('/api/opc/jobs/access', {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      Accept: 'application/json',
+    },
+  });
 
   const result = await response.json().catch(() => null);
 
@@ -188,11 +158,7 @@ export default function OPCLogin() {
 
     async function resumeSession() {
       try {
-        const { data, error: sessionError } = await withLoginTimeout(
-          supabase.auth.getSession(),
-          'Sitzungsprüfung',
-          LOGIN_SESSION_TIMEOUT_MS,
-        );
+        const { data, error: sessionError } = await supabase.auth.getSession();
 
         if (sessionError || !data.session) {
           if (mounted) setSessionChecking(false);
@@ -203,11 +169,7 @@ export default function OPCLogin() {
         const expiresAtMs = Number(session.expires_at || 0) * 1000;
 
         if (expiresAtMs > 0 && expiresAtMs <= Date.now() + 60_000) {
-          const refreshed = await withLoginTimeout(
-            supabase.auth.refreshSession(),
-            'Sitzungserneuerung',
-            LOGIN_SESSION_TIMEOUT_MS,
-          );
+          const refreshed = await supabase.auth.refreshSession();
 
           if (refreshed.error && !refreshed.data.session) {
             throw refreshed.error;
