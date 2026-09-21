@@ -13,6 +13,15 @@ export type OpcExportFile = {
 
 const PAGE_SIZE = 1000;
 
+const EXPORT_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('de-CH', {
+  timeZone: 'Europe/Zurich',
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 export async function fetchAllExportRows(
   supabase: any,
   table: string,
@@ -84,14 +93,7 @@ export function formatDateTime(value: unknown) {
     return text;
   }
 
-  return new Intl.DateTimeFormat('de-CH', {
-    timeZone: 'Europe/Zurich',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  return EXPORT_DATE_TIME_FORMATTER.format(date);
 }
 
 export function formatMoney(value: unknown) {
