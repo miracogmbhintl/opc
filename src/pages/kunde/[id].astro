@@ -1,7 +1,7 @@
 ---
 import Layout from '../../layouts/main.astro';
 import MirakaDashboardShell from '../../components/MirakaDashboardShell';
-import ClientDetail from '../../components/ClientDetail';
+import SafeClientDetail from '../../components/SafeClientDetail';
 import { baseUrl } from '../../lib/base-url';
 
 const { id } = Astro.params;
@@ -18,6 +18,6 @@ if (!id) {
     currentPath={`/kunde/${id}`}
     hideTopBar={true}
   >
-    <ClientDetail client:only="react" clientId={id} baseUrl={baseUrl} />
+    <SafeClientDetail client:only="react" clientId={id} baseUrl={baseUrl} />
   </MirakaDashboardShell>
 </Layout>

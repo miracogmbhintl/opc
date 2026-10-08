@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { supabase } from '../lib/supabase';
 import { removeOpcPageCache } from '../lib/opc-page-cache';
+import '../styles/opc-client-edit-grid-hotfix.css';
 import {
   ArrowLeft,
   Briefcase,
@@ -1122,7 +1123,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
           {!editMode ? (
             <>
               {isAdminOrOwner && (
-                <button onClick={() => setEditMode(true)} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+                <button type="button" onClick={() => { if (client) { setEditedClient({ ...client }); setEditMode(true); } }} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
                   <Edit2 size={16} />
                   Bearbeiten
                 </button>
@@ -1130,12 +1131,12 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
             </>
           ) : (
             <>
-              <button onClick={handleCancel} disabled={saving} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
+              <button type="button" onClick={handleCancel} disabled={saving} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>
                 <X size={16} />
                 Abbrechen
               </button>
 
-              <button onClick={handleSave} disabled={saving} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+              <button type="button" onClick={handleSave} disabled={saving} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
                 <Save size={16} />
                 {saving ? 'Speichern...' : 'Speichern'}
               </button>
@@ -1210,11 +1211,11 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         </div>
       )}
 
-      <div style={topGridStyle}>
+      <div key={editMode ? "client-edit-fields" : "client-view-fields"} className={editMode ? "opc-client-edit-active" : "opc-client-view-active"} style={topGridStyle}>
         <OPCListCard>
           <CardHeader icon={<Building2 size={18} />} title="Kundendaten" />
 
-          <div style={fieldStackStyle}>
+          <div className="opc-client-fields-grid" style={fieldStackStyle}>
             {renderField('Rechnungsname', displayClient.billing_name, 'billing_name')}
             {renderField('Firmenname', displayClient.company_name, 'company_name')}
             {renderField('Kundentyp', displayClient.client_type, 'client_type', {
@@ -1241,7 +1242,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         <OPCListCard>
           <CardHeader icon={<User size={18} />} title="Kontakt" />
 
-          <div style={fieldStackStyle}>
+          <div className="opc-client-fields-grid" style={fieldStackStyle}>
             {renderField('Kontaktperson', displayClient.full_name, 'full_name')}
             {renderField('E-Mail', displayClient.email || displayClient.billing_email, 'email', { type: 'email' })}
             {renderField('Telefon', getBestClientPhone(displayClient), 'phone_raw', { type: 'tel' })}
@@ -1250,7 +1251,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         </OPCListCard>
       </div>
 
-      <div style={infoGridStyle}>
+      <div key={editMode ? "client-edit-info" : "client-view-info"} className={editMode ? "opc-client-edit-active" : "opc-client-view-active"} style={infoGridStyle}>
         <OPCListCard>
           <CardHeader icon={<MapPin size={18} />} title="Standort" />
 
@@ -1266,7 +1267,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
             </div>
           )}
 
-          <div style={fieldStackStyle}>
+          <div className="opc-client-fields-grid" style={fieldStackStyle}>
             {renderField('Standortname', displayClient.primary_site_name, 'primary_site_name')}
             {renderField('Standorttyp', getSiteTypeLabel(displayClient.primary_site_type), 'primary_site_type', {
               type: 'select',
@@ -1282,7 +1283,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         <OPCListCard>
           <CardHeader icon={<FileText size={18} />} title="Verrechnung & Notizen" />
 
-          <div style={fieldStackStyle}>
+          <div className="opc-client-fields-grid" style={fieldStackStyle}>
             {renderField('Rechnungs-E-Mail', displayClient.billing_email, 'billing_email', { type: 'email' })}
             {renderField('Rechnungstelefon', getBestClientPhone(displayClient), 'billing_phone_e164', { type: 'tel' })}
             {renderField('Rechnungsadresse', displayClient.billing_address, 'billing_address')}
@@ -1693,7 +1694,7 @@ const cardTitleStyle: CSSProperties = {
 
 const fieldStackStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))',
   gap: '18px',
   padding: '20px',
   alignItems: 'start',

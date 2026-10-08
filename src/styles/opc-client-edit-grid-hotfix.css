@@ -1,0 +1,23 @@
+/* OPC client details: stable, two-column editing controls. Scoped to edit state. */
+.opc-client-edit-active .opc-client-fields-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  column-gap: 18px !important;
+  row-gap: 22px !important;
+  align-items: start !important;
+}
+.opc-client-edit-active .opc-client-fields-grid > * {
+  min-width: 0 !important;
+}
+.opc-client-edit-active .opc-client-fields-grid :is(input, select, textarea) {
+  display: block;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+@media (max-width: 1100px) {
+  .opc-client-edit-active .opc-client-fields-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
