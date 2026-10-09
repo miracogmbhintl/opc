@@ -1018,7 +1018,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     const inputType = options?.type || 'text';
 
     return (
-      <div style={fieldItemStyle}>
+      <div key={`${field || label}:${editMode ? 'edit' : 'view'}`} style={fieldItemStyle}>
         <label style={labelStyle}>{label}</label>
 
         {editMode && field && !options?.disabled ? (
