@@ -1017,7 +1017,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     const inputType = options?.type || 'text';
 
     return (
-      <div style={fieldItemStyle}>
+      <div key={`${field || label}:${editMode ? 'edit' : 'view'}`} style={fieldItemStyle}>
         <label style={labelStyle}>{label}</label>
 
         {editMode && field && !options?.disabled ? (
@@ -1093,7 +1093,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
           {!editMode ? (
             <>
               {isAdminOrOwner && (
-                <button onClick={() => setEditMode(true)} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
+                <button type="button" onClick={() => { if (client) { setEditedClient({ ...client }); setEditMode(true); } }} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
                   <Edit2 size={16} />
                   Bearbeiten
                 </button>
@@ -1181,7 +1181,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         </div>
       )}
 
-      <div style={topGridStyle}>
+      <div key={editMode ? 'client-edit-fields' : 'client-view-fields'} style={topGridStyle}>
         <OPCListCard>
           <CardHeader icon={<Building2 size={18} />} title="Kundendaten" />
 
@@ -1221,7 +1221,7 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
         </OPCListCard>
       </div>
 
-      <div style={infoGridStyle}>
+      <div key={editMode ? 'client-edit-info' : 'client-view-info'} style={infoGridStyle}>
         <OPCListCard>
           <CardHeader icon={<MapPin size={18} />} title="Standort" />
 
