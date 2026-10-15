@@ -515,6 +515,8 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   const [emailAction, setEmailAction] = useState<EmailAction>('account_setup');
   const [sendingEmail, setSendingEmail] = useState(false);
@@ -895,6 +897,29 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
     }
   }
 
+  async function archiveClient() {
+    if (!client || userRole !== 'owner' || archiving) return;
+    setArchiving(true);
+    setError('');
+    try {
+      const response = await fetch(`${appBaseUrl}/api/opc/client-archive`, {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'archive', clientId: resolvedClientId }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) throw new Error(result?.error || 'Archivierung fehlgeschlagen.');
+      try {
+        window.dispatchEvent(new CustomEvent('opc:clients-invalidated'));
+        window.localStorage.removeItem(CLIENTS_PAGE_CACHE_KEY);
+      } catch {}
+      window.location.assign(`${appBaseUrl}/kunden`);
+    } catch (error: any) {
+      setError(error?.message || 'Archivierung fehlgeschlagen.');
+      setArchiveOpen(false);
+    } finally { setArchiving(false); }
+  }
+
   function handleCancel() {
     setEditedClient(client);
     setEditMode(false);
@@ -1106,6 +1131,11 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
                 Abbrechen
               </button>
 
+              {userRole === 'owner' && (
+                <button type="button" onClick={() => setArchiveOpen(true)} disabled={saving || archiving} style={{ ...opcSecondaryButtonStyle, width: 'auto', color: '#991b1b', borderColor: '#fecaca' }}>
+                  Kunde archivieren
+                </button>
+              )}
               <button onClick={handleSave} disabled={saving} style={{ ...opcBlackButtonStyle, width: 'auto' }}>
                 <Save size={16} />
                 {saving ? 'Speichern...' : 'Speichern'}
@@ -1114,6 +1144,20 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
           )}
         </div>
       </div>
+
+      {archiveOpen && userRole === 'owner' && (
+        <div role="presentation" style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,.48)', display: 'grid', placeItems: 'center', zIndex: 9999, padding: 16 }}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="archive-title" aria-describedby="archive-description" style={{ background: '#fff', padding: 24, borderRadius: 16, maxWidth: 460, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,.18)' }}>
+            <h2 id="archive-title" style={{ margin: '0 0 12px', fontSize: 20 }}>Kunde archivieren?</h2>
+            <p id="archive-description">«{client.billing_name || client.company_name}» wird aus der aktiven Kundenliste entfernt und kann im Kundenarchiv wiederhergestellt werden. Aufträge, Rechnungen und bestehende Portalzugänge bleiben bestehen.</p>
+            <p style={{ fontSize: 13, color: '#991b1b' }}>Prüfen Sie vorab offene Aufträge, Rechnungen und Portalzugang.</p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setArchiveOpen(false)} disabled={archiving} style={opcSecondaryButtonStyle}>Abbrechen</button>
+              <button type="button" onClick={archiveClient} disabled={archiving} style={{ ...opcBlackButtonStyle, background: '#991b1b' }}>{archiving ? 'Archiviere...' : 'Ja, archivieren'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section style={heroStyle}>
         <div style={heroContentStyle}>
