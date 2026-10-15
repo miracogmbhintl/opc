@@ -1,0 +1,10 @@
+---
+import Layout from '../layouts/main.astro';
+import MirakaDashboardShell from '../components/MirakaDashboardShell';
+import ArchivedClients from '../components/ArchivedClients';
+---
+<Layout>
+  <MirakaDashboardShell client:only="react" requiredRole={["owner"]} currentPath="/kunden-archiv" hideTopBar={true}>
+    <ArchivedClients client:only="react" />
+  </MirakaDashboardShell>
+</Layout>
