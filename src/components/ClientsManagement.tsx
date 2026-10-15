@@ -53,7 +53,7 @@ type ActiveTab = 'all' | 'internal' | 'portal';
 type ClientTypeFilter = 'all' | 'privatkunden' | 'geschaeftskunden' | 'baukunden' | 'unknown';
 type SortOrder = 'name_asc' | 'name_desc' | 'oldest' | 'newest';
 
-const CLIENTS_PAGE_CACHE_KEY = 'opc:page-cache:clients-management:v6-toolbar-tabs-fixed';
+const CLIENTS_PAGE_CACHE_KEY = 'opc:page-cache:clients-management:v7-archived-filter';
 
 const clientTypeLabels: Record<string, string> = {
   privatkunden: 'Privatkunde',
@@ -243,6 +243,7 @@ function EmptyState({
 
 export default function ClientsManagement() {
   const [clients, setClients] = useState<Client[]>([]);
+  const [archiveIds, setArchiveIds] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -298,10 +299,16 @@ export default function ClientsManagement() {
         return;
       }
 
-      const [clientsResponse, portalUsersResponse] = await Promise.all([
+      const [clientsResponse, portalUsersResponse, archiveResponse] = await Promise.all([
         supabase.from('opc_portal_client_cards').select('*'),
         supabase.from('opc_client_users').select('*').limit(1000),
+        fetch('/api/opc/client-archive', { credentials: 'include', cache: 'no-store' }),
       ]);
+      if (!archiveResponse.ok) throw new Error('Archivstatus konnte nicht geladen werden.');
+      const archiveData = await archiveResponse.json();
+      if (!archiveData?.success || !Array.isArray(archiveData.clients)) throw new Error('Archivstatus ungültig.');
+      const excludedIds = new Set<string>(archiveData.clients.map((row: any) => String(row.id)));
+      setArchiveIds([...excludedIds]);
 
       if (clientsResponse.error) throw clientsResponse.error;
 
@@ -319,7 +326,7 @@ export default function ClientsManagement() {
 
       const mappedClients = (clientsResponse.data || [])
         .map((row: RawOpcClient) => mapOpcClientToClient(row, portalMap))
-        .filter((client: Client) => client.id)
+        .filter((client: Client) => client.id && !excludedIds.has(client.id))
         .sort((a: Client, b: Client) => {
           const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
           const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
