@@ -1132,6 +1132,9 @@ export default function ClientDetail({ clientId, baseUrl = '' }: ClientDetailPro
               </button>
 
               {userRole === 'owner' && (
+                <a href={`${appBaseUrl}/kunden-archiv`} style={{ ...opcSecondaryButtonStyle, width: 'auto' }}>Kundenarchiv</a>
+              )}
+              {userRole === 'owner' && (
                 <button type="button" onClick={() => setArchiveOpen(true)} disabled={saving || archiving} style={{ ...opcSecondaryButtonStyle, width: 'auto', color: '#991b1b', borderColor: '#fecaca' }}>
                   Kunde archivieren
                 </button>
