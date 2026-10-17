@@ -641,10 +641,10 @@ const INVOICE_TEMPLATE = "<!DOCTYPE html>
         phone: \"+41 61 508 03 79\",
         email: \"info@orangeproclean.ch\",
         website: \"www.orangeproclean.ch\",
-        bankName: \"Migros Bank AG\",
+        bankName: \"Raiffeisen\",
         accountHolder: \"Orange Pro Clean GmbH\",
-        bic: \"MIGRCHZZ\",
-        iban: \"CH58 0840 1000 0791 9783 3\",
+        bic: \"RAIFCH22\",
+        iban: \"CH82 8080 8001 2131 2156 2\",
         uid: \"CHE-259.534.618\",
         chId: \"CH-280.4.031.577-6\"
       },
