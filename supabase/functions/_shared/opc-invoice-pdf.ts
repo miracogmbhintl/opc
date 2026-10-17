@@ -46,10 +46,13 @@ const OPC_COMPANY = {
   phone: '+4161 508 03 79',
   mobile: '+41764641477',
   website: 'www.orangeproclean.ch',
-  bank: 'Migros Bank AG',
+  bank: 'Raiffeisen',
   accountHolder: 'Orange Pro Clean GmbH',
-  bic: 'MIGRCHZZ',
-  iban: 'CH58 0840 1000 0791 9783 3',
+  bic: 'RAIFCH22',
+  iban: 'CH82 8080 8001 2131 2156 2',
+  paymentAddressLine: 'Hagmattstrasse 7a',
+  paymentPostcode: '4123',
+  paymentCity: 'Allschwil',
   vat: 'CHE-259.534.618',
   contactPerson: '',
 };
@@ -539,7 +542,7 @@ function buildQrBillData(invoice: Record<string, unknown>, totals: OPCDocumentTo
     getSnapshotValue(client, ['billing_city', 'city']) ||
     getSnapshotValue(site, ['city', 'billing_city']);
   const debtorStreet = splitStreet(splitAddress(address)[0] || '');
-  const creditorStreet = splitStreet(OPC_COMPANY.addressLine);
+  const creditorStreet = splitStreet(OPC_COMPANY.paymentAddressLine);
   const reference = buildCreditorReference(clean(invoice.invoice_number));
   const amount = Number((totals.balance ?? totals.total) || 0).toFixed(2);
 
@@ -552,8 +555,8 @@ function buildQrBillData(invoice: Record<string, unknown>, totals: OPCDocumentTo
     OPC_COMPANY.accountHolder,
     creditorStreet.street,
     creditorStreet.houseNo,
-    OPC_COMPANY.postcode,
-    OPC_COMPANY.cityName,
+    OPC_COMPANY.paymentPostcode,
+    OPC_COMPANY.paymentCity,
     'CH',
     '',
     '',
@@ -646,8 +649,8 @@ function drawQrBillPage(
   const creditor = [
     normalizeIban(OPC_COMPANY.iban),
     OPC_COMPANY.accountHolder,
-    OPC_COMPANY.addressLine,
-    `${OPC_COMPANY.postcode} ${OPC_COMPANY.cityName}`,
+    OPC_COMPANY.paymentAddressLine,
+    `${OPC_COMPANY.paymentPostcode} ${OPC_COMPANY.paymentCity}`,
   ];
   drawSmallLines(doc, creditor, 5, top + 23, { maxWidth: 52, lineHeight: 3.4 });
   drawSmallLines(doc, creditor, 67, top + 23, { maxWidth: 58, lineHeight: 3.4 });
